@@ -5,3 +5,7 @@ template-workflow
 .*.swo
 *.pyc
 *.pyo
+*.pem
+*.key
+*.crt
+*.DS_Store

@@ -51,6 +51,8 @@ def fastq_ingress(Map arguments)
     if (margs.fastcat_stats) {
         // run fastcat regardless of input type
         ch_result = fastcat(ch_input.reads_found, margs["fastcat_extra_args"])
+
+        ch_result.view()
     } else {
         // the fastcat stats were not requested --> run fastcat only on directories with
         // more than one FASTQ file (and not on single files or directories with a

@@ -17,6 +17,25 @@ include { fastq_ingress } from './lib/fastqingress'
 
 OPTIONAL_FILE = file("$projectDir/data/OPTIONAL_FILE")
 
+process count_transcripts {
+    container = "combinelab/salmon:latest"
+    // Count transcripts using Salmon.
+    // library type is specified as forward stranded (-l SF) as it should have either been through pychopper or come from direct RNA reads.
+    label "isoforms"
+    cpus params.threads
+    input:
+        tuple val(meta), path(bam), path(ref_transcriptome)
+    output:
+        path "*transcript_counts.tsv", emit: counts
+        path "*seqkit.stats", emit: seqkit_stats
+    """
+    salmon quant --noErrorModel -p "${task.cpus}" -t "${ref_transcriptome}" -l SF -a "${bam}" -o counts
+    mv counts/quant.sf "${meta.alias}.transcript_counts.tsv"
+    seqkit bam  "${bam}" 2>  "${meta.alias}.seqkit.stats"
+    """
+}
+
+
 process getVersions {
     label "wftemplate"
     cpus 1
@@ -116,32 +135,45 @@ process collectFastqIngressResultsInDir {
     """
 }
 
+// // workflow module
+// workflow pipeline {
+//     take:
+//         reads
+//     main:
+//         per_read_stats = reads.map {
+//             it[2] ? it[2].resolve('per-read-stats.tsv') : null
+//         }
+//         | collectFile ( keepHeader: true )
+//         | ifEmpty ( OPTIONAL_FILE )
+//         software_versions = getVersions()
+//         workflow_params = getParams()
+//         metadata = reads.map { it[0] }.toList()
+//         report = makeReport(
+//             metadata, per_read_stats, software_versions.collect(), workflow_params
+//         )
+//         reads
+//         // replace `null` with path to optional file
+//         | map { [ it[0], it[1] ?: OPTIONAL_FILE, it[2] ?: OPTIONAL_FILE ] }
+//         | collectFastqIngressResultsInDir
+//     emit:
+//         fastq_ingress_results = collectFastqIngressResultsInDir.out
+//         report
+//         workflow_params
+//         // TODO: use something more useful as telemetry
+//         telemetry = workflow_params
+// }
+
 // workflow module
 workflow pipeline {
     take:
-        reads
+        sample
+    
     main:
-        per_read_stats = reads.map {
-            it[2] ? it[2].resolve('per-read-stats.tsv') : null
-        }
-        | collectFile ( keepHeader: true )
-        | ifEmpty ( OPTIONAL_FILE )
-        software_versions = getVersions()
-        workflow_params = getParams()
-        metadata = reads.map { it[0] }.toList()
-        report = makeReport(
-            metadata, per_read_stats, software_versions.collect(), workflow_params
-        )
-        reads
-        // replace `null` with path to optional file
-        | map { [ it[0], it[1] ?: OPTIONAL_FILE, it[2] ?: OPTIONAL_FILE ] }
-        | collectFastqIngressResultsInDir
-    emit:
-        fastq_ingress_results = collectFastqIngressResultsInDir.out
-        report
-        workflow_params
-        // TODO: use something more useful as telemetry
-        telemetry = workflow_params
+        sample.map {
+            ["meta": it[0],
+            "bam": it[1],
+            "ref_transcriptome": it[2]]
+        }.view()
 }
 
 
@@ -163,13 +195,13 @@ workflow {
         "required_sample_types": [] ])
 
     pipeline(samples)
-    pipeline.out.fastq_ingress_results
-    | map { [it, "fastq_ingress_results"] }
-    | concat (
-        pipeline.out.report.concat(pipeline.out.workflow_params)
-        | map { [it, null] }
-    )
-    | output
+    // pipeline.out.fastq_ingress_results
+    // | map { [it, "fastq_ingress_results"] }
+    // | concat (
+    //     pipeline.out.report.concat(pipeline.out.workflow_params)
+    //     | map { [it, null] }
+    // )
+    // | output
 }
 
 if (params.disable_ping == false) {
