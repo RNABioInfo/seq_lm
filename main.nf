@@ -13,7 +13,7 @@
 import groovy.json.JsonBuilder
 nextflow.enable.dsl = 2
 
-include { fastq_ingress } from './lib/fastqingress'
+include { bam_ingress } from './lib/bamIngress.nf'
 
 OPTIONAL_FILE = file("$projectDir/data/OPTIONAL_FILE")
 
@@ -37,20 +37,20 @@ process count_transcripts {
 
 
 process getVersions {
-    label "wftemplate"
+    label "seqLM"
     cpus 1
     output:
         path "versions.txt"
     script:
     """
     python -c "import pysam; print(f'pysam,{pysam.__version__}')" >> versions.txt
-    fastcat --version | sed 's/^/fastcat,/' >> versions.txt
+    bamstats --version | sed 's/^/bamstats,/' >> versions.txt
     """
 }
 
 
 process getParams {
-    label "wftemplate"
+    label "seqLM"
     cpus 1
     output:
         path "params.json"
@@ -64,7 +64,7 @@ process getParams {
 
 
 process makeReport {
-    label "wftemplate"
+    label "seqLM"
     input:
         val metadata
         path per_read_stats
@@ -94,7 +94,7 @@ process makeReport {
 // put the file into. If the latter is `null`, puts it into the top-level directory.
 process output {
     // publish inputs to output directory
-    label "wftemplate"
+    label "seqLM"
     publishDir (
         params.out_dir,
         mode: "copy",
@@ -111,7 +111,7 @@ process output {
 // Creates a new directory named after the sample alias and moves the fastcat results
 // into it.
 process collectFastqIngressResultsInDir {
-    label "wftemplate"
+    label "seqLM"
     input:
         // both the fastcat seqs as well as stats might be `OPTIONAL_FILE` --> stage in
         // different sub-directories to avoid name collisions
@@ -135,45 +135,17 @@ process collectFastqIngressResultsInDir {
     """
 }
 
-// // workflow module
-// workflow pipeline {
-//     take:
-//         reads
-//     main:
-//         per_read_stats = reads.map {
-//             it[2] ? it[2].resolve('per-read-stats.tsv') : null
-//         }
-//         | collectFile ( keepHeader: true )
-//         | ifEmpty ( OPTIONAL_FILE )
-//         software_versions = getVersions()
-//         workflow_params = getParams()
-//         metadata = reads.map { it[0] }.toList()
-//         report = makeReport(
-//             metadata, per_read_stats, software_versions.collect(), workflow_params
-//         )
-//         reads
-//         // replace `null` with path to optional file
-//         | map { [ it[0], it[1] ?: OPTIONAL_FILE, it[2] ?: OPTIONAL_FILE ] }
-//         | collectFastqIngressResultsInDir
-//     emit:
-//         fastq_ingress_results = collectFastqIngressResultsInDir.out
-//         report
-//         workflow_params
-//         // TODO: use something more useful as telemetry
-//         telemetry = workflow_params
-// }
-
 // workflow module
 workflow pipeline {
     take:
-        sample
-    
+        bam_ingress_results
     main:
-        sample.map {
-            ["meta": it[0],
-            "bam": it[1],
-            "ref_transcriptome": it[2]]
-        }.view()
+        software_versions = getVersions()
+        workflow_params = getParams()
+        metadata = bam_ingress_results.map { it[0] }.toList()
+        metadata.view()
+    emit:
+        workflow_params
 }
 
 
@@ -185,23 +157,13 @@ workflow {
         Pinguscript.ping_post(workflow, "start", "none", params.out_dir, params)
     }
 
-    samples = fastq_ingress([
-        "input":params.fastq,
+    samples = bam_ingress([
+        "input":params.bam,
         "sample":params.sample,
-        "sample_sheet":params.sample_sheet,
-        "analyse_unclassified":params.analyse_unclassified,
-        "fastcat_stats": params.wf.fastcat_stats,
-        "fastcat_extra_args": "",
-        "required_sample_types": [] ])
+        "bam_stats": params.wf.bam_stats,
+        "watch_path": params.watch_path])
 
     pipeline(samples)
-    // pipeline.out.fastq_ingress_results
-    // | map { [it, "fastq_ingress_results"] }
-    // | concat (
-    //     pipeline.out.report.concat(pipeline.out.workflow_params)
-    //     | map { [it, null] }
-    // )
-    // | output
 }
 
 if (params.disable_ping == false) {
