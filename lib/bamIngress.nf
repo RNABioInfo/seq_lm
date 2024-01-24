@@ -11,7 +11,7 @@ import java.nio.file.NoSuchFileException
  *     files
  *  - "sample": string to name single sample
  *  - "bamstats_stats": boolean whether to write the `bamstats` stats
- * @return Channel of `[Map(alias, barcode, type, ...), Path, Path|null]`.
+ * @return Channel of `[Map(alias, ...), Path, Path|null]`.
  *  The first element is a map with metadata, the second is the path to the
  *  `.bam` file with the alignments and the third is
  *  the path to the directory with the bam statistics (or `null` if `bamStats`
@@ -26,6 +26,7 @@ def bam_ingress(Map arguments) {
     def ch_input
     // handle `watchPath` case
     if (margs['watch_path']) {
+        println margs
         ch_input = watch_path(margs)
     } else {
         // create a channel with the inputs (single file / dir with bam / subdirs
@@ -41,6 +42,9 @@ def bam_ingress(Map arguments) {
         // the bam stats were not requested
         ch_result = ch_input.map { meta, path -> [meta, path, null] }
     }
+
+    println ch_result
+
     return ch_result
 }
 
@@ -74,6 +78,7 @@ def watch_path(Map margs) {
     | map { get_bam_files_in_dir(it) }
     | flatten
     | filter { it.name.endsWith('.bam') }
+
     // now get channel with files found by `watchPath`
     def ch_watched = Channel.watchPath("$input/**").until { it.name.startsWith('STOP') }
     // only keep BAM files
@@ -115,16 +120,17 @@ def watch_path(Map margs) {
         }
         [create_metamap([alias: alias, consecutive_run: run_number ?: 0]), it]
     }
+
     return ch_watched
 }
 
 process bamStats {
-    label params.process_label
+    label "preproc"
     cpus 3
     input:
         tuple val(meta), path(input)
     output:
-        tuple val(meta), path("bam_stats/bam_stats.tsv.gz"), path("bam_stats")
+        tuple val(meta), path(input), path("bam_stats")
     script:
         String bam_stats_outdir = 'bam_stats'
         String out = "$bam_stats_outdir/bam_stats.tsv.gz"

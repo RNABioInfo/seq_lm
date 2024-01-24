@@ -9,3 +9,4 @@ template-workflow
 *.key
 *.crt
 *.DS_Store
+*.log
