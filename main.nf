@@ -19,24 +19,6 @@ include { bam_ingress } from './lib/bamIngress.nf'
 
 OPTIONAL_FILE = file("$projectDir/data/OPTIONAL_FILE")
 
-process count_transcripts {
-    container = 'combinelab/salmon:latest'
-    // Count transcripts using Salmon.
-    // library type is specified as forward stranded (-l SF) as it should have either been through pychopper or come from direct RNA reads.
-    label 'isoforms'
-    cpus params.threads
-    input:
-        tuple val(meta), path(bam), path(ref_transcriptome)
-    output:
-        path '*transcript_counts.tsv', emit: counts
-        path '*seqkit.stats', emit: seqkit_stats
-    """
-    salmon quant --noErrorModel -p "${task.cpus}" -t "${ref_transcriptome}" -l SF -a "${bam}" -o counts
-    mv counts/quant.sf "${meta.alias}.transcript_counts.tsv"
-    seqkit bam  "${bam}" 2>  "${meta.alias}.seqkit.stats"
-    """
-}
-
 process getVersions {
     label 'preproc'
     cpus 1
@@ -62,6 +44,26 @@ process getParams {
     """
 }
 
+// See https://github.com/nextflow-io/nextflow/issues/1636. This is the only way to
+// publish files from a workflow whilst decoupling the publish from the process steps.
+// The process takes a tuple containing the filename and the name of a sub-directory to
+// put the file into. If the latter is `null`, puts it into the top-level directory.
+process output {
+    // publish inputs to output directory
+    label 'seqLM'
+    publishDir(
+        params.ex_dir,
+        mode: 'copy',
+        saveAs: { dirname ? "$dirname/$fname" : fname }
+    )
+    input:
+        tuple path(fname), val(dirname)
+    output:
+        path fname
+    '''
+    '''
+}
+
 process writeConfig {
     label 'seqLM'
     cpus 1
@@ -71,18 +73,26 @@ process writeConfig {
         // Writing experiment config file should only happen at the first run of the experiment
         configOut = new File("${params.ex_dir}/experiment.config")
 
-        if (configOut.isEmpty()) {
-            configOut << 'params {\n'
+        configOut.withWriter { w ->
+            w << 'params {\n'
             params.each { k, v ->
                 if (k.startsWith('ex')) {
-                    String line = "\t${k} = ${v}\n"
-                    configOut << line
+                    if ( k == 'ex_run_number' ) {
+                        v = v + 1
+                    }
+                    line = ""
+                    if (v instanceof String) {
+                        line = "\t${k} = \"${v}\"\n"
+                    } else {
+                        line = "\t${k} = ${v}\n"
+                    }
+                    w << line
                 }
             }
-            configOut << '}\n'
-        } else {
-            println 'Config file already exists, skipping.'
+            w << '}\n'
         }
+        
+
 }
 
 process makeReport {
@@ -107,26 +117,6 @@ process makeReport {
         --params params.json \
         --metadata metadata.json
     """
-}
-
-// See https://github.com/nextflow-io/nextflow/issues/1636. This is the only way to
-// publish files from a workflow whilst decoupling the publish from the process steps.
-// The process takes a tuple containing the filename and the name of a sub-directory to
-// put the file into. If the latter is `null`, puts it into the top-level directory.
-process output {
-    // publish inputs to output directory
-    label 'seqLM'
-    publishDir(
-        params.ex_dir,
-        mode: 'copy',
-        saveAs: { dirname ? "$dirname/$fname" : fname }
-    )
-    input:
-        tuple path(fname), val(dirname)
-    output:
-        path fname
-    '''
-    '''
 }
 
 // Creates a new directory named after the sample alias and moves the fastcat results
@@ -156,6 +146,24 @@ process collectFastqIngressResultsInDir {
     """
 }
 
+process featureCounts {
+    label 'seqLM'
+    container 'pegi3s/feature-counts'
+    cpus params.threads
+    input:
+        tuple val(meta), path(bam)
+        path ref_annotation
+    output:
+        tuple val(meta), path(countsFile)
+    script:
+        runName = meta['runName']
+        replicateName = meta['replicateName']
+        countsFile = "${runName}_${replicateName}_counts.txt"
+        """
+        featureCounts -a $ref_annotation --fracOverlap 0.9 -M -s 1 -T $task.cpus -L --largestOverlap -o $countsFile $bam
+        """
+}
+
 process salmonQuant {
     label 'seqLM'
     errorStrategy 'ignore'
@@ -169,40 +177,48 @@ process salmonQuant {
         path quantSF
 
     script:
-    quantDir = 'quantification'
-    quantSF = "${quantDir}/quant*"
-    """
-    salmon quant --ont -p "$task.cpus" -t "$refTranscriptome" -l SF -a $bam -o quantification
-    """
+        quantDir = 'quantification'
+        quantSF = "${quantDir}/quant*"
+        """
+        salmon quant --ont -p "$task.cpus" -t "$refTranscriptome" -l SF -a $bam -o quantification
+        """
 }
 
 process bamQC {
+    debug true
     label 'seqLM'
     container 'seqlm_quality'
     cpus 1
     input:
-        tuple path(bam), path(bam_index)
+        tuple val(meta), path(bam), path(bam_index)
         path seq_summary
 
     output:
-        path qcHTML
+        tuple val(meta), path(qcHTML), optional: true
 
     script:
-        qcHTML = "run_${params.ex_run_number}_qc.html"
-        qcTitle = "Run ${params.ex_run_number} QC Report"
-        """
-        pycoQC --summary_file ${seq_summary} --bam_file ${bam} --report_title "${qcTitle}" --html_outfile ${qcHTML}
-        """
+        if (seq_summary.name != OPTIONAL_FILE.name) {
+            qcHTML = "run_${params.ex_run_number}_qc.html"
+            qcTitle = "Run ${params.ex_run_number} QC Report"
+            """
+            pycoQC --summary_file ${seq_summary} --bam_file ${bam} --report_title "${qcTitle}" --html_outfile ${qcHTML}
+            """
+        } else {
+            log.info 'No seq_summary.txt file found, skipping QC report.'
+            """
+            """
+        }
 }
 
 process bamIndex {
     label 'seqLM'
     container 'staphb/samtools'
-    cpus params.threads
+    errorStrategy 'ignore'
+    cpus 1
     input:
-        path bam
+        tuple val(meta), path(bam)
     output:
-        tuple path(bam), path(bam_index)
+        tuple val(meta), path(bam), path(bam_index)
     script:
         bam_index = "${bam}.bai"
         """
@@ -211,33 +227,63 @@ process bamIndex {
         """
 }
 
+process differentiaExpression {
+    container "seqlm_dea"
+    cpus params.threads
+
+    input:
+        path quantSF
+
+    script:
+        """
+        workflow-glue deseq -q "${quantSF}" -t "${task.cpus}"
+        """
+}
+
+def getSamplePath(Map meta) {
+    return "${meta['runName']}/${meta['replicateName']}"
+}
+
 // workflow module
-workflow real_time_pipeline {
+workflow sample_pipeline {
     take:
-        newBam
-        seqSummary
-        allBam
-        runName
+        sampleChunk
     main:
         software_versions = getVersions()
         workflow_params = getParams()
+        
+        newBamIn = sampleChunk.map { meta, newBam, allBam -> [meta, newBam] }
 
-        bamIndexResult = bamIndex(newBam)
+        bamIndexResult = bamIndex(newBamIn)
 
-        // Quality control of aligned reads
-        bamQCRes = bamQC(bamIndexResult, seqSummary) |
-        map { qc_result -> [qc_result, "${runName}/qc"] }
+        //Quality control of aligned reads
+        bamQCRes = bamQC(bamIndexResult, OPTIONAL_FILE) |
+        map { meta, res -> 
+            samplePath = getSamplePath(meta)
+            return [res, "${samplePath}/qc"] 
+        }
 
-        // Count transcripts using Salmon
-        salmonQuantRes = salmonQuant(allBam, params.ref_transcriptome) |
-        map { quant_result -> [quant_result, 'quant'] }
+        featureCountsRes = featureCounts(newBamIn, params.ref_annotation) |
+        map { meta, res -> 
+            samplePath = getSamplePath(meta)
+            return [res, "${samplePath}/counts"] 
+        }
 
-        bamQCRes | 
-        concat(salmonQuantRes) | 
+        featureCountsRes |
+        concat(bamQCRes) | 
         output
 
     emit:
         workflow_params
+}
+
+def getSeqSummaryFile(Path bamFile) {
+    summaryFile = file("${bamFile.parent}/seq_summary.txt")
+    if (summaryFile.exists()) {
+        return summaryFile
+    } else {
+        return OPTIONAL_FILE
+    }
 }
 
 // entrypoint workflow
@@ -247,37 +293,34 @@ workflow {
         Pinguscript.ping_post(workflow, 'start', 'none', params.ex_dir, params)
     }
 
-    if (params.watch_path) {
-        writeConfig()
+    writeConfig()
 
-        run_name = "run_${params.ex_run_number}"
-        runDir = file("${params.ex_dir}/${run_name}")
-        runDir.mkdirs()
+    runName = "run_${params.ex_run_number}"
+    runDir = file("${params.ex_dir}/${runName}")
 
-        // Emit a new map of bam files whenever a new bam file is added to the run directory
-        input = Channel.watchPath("$runDir/*.bam")
-        .until { it.name.startsWith('STOP') }
-        .multiMap { newBam -> 
-            newBam: newBam
-            seqSummary: file(newBam.parent / "seq_summary.txt", checkIfExists: true)
-            allBam: file("$runDir/*.bam")
-        }
+    (1..params.ex_replicate_number).each { replicate_number ->
+        replicateDir = file("${runDir}/replicate_${replicate_number}")
+        replicateDir.mkdirs()
+    }
 
-        real_time_pipeline(
-            input.newBam, 
-            input.seqSummary, 
-            input.allBam, 
-            run_name)
+    // Sample chunk is [map[runName, replicateName], newBam, [allBam]]
+    sampleChunk = bam_ingress([
+    'input':runDir,
+    'runName':runName,
+    'bam_stats': params.wf.bam_stats,
+    'watch_path': params.watch_path])
 
+    sample_pipeline(sampleChunk)
 
-        // sample_chunk = bam_ingress([
-        //     'input':runDir,
-        //     'sample':params.ex_name,
-        //     'bam_stats': params.wf.bam_stats,
-        //     'watch_path': params.watch_path])
-
-    } else {
-        error 'Retrospective analysis not yet implemented.'
+    if (params.ex_run_number > 1) {
+        quantResults = Channel.watchPath("$runDir/**counts.txt")
+        .until { it.name.startsWith("STOP") }
+        .filter { it.name.endsWith("counts.txt") }
+        .map { file("$params.ex_dir/**counts.txt") }
+        .view()
+        .filter { it.size() == (params.ex_run_number * params.ex_replicate_number) }
+        .view()
+        differentiaExpression(quantResults)
     }
 }
 

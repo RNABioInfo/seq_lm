@@ -3,19 +3,19 @@
 //
 
 // MIT License
-// 
+//
 // Copyright (c) 2018 nf-core
-// 
+//
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
 // in the Software without restriction, including without limitation the rights
 // to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 // copies of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
-// 
+//
 // The above copyright notice and this permission notice shall be included in all
 // copies or substantial portions of the Software.
-// 
+//
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 // FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -23,7 +23,6 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
-
 
 import org.yaml.snakeyaml.Yaml
 
@@ -326,14 +325,37 @@ class NfcoreTemplate {
         String workflow_version = version(workflow)
         String.format(
             """
-            ${colors.igreen}||||||||||   ${colors.reset}${colors.dim}_____ ____ ___ ____  __  __ _____      _       _
+                                                                                         ;;;;;;   XXXXXXX;;;
+            XXXXXXXXXXXX  XXXXXX      XXX      XXXXX       XXXXXXXXXXx  xxxx                 ;;  XXXxXXXX;;;;;               ;;;;;
+            XXXX    XXXXX XXXXXXX     XXX     XXXXXXX      XXX     XXxx                    ;;;   XXX      ;;;;              ;;;;
+            XXXX     XXXX XXXX XXX    XXX     XXX XXX      XXX     XXxx  xxx     ++++    ;;;     XXX XXXXX;;;; ;;;; ;;;;   ;;;;;;;    ;;;;;
+            XXXX    XXXX  XXXX XXXX   XXX    XXX   XXX     XXXXXXXXXXx   xxx  ++++++++;; ;;;;;;  XXX      ;;;; ;;;;;;;;;;; ;;;;;;;  ;;;;;;;;;
+            XXXXXXXXXXX   XXXX  XXXX  XXX   XXXX   XXXX    XXXXXXXXXXx   xxx ++++    +;;;        XXX XXXXX;;;; ;;;;    ;;;  ;;;;   ;;;     ;;;
+            XXXX    XXXX  XXXX   XXXX XXX  xXXXXXXXXXXXX   XXX      Xxx  xxx ++++     ;;;        XXX      ;;;; ;;;;    ;;;  ;;;;  ;;;;     ;;;;
+            XXXX     XXXX XXXX    XXX XXX  XXXXXXXXXXXXX   XXX      Xxxx xxx ++++    +;;;        XXX XXXXX;;;; ;;;;    ;;;  ;;;;  ;;;;     ;;;;
+            XXXX     XXXX XXXX     XXXXXX xXXX       XXXX  XXXXXXXXXXxx  xxx  ++++   +;;         XXX      ;;;; ;;;;    ;;;  ;;;;   ;;;;   ;;;;
+            XXXX     XXXX XXXX      XXXXX XXX         XXXX XXXXXXXXXX    xxx   +++++++;          XXX XXXXX;;;; ;;;;    ;;;  ;;;;     ;;;;;;;
+                                                                                                 XXX      ;;;;
+                          XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX      ;;;; XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+                           XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX         ;;; XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+                                   X             X            X             X             X                           X             X             X
+                                   X             X            X             X             X                           X             X             X
+                                   X             X            X             X             X                           X             X             X
+
+                                                XXX         XX  XX         XXXX         XXXX                        XXXX          XXXX          XXXX
+                                               XXxXX        XX  XX        XX           XX  xx                         XX          X  X            XX
+                                              XX   XX        XXXX          XXXX         XXXX                          XX          XXXX            XX
+            ${NfcoreTemplate.dashedLine(monochrome_logs)}
+            """.stripIndent()
+        )
+
+        /*
+        ${colors.igreen}||||||||||   ${colors.reset}${colors.dim}_____ ____ ___ ____  __  __ _____      _       _
             ${colors.igreen}||||||||||  ${colors.reset}${colors.dim}| ____|  _ \\_ _|___ \\|  \\/  | ____|    | | __ _| |__  ___
             ${colors.yellow}|||||       ${colors.reset}${colors.dim}|  _| | |_) | |  __) | |\\/| |  _| _____| |/ _` | '_ \\/ __|
             ${colors.yellow}|||||       ${colors.reset}${colors.dim}| |___|  __/| | / __/| |  | | |__|_____| | (_| | |_) \\__ \\
             ${colors.iblue}||||||||||  ${colors.reset}${colors.dim}|_____|_|  |___|_____|_|  |_|_____|    |_|\\__,_|_.__/|___/
             ${colors.iblue}||||||||||  ${colors.reset}${colors.bold}${workflow_name} ${workflow_version}${colors.reset}
-            ${NfcoreTemplate.dashedLine(monochrome_logs)}
-            """.stripIndent()
-        )
+        */
     }
 }
