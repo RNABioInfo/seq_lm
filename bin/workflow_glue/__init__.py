@@ -33,26 +33,28 @@ def get_components():
 def cli():
     """Run workflow entry points."""
     parser = argparse.ArgumentParser(
-        'wf-glue',
+        "wf-glue",
         parents=[_log_level()],
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
 
     parser.add_argument(
-        '-v', '--version', action='version',
-        version='%(prog)s {}'.format(__version__))
+        "-v", "--version", action="version", version="%(prog)s {}".format(__version__)
+    )
 
     subparsers = parser.add_subparsers(
-        title='subcommands', description='valid commands',
-        help='additional help', dest='command')
+        title="subcommands",
+        description="valid commands",
+        help="additional help",
+        dest="command",
+    )
     subparsers.required = True
 
     # all component demos, plus some others
-    components = [
-        f'{_package_name}.{comp}' for comp in get_components()]
+    components = [f"{_package_name}.{comp}" for comp in get_components()]
     for module in components:
         mod = importlib.import_module(module)
-        p = subparsers.add_parser(
-            module.split(".")[-1], parents=[mod.argparser()])
+        p = subparsers.add_parser(module.split(".")[-1], parents=[mod.argparser()])
         p.set_defaults(func=mod.main)
 
     logger = get_main_logger(_package_name)

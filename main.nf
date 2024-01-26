@@ -228,6 +228,7 @@ process bamIndex {
 }
 
 process differentiaExpression {
+    debug true
     container "seqlm_dea"
     cpus params.threads
 
@@ -236,7 +237,7 @@ process differentiaExpression {
 
     script:
         """
-        workflow-glue deseq -q "${quantSF}" -t "${task.cpus}"
+        workflow-glue deseq -q ${quantSF} -t "${task.cpus}"
         """
 }
 
@@ -317,9 +318,9 @@ workflow {
         .until { it.name.startsWith("STOP") }
         .filter { it.name.endsWith("counts.txt") }
         .map { file("$params.ex_dir/**counts.txt") }
-        .view()
         .filter { it.size() == (params.ex_run_number * params.ex_replicate_number) }
-        .view()
+
+
         differentiaExpression(quantResults)
     }
 }
