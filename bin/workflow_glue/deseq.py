@@ -1,9 +1,6 @@
 #!/usr/bin/env python
 """Perform differential expression analysis using DESeq2."""
 import os
-
-os.environ["MPLCONFIGDIR"] = "/tmp"
-
 from .util import get_named_logger, wf_parser
 import numpy as np
 import pandas as pd
@@ -15,10 +12,11 @@ from pydeseq2.ds import DeseqStats
 from pydeseq2.default_inference import DefaultInference
 
 from bokeh.models import ColumnDataSource, Whisker
-from bokeh.plotting import figure, show, row
+from bokeh.plotting import figure, row
 from bokeh import model
 from bokeh.transform import factor_cmap
 from bokeh.palettes import Pastel1
+from bokeh.io import save, output_file
 
 
 def argparser():
@@ -57,6 +55,7 @@ def createLibrarySizePlot(
         title=title,
         background_fill_color="#eaefef",
         y_axis_label=yAxisLabel,
+        x_axis_label="Sample [Run_Replicate]",
     )
 
     # outlier range
@@ -82,6 +81,7 @@ def createLibrarySizePlot(
 
 def main(args):
     quantFiles: list[str] = args.quant_files
+    quantFiles.sort()
     threads: int = args.threads
 
     replicate_names: list[str] = []
@@ -120,24 +120,20 @@ def main(args):
 
     # Read and merge the count files
     for count_file, sample_name in zip(count_files, sample_names):
-        df: pd.DataFrame = pd.read_csv(
-            count_file, sep="\t", skiprows=1, header=1, index_col=0
-        )
+        df: pd.DataFrame = pd.read_csv(count_file, sep="\t", header=0, index_col=0)
         df = df.iloc[:, [-1]]
         df.columns = [sample_name]
         dfs.append(df)
 
     counts_df: pd.DataFrame = dfs[0].join(dfs[1:])
 
-    print(counts_df)
-    # set all columns data type to int
-    counts_df = counts_df.astype(int)
-    counts_df = counts_df[counts_df.sum(axis=1) > 50]
+    counts_df = counts_df.apply(pd.to_numeric, errors="coerce")
+    counts_df = counts_df[counts_df.sum(axis=1) > 10]
     counts_df = counts_df.T
 
     metadata_df.set_index("sample", inplace=True)
 
-    # Run DESeq2 analysis
+    # Run DESeq2 normalization
     inference = DefaultInference(n_cpus=threads)
 
     data_set = DeseqDataSet(
@@ -151,6 +147,7 @@ def main(args):
 
     data_set.deseq2()
 
+    output_file("library_sizes.html", title="Library Sizes")
     # Plot non normalized library counts
     nonNormPlot = createLibrarySizePlot(
         counts_df, title="Non-normalized library counts", yAxisLabel="Counts"
@@ -162,7 +159,8 @@ def main(args):
         norm_data, title="Normalized library counts", yAxisLabel="Counts"
     )
 
-    # show(row(nonNormPlot, normPlot, sizing_mode="stretch_width"))  # type: ignore
+    librarySizePlots = row(nonNormPlot, normPlot, sizing_mode="stretch_width")  # type: ignore
+    save(librarySizePlots)
 
     # Run DESeq2 analysis for each run compared to the first run as the ground truth
     runs_df = metadata_df["run"].unique()
@@ -172,8 +170,9 @@ def main(args):
     ground_truth = runs.pop(0)
 
     for run in runs:
+        name = f"run_{run}_vs_{ground_truth}"
         # Create dir for comparison#
-        out_path = f"run_{run}_vs_{ground_truth}"
+        out_path = name
         if not os.path.exists(out_path):
             os.mkdir(out_path)
 
@@ -182,13 +181,26 @@ def main(args):
             data_set, contrast=contrast, inference=inference, quiet=True
         )
         stat_res.summary()
-        stat_res.lfc_shrink(f"run_{run}_vs_{ground_truth}")
+        stat_res.lfc_shrink(name)
 
-        # FIXME: This is not working currently
-        # stat_res.results_df.sort_values("padj", inplace=True)
-        # ma_path = f"{out_path}/run_{run}_vs_{ground_truth}_MA.png"
-        # stat_res.plot_MA(save_path=ma_path)
-        # plt.clf()
+        # Plot MA plot
+        output_file(f"{out_path}/ma_plot.html")
+        colors = ["red" if x < 0.05 else "black" for x in stat_res.results_df["padj"]]
+        ma_plot = figure(
+            title=f"MA Plot {name}",
+            x_axis_label="log2 Fold Change",
+            y_axis_label="log2 Counts",
+            sizing_mode="stretch_width",
+        )
+        ma_plot.circle(
+            stat_res.results_df["log2FoldChange"],
+            stat_res.results_df["baseMean"],
+            line_color=None,
+            fill_color=colors,
+            fill_alpha=0.6,
+            size=6,
+        )
+        save(ma_plot)  # type: ignore
 
         # Plot PCA for the run vs ground truth
         # Filter rows by sample names for run and ground truth
@@ -208,12 +220,25 @@ def main(args):
         pca_df["run"] = comparison_metadata["run"].tolist()
         pca_df["sample"] = pca_df.index.tolist()
 
-        # FIXME: This is not working currently
-        # pca_plot = sns.scatterplot(data=pca_df, x="PC1", y="PC2", hue="run")
-
-        # pca_path = f"{out_path}/run_{run}_vs_{ground_truth}_PCA.png"
-        # plt.savefig(pca_path)
-        # plt.clf()
+        output_file(f"{out_path}/pca_plot.html")
+        pca_plot = figure(
+            title=f"PCA Plot {name}",
+            x_axis_label="PC1",
+            y_axis_label="PC2",
+            sizing_mode="stretch_width",
+        )
+        pca_plot.scatter(
+            "PC1",
+            "PC2",
+            source=pca_df,
+            line_color="black",
+            line_alpha=0.3,
+            fill_color=factor_cmap("run", Pastel1[3], runs),
+            fill_alpha=0.8,
+            legend_field="run",
+            size=18,
+        )
+        save(pca_plot)  # type: ignore
 
         deseq_path = f"{out_path}/deseq2_results_{run}_vs_{ground_truth}.tsv"
 

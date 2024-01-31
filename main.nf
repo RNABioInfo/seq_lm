@@ -16,6 +16,8 @@ import java.text.SimpleDateFormat
 nextflow.enable.dsl = 2
 
 include { bam_ingress } from './lib/bamIngress.nf'
+include { getSamplePath } from './lib/util.nf'
+include { getSeqSummaryFile } from './lib/util.nf'
 
 OPTIONAL_FILE = file("$projectDir/data/OPTIONAL_FILE")
 
@@ -50,6 +52,7 @@ process getParams {
 // put the file into. If the latter is `null`, puts it into the top-level directory.
 process output {
     // publish inputs to output directory
+    debug true
     label 'seqLM'
     publishDir(
         params.ex_dir,
@@ -60,15 +63,15 @@ process output {
         tuple path(fname), val(dirname)
     output:
         path fname
-    '''
-    '''
+    """
+    """
 }
 
 process writeConfig {
     label 'seqLM'
     cpus 1
     exec:
-        log.info 'Writing config file'
+        log.info 'Writing config file...'
 
         // Writing experiment config file should only happen at the first run of the experiment
         configOut = new File("${params.ex_dir}/experiment.config")
@@ -91,8 +94,6 @@ process writeConfig {
             }
             w << '}\n'
         }
-        
-
 }
 
 process makeReport {
@@ -119,33 +120,6 @@ process makeReport {
     """
 }
 
-// Creates a new directory named after the sample alias and moves the fastcat results
-// into it.
-process collectFastqIngressResultsInDir {
-    label 'seqLM'
-    input:
-        // both the fastcat seqs as well as stats might be `OPTIONAL_FILE` --> stage in
-        // different sub-directories to avoid name collisions
-        tuple val(meta), path(concat_seqs, stageAs: 'seqs/*'), path(fastcat_stats,
-            stageAs: 'stats/*')
-    output:
-        // use sub-dir to avoid name clashes (in the unlikely event of a sample alias
-        // being `seq` or `stats`)
-        path 'out/*'
-    script:
-    String outdir = "out/${meta['alias']}"
-    String metaJson = new JsonBuilder(meta).toPrettyString()
-    String concat_seqs = \
-        (concat_seqs.fileName.name == OPTIONAL_FILE.name) ? '' : concat_seqs
-    String fastcat_stats = \
-        (fastcat_stats.fileName.name == OPTIONAL_FILE.name) ? '' : fastcat_stats
-    """
-    mkdir -p $outdir
-    echo '$metaJson' > metamap.json
-    mv metamap.json $concat_seqs $fastcat_stats $outdir
-    """
-}
-
 process featureCounts {
     label 'seqLM'
     container 'pegi3s/feature-counts'
@@ -161,26 +135,25 @@ process featureCounts {
         countsFile = "${runName}_${replicateName}_counts.txt"
         """
         featureCounts -a $ref_annotation --fracOverlap 0.9 -M -s 1 -T $task.cpus -L --largestOverlap -o $countsFile $bam
+        echo "\$(tail -n +2 $countsFile)" > $countsFile
         """
 }
 
-process salmonQuant {
+process mergeFeatureCounts {
+    debug true
     label 'seqLM'
-    errorStrategy 'ignore'
-    cpus params.threads
-    container 'combinelab/salmon:latest'
-
+    container 'seqlm_dea'
+    cpus 1
     input:
-        path bam
-        path refTranscriptome
+        tuple val(meta), path(newCounts, name: "new_counts.txt"), path(allCounts, name: "all_counts.txt")
     output:
-        path quantSF
-
+        tuple val(meta), path(mergedCountsFile)
     script:
-        quantDir = 'quantification'
-        quantSF = "${quantDir}/quant*"
+        runName = meta['runName']
+        replicateName = meta['replicateName']
+        mergedCountsFile = "${runName}_${replicateName}_counts.txt"
         """
-        salmon quant --ont -p "$task.cpus" -t "$refTranscriptome" -l SF -a $bam -o quantification
+        workflow-glue merge_feature_counts -n $newCounts -a $allCounts -o $mergedCountsFile
         """
 }
 
@@ -228,7 +201,6 @@ process bamIndex {
 }
 
 process differentiaExpression {
-    debug true
     container "seqlm_dea"
     cpus params.threads
 
@@ -239,10 +211,6 @@ process differentiaExpression {
         """
         workflow-glue deseq -q ${quantSF} -t "${task.cpus}"
         """
-}
-
-def getSamplePath(Map meta) {
-    return "${meta['runName']}/${meta['replicateName']}"
 }
 
 // workflow module
@@ -265,29 +233,31 @@ workflow sample_pipeline {
         }
 
         featureCountsRes = featureCounts(newBamIn, params.ref_annotation) |
-        map { meta, res -> 
+        map { meta, newCounts -> 
             samplePath = getSamplePath(meta)
-            return [res, "${samplePath}/counts"] 
-        }
+            allCounts = file("${params.ex_dir}/${samplePath}/*counts.txt")
+            return [meta, newCounts, allCounts] } | 
+        branch { meta, newCounts, allCounts -> 
+            initial: allCounts.empty
+                samplePath = getSamplePath(meta)
+                return [newCounts, samplePath]
+            merge: true }
 
-        featureCountsRes |
-        concat(bamQCRes) | 
+        mergedCountsRes = mergeFeatureCounts(featureCountsRes.merge) |
+        map { meta, mergedCounts -> 
+            samplePath = getSamplePath(meta)
+            return [mergedCounts, samplePath] }
+
+        featureCountsRes.initial |
+        mix(mergedCountsRes) |
+        mix(bamQCRes) | 
         output
 
     emit:
         workflow_params
 }
 
-def getSeqSummaryFile(Path bamFile) {
-    summaryFile = file("${bamFile.parent}/seq_summary.txt")
-    if (summaryFile.exists()) {
-        return summaryFile
-    } else {
-        return OPTIONAL_FILE
-    }
-}
-
-// entrypoint workflow
+// Entrypoint workflow
 WorkflowMain.initialise(workflow, params, log)
 workflow {
     if (params.disable_ping == false) {
@@ -318,8 +288,8 @@ workflow {
         .until { it.name.startsWith("STOP") }
         .filter { it.name.endsWith("counts.txt") }
         .map { file("$params.ex_dir/**counts.txt") }
+        // Waits until there are count files for all replicates
         .filter { it.size() == (params.ex_run_number * params.ex_replicate_number) }
-
 
         differentiaExpression(quantResults)
     }
