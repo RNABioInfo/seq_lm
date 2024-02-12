@@ -18,12 +18,9 @@ def main():
     connection_manager: ConnectionManager = ConnectionManager(run_config)
     connection_manager.print_available_positions()
 
-    acquisitions = connection_manager.start_run()
+    run_manager: RunManager = RunManager(connection_manager)
+    run_manager.start_run(run_config)
 
-    run_manager = RunManager(active_acquisitions=acquisitions)
-    run_manager.watch_acquisitions_for_stop()
-
-    connection_manager.remove_all_simulated_positions()
     connection_manager.disconnect()
 
 
