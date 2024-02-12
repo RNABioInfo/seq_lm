@@ -1,8 +1,8 @@
 import socket
-import time
 from .models.run_config import RunConfig
 from .utils.argument_parser import ArgumentParser
 from .managers.connection_manager import ConnectionManager
+from .managers.run_manager import RunManager
 
 __version__ = "0.0.1"
 _package_name = "seq_run_manager"
@@ -16,17 +16,15 @@ def main():
     check_server(run_config.host, run_config.port)
 
     connection_manager: ConnectionManager = ConnectionManager(run_config)
-    connection_manager.remove_all_simulated_positions()
-
     connection_manager.print_available_positions()
 
-    exit(0)
+    acquisitions = connection_manager.start_run()
 
-    connection_manager.start_run()
-
-    time.sleep(20)
+    run_manager = RunManager(active_acquisitions=acquisitions)
+    run_manager.watch_acquisitions_for_stop()
 
     connection_manager.remove_all_simulated_positions()
+    connection_manager.disconnect()
 
 
 def check_server(address, port):

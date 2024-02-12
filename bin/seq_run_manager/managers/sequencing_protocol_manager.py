@@ -1,6 +1,7 @@
 from typing import Optional, Iterator
 from minknow_api.tools import protocols
 from minknow_api import protocol_pb2
+from pathlib import Path
 import minknow_api as mk
 
 from ..models.run_config import RunConfig
@@ -25,6 +26,7 @@ class SequencingProtocolManager:
         device_connection: mk.Connection,
         protocol: mk.protocol_pb2.ProtocolInfo,  # type: ignore
         sample_id: str,
+        sample_dir: Path,
         run_config: RunConfig,
     ) -> str:
         alignment_args = protocols.AlignmentArgs(
@@ -65,7 +67,7 @@ class SequencingProtocolManager:
         user_info.protocol_group_id.value = run_config.experiment_id
 
         offload_location_info = protocol_pb2.OffloadLocationInfo()  # type: ignore
-        offload_location_info.offload_location_path.value = run_config.output_dir
+        offload_location_info.offload_location_path.value = sample_dir
 
         run_id = device_connection.protocol.start_protocol(  # type: ignore
             identifier=protocol_identifier,

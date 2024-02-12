@@ -1,5 +1,9 @@
 import argparse
+import csv
+from pathlib import Path
+
 from ..models.run_config import RunConfig
+from ..models.sample import Sample
 
 
 class ArgumentParser:
@@ -69,6 +73,8 @@ class ArgumentParser:
 
         args = parser.parse_args()
 
+        samples = ArgumentParser.parse_tsv_to_samples(args.metadata)
+
         return RunConfig(
             host=args.host,
             port=args.port,
@@ -85,5 +91,18 @@ class ArgumentParser:
             adaptive_sampling_mode=args.adaptive_sampling_mode,
             basecall_config=args.basecall_config,
             output_chunk_size=args.output_chunk_size,
-            output_dir=args.output_dir,
+            samples=samples,
         )
+
+    @staticmethod
+    def parse_tsv_to_samples(file_path: str) -> list[Sample]:
+        with open(file_path, "r") as f:
+            reader = csv.DictReader(f, delimiter="\t")
+            return [
+                Sample(
+                    run_number=int(row["run_number"]),
+                    replicate_number=int(row["replicate_number"]),
+                    replicate_dir=Path(row["replicate_dir"]),
+                )
+                for row in reader
+            ]

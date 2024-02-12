@@ -1,5 +1,6 @@
 from typing import Optional
 from dataclasses import dataclass
+from .sample import Sample
 
 
 @dataclass
@@ -19,4 +20,4 @@ class RunConfig:
     adaptive_sampling_mode: Optional[str]
     basecall_config: str
     output_chunk_size: int
-    output_dir: str
+    samples: list[Sample]

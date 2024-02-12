@@ -1,4 +1,5 @@
 from ..models.run_config import RunConfig
+from ..models.acquisition import Acquisition
 from .sequencing_protocol_manager import SequencingProtocolManager
 
 from pprint import pprint
@@ -34,6 +35,9 @@ class ConnectionManager:
             client_certificate_chain=certificate_bytes,
             client_private_key=key_bytes,
         )
+
+    def disconnect(self) -> None:
+        self.manager.close()
 
     def create_simulated_position(self, name: Optional[str] = None) -> str:
         def generate_random_string(length=8) -> str:
@@ -173,9 +177,8 @@ class ConnectionManager:
                 raise Exception("All flow cells must have the same product code")
         return product_code
 
-    def start_run(self):
+    def start_run(self) -> list[Acquisition]:
         connections: list[mk.Connection] = self.__connect_to_positions_for_config()
-        connections[0]
         product_code = self.__get_uniform_product_code(connections)
 
         protocol: Optional[mk.protocol_pb2.ProtocolInfo] = SequencingProtocolManager.get_sequencing_protocol(  # type: ignore
@@ -185,10 +188,20 @@ class ConnectionManager:
         if protocol is None:
             raise Exception("No protocol identifier found")
 
-        for i, connection in enumerate(connections):
-            sample_id = f"run{self.run_config.run_number}_replicate{i}"
-            seq_id = SequencingProtocolManager.start_sequencing_protocol(
-                connection, protocol, sample_id, self.run_config
+        if len(connections) != len(self.run_config.samples):
+            raise Exception(
+                "Number of connected devices does not match number of requested samples"
             )
 
-            print(f"Started sequencing with id {seq_id} for {sample_id}")
+        acquisitions: list[Acquisition] = []
+
+        for connection, sample in zip(connections, self.run_config.samples):
+            seq_id = SequencingProtocolManager.start_sequencing_protocol(
+                connection, protocol, sample.id, sample.replicate_dir, self.run_config
+            )
+            acquisitions.append(
+                Acquisition(sample=sample, id=seq_id, connection=connection)
+            )
+            print(f"Started sequencing with id {seq_id} for {sample.id}")
+
+        return acquisitions
