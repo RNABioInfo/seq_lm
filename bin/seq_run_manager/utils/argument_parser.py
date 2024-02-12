@@ -1,10 +1,10 @@
 import argparse
-import models.run_config as rc
+from ..models.run_config import RunConfig
 
 
 class ArgumentParser:
     @staticmethod
-    def parse_cli_arguments() -> rc.RunConfig:
+    def parse_cli_arguments() -> RunConfig:
         parser = argparse.ArgumentParser(description="Run manager for MinKNOW runs")
         parser.add_argument(
             "--host",
@@ -24,24 +24,26 @@ class ArgumentParser:
         parser.add_argument(
             "--key_path", required=True, help="Specify the path to the key."
         )
-        identifier_group = parser.add_mutually_exclusive_group(required=True)
+        parser.add_argument(
+            "--replicate_count",
+            required=True,
+            help="Specify the experiment ID.",
+            type=int,
+        )
+        parser.add_argument(
+            "--run_number", required=True, help="Specify the run number.", type=int
+        )
+        identifier_group = parser.add_mutually_exclusive_group()
         identifier_group.add_argument(
-            "-f", "--flow_cell_id", help="Flow cell ID exclusive to position ID"
+            "-f", "--flow_cell_ids", help="Flow cell ID exclusive to position ID"
         )
         identifier_group.add_argument(
-            "-p", "--position_id", help="Position ID exclusive to flow cell ID"
+            "-p", "--position_ids", help="Position ID exclusive to flow cell ID"
         )
-        parser.add_argument("-s", "--sample_id", required=True, help="Sample ID")
         parser.add_argument(
             "-e", "--experiment_id", required=True, help="Experiment ID"
         )
         parser.add_argument("-k", "--kit", required=True, help="Kit name")
-        parser.add_argument(
-            "-r",
-            "--flowcell_product_code",
-            required=True,
-            help="Flow cell product code",
-        )
         parser.add_argument(
             "-g", "--reference_genome", required=True, help="Reference genome (FASTA)"
         )
@@ -61,22 +63,22 @@ class ArgumentParser:
             default="rna_rp4_130bps_sup_prom.cfg",
         )
         parser.add_argument(
-            "-u", "--output_chunk_size", help="Output chunk size", default=2000
+            "-u", "--output_chunk_size", help="Output chunk size", default=4000
         )
-        parser.add_argument("-o", "--output_dir", help="Output directory", default=".")
+        parser.add_argument("-m", "--metadata", help="Metadata file", required=True)
 
         args = parser.parse_args()
 
-        return rc.RunConfig(
+        return RunConfig(
             host=args.host,
             port=args.port,
             certificate_path=args.certificate_path,
             key_path=args.key_path,
-            flow_cell_id=args.flow_cell_id,
-            position_id=args.position_id,
-            sample_id=args.sample_id,
+            run_number=args.run_number,
+            replicate_count=args.replicate_count,
+            flow_cell_ids=args.flow_cell_ids,
+            position_ids=args.position_ids,
             experiment_id=args.experiment_id,
-            flow_cell_product_code=args.flowcell_product_code,
             kit=args.kit,
             reference_genome_path=args.reference_genome,
             sampling_regions_path=args.sampling_regions,

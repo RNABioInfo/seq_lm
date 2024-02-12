@@ -15,7 +15,7 @@ import java.text.SimpleDateFormat
 
 nextflow.enable.dsl = 2
 
-include { bam_ingress } from './lib/bamIngress.nf'
+include { bamIngress } from './lib/bamIngress.nf'
 include { getSamplePath } from './lib/util.nf'
 include { getSeqSummaryFile } from './lib/util.nf'
 
@@ -257,6 +257,56 @@ workflow sample_pipeline {
         workflow_params
 }
 
+process startSequencing {
+    debug true
+    label 'seqLM'
+    cpus 1
+    input:
+        val argumentMap
+    script:
+        argumentString = argumentMap.collect { k, v -> "--${k} '${v}'" }.join(' ')
+        println argumentString
+        """
+        seq-run-manager ${argumentString}
+        """
+}
+
+def prepareRun(experiment_dir, run_number, replicate_count) {
+    runName = "run_${params.ex_run_number}"
+    runDir = file("${params.ex_dir}/${runName}")
+
+    metadataFile = new File("${experiment_dir}/metadata.tsv")
+
+    // Add header to metadata file if file is empty
+    if (metadataFile.length() == 0) {
+        metadataFile.withWriter { w ->
+            w << "run\treplicate\treplicate_dir\n"
+        }
+    }
+
+    // Create run directories for each replicate
+    (1..replicate_count).each { count ->
+        replicateName = "replicate_${count}"
+        replicateDir = file("${runDir}/${replicateName}")
+        replicateDir.mkdirs()
+
+        metadataFile << "${params.ex_run_number}\t${count}\t${replicateDir}\n"
+    }
+}
+
+Map getSequencingArguments(runDir) {
+    Map args = [:]
+    args['certificate_path'] = "/Applications/MinKNOW.app/Contents/Resources/conf/rpc-certs/minknow_cert.pem"
+    args['key_path'] = "/Users/christopherphd/Documents/projects/bios/seqLM/minknow_key.pem"
+    args['replicate_count'] = params.ex_replicate_count
+    args['run_number'] = params.ex_run_number
+    args['experiment_id'] = params.ex_name
+    args['kit'] = "SQK-RNA002"
+    args['reference_genome'] = "/Users/christopherphd/Downloads/Pseudomonas_putida_NBRC_14164/ncbi_dataset/data/GCF_000412675.1/GCF_000412675.1_ASM41267v1_genomic.fa"
+    args['metadata'] = "${params.ex_dir}/metadata.tsv"
+    return args
+}
+
 // Entrypoint workflow
 WorkflowMain.initialise(workflow, params, log)
 workflow {
@@ -264,18 +314,22 @@ workflow {
         Pinguscript.ping_post(workflow, 'start', 'none', params.ex_dir, params)
     }
 
+    // TODO: Implement parameter validation
+
+    // TODO: Implement sequencing setup checks
+
+    // Config is stored in order to fetch parameters in subsequent runs
     writeConfig()
 
-    runName = "run_${params.ex_run_number}"
-    runDir = file("${params.ex_dir}/${runName}")
+    // Setup the run
+    prepareRun(params.ex_dir, params.ex_run_number, params.ex_replicate_count)
 
-    (1..params.ex_replicate_number).each { replicate_number ->
-        replicateDir = file("${runDir}/replicate_${replicate_number}")
-        replicateDir.mkdirs()
-    }
+    // Start the sequencing run
+    sequencingArgs = getSequencingArguments(runDir)
+    startSequencing(sequencingArgs)
 
     // Sample chunk is [map[runName, replicateName], newBam, [allBam]]
-    sampleChunk = bam_ingress([
+    sampleChunk = bamIngress([
     'input':runDir,
     'runName':runName,
     'bam_stats': params.wf.bam_stats,
@@ -283,13 +337,14 @@ workflow {
 
     sample_pipeline(sampleChunk)
 
+    // Start differential expression analysis if there is more than one run
     if (params.ex_run_number > 1) {
         quantResults = Channel.watchPath("$runDir/**counts.txt")
         .until { it.name.startsWith("STOP") }
         .filter { it.name.endsWith("counts.txt") }
         .map { file("$params.ex_dir/**counts.txt") }
         // Waits until there are count files for all replicates
-        .filter { it.size() == (params.ex_run_number * params.ex_replicate_number) }
+        .filter { it.size() == (params.ex_run_number * params.ex_replicate_count) }
 
         differentiaExpression(quantResults)
     }

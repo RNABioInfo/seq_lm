@@ -1,8 +1,9 @@
 from typing import Optional, Iterator
 from minknow_api.tools import protocols
+from minknow_api import protocol_pb2
 import minknow_api as mk
 
-from models.run_config import RunConfig
+from ..models.run_config import RunConfig
 
 
 class SequencingProtocolManager:
@@ -21,17 +22,11 @@ class SequencingProtocolManager:
 
     @staticmethod
     def start_sequencing_protocol(
-        position_connection: mk.Connection, run_config: RunConfig
-    ):
-        protocol = SequencingProtocolManager.get_sequencing_protocol(
-            position_connection,
-            run_config.flow_cell_product_code,
-            run_config.kit,
-        )
-
-        if protocol is None:
-            raise Exception("No protocol identifier found")
-
+        device_connection: mk.Connection,
+        protocol: mk.protocol_pb2.ProtocolInfo,  # type: ignore
+        sample_id: str,
+        run_config: RunConfig,
+    ) -> str:
         alignment_args = protocols.AlignmentArgs(
             [run_config.reference_genome_path], run_config.sampling_regions_path
         )
@@ -57,21 +52,27 @@ class SequencingProtocolManager:
 
         protocol_identifier = protocol.identifier  # type: ignore
 
-        run_id = protocols.start_protocol(
-            device_connection=position_connection,
-            identifier=protocol_identifier,  # type: ignore
-            sample_id=run_config.sample_id,
-            experiment_group=run_config.experiment_id,
-            barcode_info=None,
+        protocol_args = protocols.make_protocol_arguments(
             basecalling=basecalling_args,
-            read_until=read_until_args,
-            pod5_arguments=pod5_args,
+            read_until=read_until_args,  # type: ignore
             fastq_arguments=fastq_args,
+            pod5_arguments=pod5_args,
             bam_arguments=bam_args,
         )
 
-        print(f"Started run with id {run_id} on position {run_config.position_id}")
+        user_info = protocol_pb2.ProtocolRunUserInfo()  # type: ignore
+        user_info.sample_id.value = sample_id
+        user_info.protocol_group_id.value = run_config.experiment_id
 
+        offload_location_info = protocol_pb2.OffloadLocationInfo()  # type: ignore
+        offload_location_info.offload_location_path.value = run_config.output_dir
+
+        run_id = device_connection.protocol.start_protocol(  # type: ignore
+            identifier=protocol_identifier,
+            args=protocol_args,
+            user_info=user_info,
+            offload_location_info=offload_location_info,
+        )
         return run_id
 
     @staticmethod
