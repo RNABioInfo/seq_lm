@@ -3,7 +3,7 @@ from minknow_api.tools import protocols
 from minknow_api import protocol_pb2
 from pathlib import Path
 import minknow_api as mk
-import pprint
+import os
 
 from ..models.run_config import RunConfig
 
@@ -41,7 +41,7 @@ class SequencingProtocolManager:
             [run_config.reference_genome_path], run_config.sampling_regions_path
         )
         basecalling_args = protocols.BasecallingArgs(
-            config=run_config.basecall_config, barcoding=None, alignment=alignment_args
+            config=run_config.basecall_config, barcoding=None, alignment=None
         )
 
         read_until_args = None
@@ -74,9 +74,11 @@ class SequencingProtocolManager:
         user_info.sample_id.value = sample_id
         user_info.protocol_group_id.value = run_config.experiment_id
 
+        sequencing_dir = sample_dir / "sequencing_data"
+        os.umask(0)
+        os.mkdir(sequencing_dir, mode=0o777)
         offload_location_info = protocol_pb2.OffloadLocationInfo()  # type: ignore
-        pprint.pprint(offload_location_info)
-        offload_location_info.offload_location_path = sample_dir.as_posix()
+        offload_location_info.offload_location_path = sequencing_dir.as_posix()
 
         print(f"Offload location path: {offload_location_info.offload_location_path}")
 
@@ -90,7 +92,7 @@ class SequencingProtocolManager:
 
     @staticmethod
     def stream_current_protocol_updates(
-        position_connection: mk.Connection, run_config: RunConfig
+        position_connection: mk.Connection,
     ) -> Iterator[mk.protocol_pb2.ProtocolRunInfo]:  # type: ignore
         return position_connection.protocol.watch_current_protocol_run()  # type: ignore
 

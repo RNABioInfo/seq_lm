@@ -5,6 +5,7 @@ from ..managers.connection_manager import ConnectionManager
 from typing import List
 import time
 import minknow_api as mk
+from pathlib import Path
 
 
 class RunManager:
@@ -83,8 +84,8 @@ class RunManager:
             .kit_configs[run_config.kit]
             .configs
         )
-
-        if run_config.basecall_config not in configs_for_run:
+        requested_config = str(Path(run_config.basecall_config).stem)
+        if requested_config not in configs_for_run:
             raise Exception(
                 f"Basecalling config {run_config.basecall_config} not available for flow cell {uniform_product_code} and kit {run_config.kit}. Available configs: {configs_for_run}"
             )
@@ -94,6 +95,13 @@ class RunManager:
             active_acquisitions = False
 
             for acquisition in self.active_acquisitions:
+                for event in SequencingProtocolManager.stream_current_protocol_updates(
+                    acquisition.connection
+                ):
+                    if hasattr(event, "state"):
+                        print(event.state)
+                    break
+
                 if acquisition.is_stopped:
                     continue
 
