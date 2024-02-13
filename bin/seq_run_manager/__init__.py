@@ -15,8 +15,9 @@ def main():
 
     check_server(run_config.host, run_config.port)
 
-    connection_manager: ConnectionManager = ConnectionManager(run_config)
+    connection_manager: ConnectionManager = ConnectionManager.connected_with(run_config)
     connection_manager.print_available_positions()
+    connection_manager.remove_all_simulated_positions()
 
     run_manager: RunManager = RunManager(connection_manager)
     run_manager.start_run(run_config)

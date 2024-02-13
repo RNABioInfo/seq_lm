@@ -2,13 +2,14 @@ from ..models.acquisition import Acquisition
 from ..models.run_config import RunConfig
 from ..managers.sequencing_protocol_manager import SequencingProtocolManager
 from ..managers.connection_manager import ConnectionManager
+from typing import List
 import time
 import minknow_api as mk
 
 
 class RunManager:
     connection_manager: ConnectionManager
-    active_acquisitions: list[Acquisition] = []
+    active_acquisitions: List[Acquisition] = []
 
     def __init__(self, connection_manager: ConnectionManager) -> None:
         self.connection_manager = connection_manager
@@ -20,7 +21,7 @@ class RunManager:
             product_code = flow_cell_info.product_code
         return product_code
 
-    def __get_uniform_product_code(self, connections: list[mk.Connection]) -> str:
+    def __get_uniform_product_code(self, connections: List[mk.Connection]) -> str:
         product_code = self.__get_product_code(connections[0])
         for connection in connections:
             other_product_code = self.__get_product_code(connection)
@@ -28,25 +29,39 @@ class RunManager:
                 raise Exception("All flow cells must have the same product code")
         return product_code
 
-    def __start_acquisitions(self, run_config: RunConfig) -> list[Acquisition]:
-        connections: list[mk.Connection] = self.connection_manager.connect_to_positions(
+    def __start_acquisitions(self, run_config: RunConfig) -> List[Acquisition]:
+        connections: List[mk.Connection] = self.connection_manager.connect_to_positions(
             run_config
         )
+
         product_code = self.__get_uniform_product_code(connections)
+
+        self.__check_bascalling_config(run_config, product_code)
 
         protocol: Optional[mk.protocol_pb2.ProtocolInfo] = SequencingProtocolManager.get_sequencing_protocol(  # type: ignore
             connections[0], product_code, run_config.kit
         )
 
         if protocol is None:
-            raise Exception("No protocol identifier found")
+            available_protocols = SequencingProtocolManager.get_available_protocols(
+                connections[0]
+            )
+            available_kits = []
+            for protocol in available_protocols:
+                tags = protocol.tags
+                if tags["flow cell"].string_value == product_code:
+                    available_kits.append(tags["kit"].string_value)
+
+            raise Exception(
+                f"No protocol identifier found. \nAvailable kits for this flow cell: {available_kits}"
+            )
 
         if len(connections) != len(run_config.samples):
             raise Exception(
                 "Number of connected devices does not match number of requested samples"
             )
 
-        acquisitions: list[Acquisition] = []
+        acquisitions: List[Acquisition] = []
 
         for connection, sample in zip(connections, run_config.samples):
             seq_id = SequencingProtocolManager.start_sequencing_protocol(
@@ -58,6 +73,21 @@ class RunManager:
             print(f"Started sequencing with id {seq_id} for {sample.id}")
 
         return acquisitions
+
+    def __check_bascalling_config(
+        self, run_config: RunConfig, uniform_product_code: str
+    ) -> None:
+        configs_by_flow_cell = mk.manager.Manager.basecaller(self.connection_manager.manager).rpc.list_configs_by_kit()  # type: ignore
+        configs_for_run: list = (
+            configs_by_flow_cell.flow_cell_configs[uniform_product_code]
+            .kit_configs[run_config.kit]
+            .configs
+        )
+
+        if run_config.basecall_config not in configs_for_run:
+            raise Exception(
+                f"Basecalling config {run_config.basecall_config} not available for flow cell {uniform_product_code} and kit {run_config.kit}. Available configs: {configs_for_run}"
+            )
 
     def __watch_acquisitions_for_stop(self) -> None:
         while True:
@@ -84,3 +114,6 @@ class RunManager:
     def start_run(self, run_config: RunConfig) -> None:
         self.active_acquisitions = self.__start_acquisitions(run_config)
         self.__watch_acquisitions_for_stop()
+
+        if run_config.simulate_run:
+            self.connection_manager.remove_all_simulated_positions()

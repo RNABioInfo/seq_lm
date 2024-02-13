@@ -1,6 +1,7 @@
 import argparse
 import csv
 from pathlib import Path
+from typing import List
 
 from ..models.run_config import RunConfig
 from ..models.sample import Sample
@@ -23,19 +24,19 @@ class ArgumentParser:
         parser.add_argument(
             "--certificate_path",
             required=True,
-            help="Specify the path to the certificate.",
+            help="Specify the path to the certificate (required)",
         )
         parser.add_argument(
-            "--key_path", required=True, help="Specify the path to the key."
+            "--key_path", required=True, help="Specify the path to the key (required)"
         )
         parser.add_argument(
             "--replicate_count",
             required=True,
-            help="Specify the experiment ID.",
+            help="Count of replicates in run (required)",
             type=int,
         )
         parser.add_argument(
-            "--run_number", required=True, help="Specify the run number.", type=int
+            "--run_number", required=True, help="Run number (required)", type=int
         )
         identifier_group = parser.add_mutually_exclusive_group()
         identifier_group.add_argument(
@@ -45,9 +46,9 @@ class ArgumentParser:
             "-p", "--position_ids", help="Position ID exclusive to flow cell ID"
         )
         parser.add_argument(
-            "-e", "--experiment_id", required=True, help="Experiment ID"
+            "-e", "--experiment_id", required=True, help="Experiment ID (required)"
         )
-        parser.add_argument("-k", "--kit", required=True, help="Kit name")
+        parser.add_argument("-k", "--kit", required=True, help="Kit name (required)")
         parser.add_argument(
             "-g", "--reference_genome", required=True, help="Reference genome (FASTA)"
         )
@@ -63,13 +64,22 @@ class ArgumentParser:
         parser.add_argument(
             "-b",
             "--basecall_config",
-            help="Basecall config",
-            default="rna_rp4_130bps_sup_prom.cfg",
+            help="Basecall config (default: rna_rp4_130bps_sup_prom.cfg)",
+            default="rna_rp4_130bps_hac_prom",
         )
         parser.add_argument(
-            "-u", "--output_chunk_size", help="Output chunk size", default=4000
+            "-u",
+            "--output_chunk_size",
+            help="Output chunk size (default: 4000)",
+            default=4000,
         )
-        parser.add_argument("-m", "--metadata", help="Metadata file", required=True)
+        parser.add_argument(
+            "-m", "--metadata", help="Metadata file (required)", required=True
+        )
+
+        parser.add_argument(
+            "--simulate_run", action="store_true", help="Simulate run (default: False)"
+        )
 
         args = parser.parse_args()
 
@@ -92,10 +102,11 @@ class ArgumentParser:
             basecall_config=args.basecall_config,
             output_chunk_size=args.output_chunk_size,
             samples=samples,
+            simulate_run=args.simulate_run,
         )
 
     @staticmethod
-    def parse_tsv_to_samples(file_path: str) -> list[Sample]:
+    def parse_tsv_to_samples(file_path: str) -> List[Sample]:
         with open(file_path, "r") as f:
             reader = csv.DictReader(f, delimiter="\t")
             return [

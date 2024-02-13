@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, List
 from dataclasses import dataclass
 from .sample import Sample
 
@@ -9,8 +9,8 @@ class RunConfig:
     port: Optional[int]
     certificate_path: Optional[str]
     key_path: Optional[str]
-    flow_cell_ids: Optional[list[str]]
-    position_ids: Optional[list[str]]
+    flow_cell_ids: Optional[List[str]]
+    position_ids: Optional[List[str]]
     experiment_id: str
     run_number: int
     replicate_count: int
@@ -20,4 +20,5 @@ class RunConfig:
     adaptive_sampling_mode: Optional[str]
     basecall_config: str
     output_chunk_size: int
-    samples: list[Sample]
+    samples: List[Sample]
+    simulate_run: bool

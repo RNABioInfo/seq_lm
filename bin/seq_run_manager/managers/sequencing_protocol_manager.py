@@ -3,6 +3,7 @@ from minknow_api.tools import protocols
 from minknow_api import protocol_pb2
 from pathlib import Path
 import minknow_api as mk
+import pprint
 
 from ..models.run_config import RunConfig
 
@@ -20,6 +21,13 @@ class SequencingProtocolManager:
             kit=kit,
             basecalling=True,
         )
+
+    @staticmethod
+    def get_available_protocols(
+        position_connection: mk.Connection,
+    ) -> list[mk.protocol_pb2.ProtocolInfo]:  # type: ignore
+        response = position_connection.protocol.list_protocols(force_reload=True)  # type: ignore
+        return response.protocols  # type: ignore
 
     @staticmethod
     def start_sequencing_protocol(
@@ -67,7 +75,10 @@ class SequencingProtocolManager:
         user_info.protocol_group_id.value = run_config.experiment_id
 
         offload_location_info = protocol_pb2.OffloadLocationInfo()  # type: ignore
-        offload_location_info.offload_location_path.value = sample_dir
+        pprint.pprint(offload_location_info)
+        offload_location_info.offload_location_path = sample_dir.as_posix()
+
+        print(f"Offload location path: {offload_location_info.offload_location_path}")
 
         run_id = device_connection.protocol.start_protocol(  # type: ignore
             identifier=protocol_identifier,
