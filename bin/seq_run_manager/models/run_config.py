@@ -1,19 +1,19 @@
 from typing import Optional, List
 from dataclasses import dataclass
 from .sample import Sample
+from pathlib import Path
 
 
 @dataclass
 class RunConfig:
     host: Optional[str]
     port: Optional[int]
-    certificate_path: Optional[str]
-    key_path: Optional[str]
+    certificate_path: str
+    key_path: str
     flow_cell_ids: Optional[List[str]]
     position_ids: Optional[List[str]]
     experiment_id: str
-    run_number: int
-    replicate_count: int
+    run_id: str
     kit: str
     reference_genome_path: str
     sampling_regions_path: Optional[str]
@@ -22,3 +22,37 @@ class RunConfig:
     output_chunk_size: int
     samples: List[Sample]
     simulate_run: bool
+
+    @property
+    def sample_count(self) -> int:
+        return len(self.samples)
+
+    def validate(self):
+        if not Path(self.certificate_path).exists():
+            raise Exception("Certificate file does not exist")
+
+        if not Path(self.key_path).exists():
+            raise Exception("Key file does not exist")
+
+        if self.experiment_id is None:
+            raise Exception("Experiment ID is required")
+
+        if self.run_id is None:
+            raise Exception("Run ID is required")
+
+        if self.kit is None:
+            raise Exception("Kit is required")
+
+        allowed_reference_genome_extensions = [".fasta", ".fa", ".fna", ".mmi"]
+        reference_genome_extension = Path(self.reference_genome_path).suffix
+        if reference_genome_extension not in allowed_reference_genome_extensions:
+            raise Exception("Reference genome must be a .fasta, .fa, .fna or .mmi file")
+
+        if Path(self.basecall_config).suffix != ".cfg":
+            raise Exception("Basecall config must be a .cfg file")
+
+        if len(self.samples) < 1:
+            raise Exception("No samples provided")
+
+        if self.simulate_run:
+            raise Exception("Simulated runs are not supported yet")

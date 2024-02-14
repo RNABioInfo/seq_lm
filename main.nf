@@ -232,7 +232,7 @@ workflow sample_pipeline {
             return [res, "${samplePath}/qc"] 
         }
 
-        featureCountsRes = featureCounts(newBamIn, params.ref_annotation) |
+        featureCountsRes = featureCounts(newBamIn, params.ex_reference_annotation) |
         map { meta, newCounts -> 
             samplePath = getSamplePath(meta)
             allCounts = file("${params.ex_dir}/${samplePath}/*counts.txt")
@@ -258,16 +258,20 @@ workflow sample_pipeline {
 }
 
 process startSequencing {
+    container 'seqlm_seq'
     debug true
     label 'seqLM'
     cpus 1
     input:
         val argumentMap
+        path keyFile
+        path certificateFile
+        path metadataFile
     script:
         argumentString = argumentMap.collect { k, v -> "--${k} '${v}'" }.join(' ')
         println argumentString
         """
-        seq-run-manager ${argumentString}
+        seq-run-manager ${argumentString} --key_path ${keyFile} --certificate_path ${certificateFile} --metadata ${metadataFile}
         """
 }
 
@@ -280,7 +284,7 @@ def prepareRun(experiment_dir, run_number, replicate_count) {
     // Add header to metadata file if file is empty
     if (metadataFile.length() == 0) {
         metadataFile.withWriter { w ->
-            w << "run\treplicate\treplicate_dir\n"
+            w << "run_number\treplicate_number\treplicate_dir\n"
         }
     }
 
@@ -296,14 +300,11 @@ def prepareRun(experiment_dir, run_number, replicate_count) {
 
 Map getSequencingArguments(runDir) {
     Map args = [:]
-    args['certificate_path'] = "/Applications/MinKNOW.app/Contents/Resources/conf/rpc-certs/minknow_cert.pem"
-    args['key_path'] = "/Users/christopherphd/Documents/projects/bios/seqLM/minknow_key.pem"
-    args['replicate_count'] = params.ex_replicate_count
-    args['run_number'] = params.ex_run_number
     args['experiment_id'] = params.ex_name
-    args['kit'] = "SQK-RNA002"
-    args['reference_genome'] = "/Users/christopherphd/Downloads/Pseudomonas_putida_NBRC_14164/ncbi_dataset/data/GCF_000412675.1/GCF_000412675.1_ASM41267v1_genomic.fa"
-    args['metadata'] = "${params.ex_dir}/metadata.tsv"
+    args['run_id'] = params.ex_run_number
+    args['kit'] = params.ex_kit
+    args['reference_genome'] = params.ex_reference_genome
+    args["basecall_config"] = params.ex_basecall_config
     return args
 }
 
@@ -325,8 +326,11 @@ workflow {
     prepareRun(params.ex_dir, params.ex_run_number, params.ex_replicate_count)
 
     // Start the sequencing run
+    metadataFile = Channel.fromPath("${params.ex_dir}/metadata.tsv")
+    keyFile = Channel.fromPath(params.ex_mk_key)
+    certificateFile = Channel.fromPath(params.ex_mk_cert)
     sequencingArgs = getSequencingArguments(runDir)
-    startSequencing(sequencingArgs)
+    startSequencing(sequencingArgs, keyFile, certificateFile, metadataFile)
 
     // Sample chunk is [map[runName, replicateName], newBam, [allBam]]
     sampleChunk = bamIngress([

@@ -38,10 +38,11 @@ class SequencingProtocolManager:
         run_config: RunConfig,
     ) -> str:
         alignment_args = protocols.AlignmentArgs(
-            [run_config.reference_genome_path], run_config.sampling_regions_path
+            reference_files=[run_config.reference_genome_path],
+            bed_file=run_config.sampling_regions_path,
         )
         basecalling_args = protocols.BasecallingArgs(
-            config=run_config.basecall_config, barcoding=None, alignment=None
+            config=run_config.basecall_config, barcoding=None, alignment=alignment_args
         )
 
         read_until_args = None
@@ -68,20 +69,20 @@ class SequencingProtocolManager:
             fastq_arguments=fastq_args,
             pod5_arguments=pod5_args,
             bam_arguments=bam_args,
+            args=[],
         )
 
         user_info = protocol_pb2.ProtocolRunUserInfo()  # type: ignore
-        user_info.sample_id.value = sample_id
         user_info.protocol_group_id.value = run_config.experiment_id
+        user_info.sample_id.value = sample_id
 
-        sequencing_dir = sample_dir / "sequencing_data"
-        os.umask(0)
-        os.mkdir(sequencing_dir, mode=0o777)
+        sequencing_dir = sample_dir.parents[1]
+        # os.umask(0)
+        # os.mkdir(sequencing_dir, mode=0o777)
         offload_location_info = protocol_pb2.OffloadLocationInfo()  # type: ignore
         offload_location_info.offload_location_path = sequencing_dir.as_posix()
 
         print(f"Offload location path: {offload_location_info.offload_location_path}")
-
         run_id = device_connection.protocol.start_protocol(  # type: ignore
             identifier=protocol_identifier,
             args=protocol_args,

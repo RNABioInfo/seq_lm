@@ -13,13 +13,14 @@ class ArgumentParser:
         parser = argparse.ArgumentParser(description="Run manager for MinKNOW runs")
         parser.add_argument(
             "--host",
-            default="localhost",
+            default="host.docker.internal",
             help="Specify which host to connect to. (Default: localhost)",
         )
         parser.add_argument(
             "--port",
             default=9501,
             help="Specify which port to connect to. (Default: 9501)",
+            type=int,
         )
         parser.add_argument(
             "--certificate_path",
@@ -30,13 +31,10 @@ class ArgumentParser:
             "--key_path", required=True, help="Specify the path to the key (required)"
         )
         parser.add_argument(
-            "--replicate_count",
-            required=True,
-            help="Count of replicates in run (required)",
-            type=int,
+            "-e", "--experiment_id", required=True, help="Experiment ID (required)"
         )
         parser.add_argument(
-            "--run_number", required=True, help="Run number (required)", type=int
+            "--run_id", required=True, help="Run number (required)", type=str
         )
         identifier_group = parser.add_mutually_exclusive_group()
         identifier_group.add_argument(
@@ -44,9 +42,6 @@ class ArgumentParser:
         )
         identifier_group.add_argument(
             "-p", "--position_ids", help="Position ID exclusive to flow cell ID"
-        )
-        parser.add_argument(
-            "-e", "--experiment_id", required=True, help="Experiment ID (required)"
         )
         parser.add_argument("-k", "--kit", required=True, help="Kit name (required)")
         parser.add_argument(
@@ -85,16 +80,15 @@ class ArgumentParser:
 
         samples = ArgumentParser.parse_tsv_to_samples(args.metadata)
 
-        return RunConfig(
+        config = RunConfig(
             host=args.host,
             port=args.port,
             certificate_path=args.certificate_path,
             key_path=args.key_path,
-            run_number=args.run_number,
-            replicate_count=args.replicate_count,
+            run_id=args.run_id,
+            experiment_id=args.experiment_id,
             flow_cell_ids=args.flow_cell_ids,
             position_ids=args.position_ids,
-            experiment_id=args.experiment_id,
             kit=args.kit,
             reference_genome_path=args.reference_genome,
             sampling_regions_path=args.sampling_regions,
@@ -104,6 +98,9 @@ class ArgumentParser:
             samples=samples,
             simulate_run=args.simulate_run,
         )
+
+        config.validate()
+        return config
 
     @staticmethod
     def parse_tsv_to_samples(file_path: str) -> List[Sample]:

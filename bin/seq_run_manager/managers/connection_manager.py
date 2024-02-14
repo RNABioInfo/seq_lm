@@ -92,7 +92,7 @@ class ConnectionManager:
         if run_config.simulate_run:
             simulated_positions: List[mk.manager.FlowCellPosition] = []
 
-            for _ in range(run_config.replicate_count):
+            for _ in range(run_config.sample_count):
                 position_name = self.__create_simulated_position()
                 simulated_position = self.__get_simulated_position_by_name(
                     position_name
@@ -113,9 +113,9 @@ class ConnectionManager:
             )
 
         if run_config.position_ids is not None:
-            if len(run_config.position_ids) != run_config.replicate_count:
+            if len(run_config.position_ids) != run_config.sample_count:
                 raise Exception(
-                    f"Number of positions ({len(run_config.position_ids)}) does not match the number of replicates ({run_config.replicate_count})"
+                    f"Number of positions ({len(run_config.position_ids)}) does not match the number of replicates ({run_config.sample_count})"
                 )
             return [
                 self.__get_sequencing_position_by_position_id_throws(id)
@@ -123,9 +123,9 @@ class ConnectionManager:
             ]
 
         if run_config.flow_cell_ids is not None:
-            if len(run_config.flow_cell_ids) != run_config.replicate_count:
+            if len(run_config.flow_cell_ids) != run_config.sample_count:
                 raise Exception(
-                    f"Number of flow cells ({len(run_config.flow_cell_ids)}) does not match the number of replicates ({run_config.replicate_count})"
+                    f"Number of flow cells ({len(run_config.flow_cell_ids)}) does not match the number of replicates ({run_config.sample_count})"
                 )
             return [
                 self.__get_sequencing_position_by_flow_cell_id_throws(id)
@@ -134,9 +134,9 @@ class ConnectionManager:
 
         positions = list(self.manager.flow_cell_positions())
 
-        if len(positions) != run_config.replicate_count:
+        if len(positions) != run_config.sample_count:
             raise Exception(
-                f"Number of available positions ({len(positions)}) does not match the number of replicates ({run_config.replicate_count})"
+                f"Number of available positions ({len(positions)}) does not match the number of replicates ({run_config.sample_count})"
             )
 
         return positions
@@ -184,10 +184,16 @@ class ConnectionManager:
         connections: List[mk.Connection] = []
 
         for position in positions:
+            print(f"State of position {position.name}: {position.state}")
             for _ in range(retries):
                 try:
-                    if not position.running:
-                        raise Exception(f"Position {position.name} is not running.")
+                    if (
+                        not position.running
+                        or position.state != mk.manager_pb2.FlowCellPosition.State.STATE_RUNNING  # type: ignore
+                    ):
+                        raise Exception(
+                            f"Position {position.name} is not running. Hardware state: {position.state}"
+                        )
 
                     connections.append(position.connect())
                     break
@@ -197,8 +203,12 @@ class ConnectionManager:
                     )
                     time.sleep(5)
 
-        if len(connections) != run_config.replicate_count:
+        print(
+            f"Connected to {len(connections)} positions expected {run_config.sample_count}"
+        )
+
+        if len(connections) != run_config.sample_count:
             raise Exception(
-                f"Could not connect to all positions. Expected {run_config.replicate_count}, got {len(connections)}"
+                f"Could not connect to all positions. Expected {run_config.sample_count}, got {len(connections)}"
             )
         return connections

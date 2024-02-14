@@ -105,7 +105,7 @@ def watch_path(Map margs) {
         // This file could be in the top-level dir or a sub-dir. In the first case
         // check if a sample name was provided. In the second case, the alias is
         // always the name of the sub-dir.
-        [create_metamap([runName: margs['runName'], replicateName: it.parent.name]), it, file(it.parent / '*.bam')]
+        [create_metamap([runName: margs['runName'], replicateName: it.parent.parent.name]), it, file(it.parent / '*.bam')]
     }
 
     return ch_watched
