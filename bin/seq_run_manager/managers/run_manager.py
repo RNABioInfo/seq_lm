@@ -11,6 +11,13 @@ from pathlib import Path
 class RunManager:
     connection_manager: ConnectionManager
     active_acquisitions: List[Acquisition] = []
+    # For more information on the protocol states, see the minknow_api.proto.protocol.ProtocolState enum
+    __permitted_protocol_states = [
+        0,
+        4,
+        5,
+        1,
+    ]  # 0: PROTOCOL_RUNNING, 4: PROTOCOL_WAITING_FOR_TEMPERATURE, 5: PROTOCOL_WAITING_FOR_ACQUISITION, 1: PROTOCOL_COMPLETED
 
     def __init__(self, connection_manager: ConnectionManager) -> None:
         self.connection_manager = connection_manager
@@ -90,27 +97,34 @@ class RunManager:
                 f"Basecalling config {run_config.basecall_config} not available for flow cell {uniform_product_code} and kit {run_config.kit}. Available configs: {configs_for_run}"
             )
 
-    def __watch_acquisitions_for_stop(self) -> None:
+    def __watch_acquisitions_status(self) -> None:
         while True:
             active_acquisitions = False
 
             for acquisition in self.active_acquisitions:
+
+                if acquisition.is_stopped:
+                    continue
+
+                # Check if the acquisition is still running. Retry until the protocol update contains a state.
                 for event in SequencingProtocolManager.stream_current_protocol_updates(
                     acquisition.connection
                 ):
                     if hasattr(event, "state"):
-                        print(event.state)
-                    break
-
-                if acquisition.is_stopped:
-                    continue
+                        if not event.state in self.__permitted_protocol_states:
+                            raise Exception(
+                                f"Unexpected protocol state: {event.state}. Check the minknow log for more information."
+                            )
+                        break
 
                 if acquisition.should_stop():
                     try:
                         acquisition.stop_run_throws()
                         continue
                     except Exception as e:
-                        print(e)
+                        print(
+                            f"Error stopping acquisition: {e}. Please stop run: {event.run_id} manually."
+                        )
 
                 active_acquisitions = True
 
@@ -121,7 +135,7 @@ class RunManager:
 
     def start_run(self, run_config: RunConfig) -> None:
         self.active_acquisitions = self.__start_acquisitions(run_config)
-        self.__watch_acquisitions_for_stop()
+        self.__watch_acquisitions_status()
 
         if run_config.simulate_run:
             self.connection_manager.remove_all_simulated_positions()

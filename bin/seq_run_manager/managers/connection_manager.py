@@ -187,10 +187,7 @@ class ConnectionManager:
             print(f"State of position {position.name}: {position.state}")
             for _ in range(retries):
                 try:
-                    if (
-                        not position.running
-                        or position.state != mk.manager_pb2.FlowCellPosition.State.STATE_RUNNING  # type: ignore
-                    ):
+                    if not position.running:
                         raise Exception(
                             f"Position {position.name} is not running. Hardware state: {position.state}"
                         )

@@ -43,10 +43,13 @@ class RunConfig:
         if self.kit is None:
             raise Exception("Kit is required")
 
-        allowed_reference_genome_extensions = [".fasta", ".fa", ".fna", ".mmi"]
-        reference_genome_extension = Path(self.reference_genome_path).suffix
-        if reference_genome_extension not in allowed_reference_genome_extensions:
-            raise Exception("Reference genome must be a .fasta, .fa, .fna or .mmi file")
+        if self.reference_genome_path:
+            allowed_reference_genome_extensions = [".fasta", ".fa", ".fna", ".mmi"]
+            reference_genome_extension = Path(self.reference_genome_path).suffix
+            if reference_genome_extension not in allowed_reference_genome_extensions:
+                raise Exception(
+                    "Reference genome must be a .fasta, .fa, .fna or .mmi file"
+                )
 
         if Path(self.basecall_config).suffix != ".cfg":
             raise Exception("Basecall config must be a .cfg file")

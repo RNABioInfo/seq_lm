@@ -44,9 +44,7 @@ class ArgumentParser:
             "-p", "--position_ids", help="Position ID exclusive to flow cell ID"
         )
         parser.add_argument("-k", "--kit", required=True, help="Kit name (required)")
-        parser.add_argument(
-            "-g", "--reference_genome", required=True, help="Reference genome (FASTA)"
-        )
+        parser.add_argument("-g", "--reference_genome", help="Reference genome (FASTA)")
         parser.add_argument(
             "-i", "--sampling_regions", help="Regions for adaptive sampling (BED)"
         )
