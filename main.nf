@@ -11,13 +11,13 @@
 //        as an entry point when using this workflow in isolation.
 
 import groovy.json.JsonBuilder
-import java.text.SimpleDateFormat
+
 
 nextflow.enable.dsl = 2
 
 include { bamIngress } from './lib/bamIngress.nf'
-include { getSamplePath } from './lib/util.nf'
-include { getSeqSummaryFile } from './lib/util.nf'
+include { getSamplePath; getSeqSummaryFile; getSequencingArguments } from './lib/util.nf'
+include { validateExperimentDir } from './lib/validation.nf'
 
 OPTIONAL_FILE = file("$projectDir/data/OPTIONAL_FILE")
 
@@ -63,8 +63,8 @@ process output {
         tuple path(fname), val(dirname)
     output:
         path fname
-    """
-    """
+    '''
+    '''
 }
 
 process writeConfig {
@@ -80,10 +80,10 @@ process writeConfig {
             w << 'params {\n'
             params.each { k, v ->
                 if (k.startsWith('ex')) {
-                    if ( k == 'ex_run_number' ) {
+                    if (k == 'ex_run_number') {
                         v = v + 1
                     }
-                    line = ""
+                    line = ''
                     if (v instanceof String) {
                         line = "\t${k} = \"${v}\"\n"
                     } else {
@@ -145,7 +145,7 @@ process mergeFeatureCounts {
     container 'seqlm_dea'
     cpus 1
     input:
-        tuple val(meta), path(newCounts, name: "new_counts.txt"), path(allCounts, name: "all_counts.txt")
+        tuple val(meta), path(newCounts, name: 'new_counts.txt'), path(allCounts, name: 'all_counts.txt')
     output:
         tuple val(meta), path(mergedCountsFile)
     script:
@@ -178,14 +178,14 @@ process bamQC {
             """
         } else {
             log.info 'No seq_summary.txt file found, skipping QC report.'
-            """
-            """
+            '''
+            '''
         }
 }
 
 process bamIndex {
     label 'seqLM'
-    container 'staphb/samtools'
+    container 'seqlm/samtools'
     errorStrategy 'ignore'
     cpus 1
     input:
@@ -201,7 +201,7 @@ process bamIndex {
 }
 
 process differentiaExpression {
-    container "seqlm_dea"
+    container 'seqlm/dea'
     cpus params.threads
 
     input:
@@ -220,37 +220,38 @@ workflow sample_pipeline {
     main:
         software_versions = getVersions()
         workflow_params = getParams()
-        
+
         newBamIn = sampleChunk.map { meta, newBam, allBam -> [meta, newBam] }
 
         bamIndexResult = bamIndex(newBamIn)
 
         //Quality control of aligned reads
         bamQCRes = bamQC(bamIndexResult, OPTIONAL_FILE) |
-        map { meta, res -> 
+        map { meta, res ->
             samplePath = getSamplePath(meta)
-            return [res, "${samplePath}/qc"] 
+            return [res, "${samplePath}/qc"]
         }
 
         featureCountsRes = featureCounts(newBamIn, params.ex_reference_annotation) |
-        map { meta, newCounts -> 
+        map { meta, newCounts ->
             samplePath = getSamplePath(meta)
             allCounts = file("${params.ex_dir}/${samplePath}/*counts.txt")
-            return [meta, newCounts, allCounts] } | 
-        branch { meta, newCounts, allCounts -> 
+            return [meta, newCounts, allCounts] } |
+        branch { meta, newCounts, allCounts ->
             initial: allCounts.empty
                 samplePath = getSamplePath(meta)
                 return [newCounts, samplePath]
-            merge: true }
+            merge: true
+        }
 
         mergedCountsRes = mergeFeatureCounts(featureCountsRes.merge) |
-        map { meta, mergedCounts -> 
+        map { meta, mergedCounts ->
             samplePath = getSamplePath(meta)
             return [mergedCounts, samplePath] }
 
         featureCountsRes.initial |
         mix(mergedCountsRes) |
-        mix(bamQCRes) | 
+        mix(bamQCRes) |
         output
 
     emit:
@@ -275,6 +276,8 @@ process startSequencing {
         """
 }
 
+
+
 def prepareRun(experiment_dir, run_number, replicate_count) {
     runName = "run_${params.ex_run_number}"
     runDir = file("${params.ex_dir}/${runName}")
@@ -284,7 +287,7 @@ def prepareRun(experiment_dir, run_number, replicate_count) {
     // Add header to metadata file if file is empty
     if (metadataFile.length() == 0) {
         metadataFile.withWriter { w ->
-            w << "run_number\treplicate_number\treplicate_dir\n"
+            w << 'run_number\treplicate_number\treplicate_dir\n'
         }
     }
 
@@ -298,18 +301,6 @@ def prepareRun(experiment_dir, run_number, replicate_count) {
     }
 }
 
-Map getSequencingArguments(runDir) {
-    Map args = [:]
-    args['experiment_id'] = params.ex_name
-    args['run_id'] = params.ex_run_number
-    args['kit'] = params.ex_kit
-    if (!params.ex_special_alignment) {
-        args['reference_genome'] = params.ex_reference_genome
-    }
-    args["basecall_config"] = params.ex_basecall_config
-    return args
-}
-
 // Entrypoint workflow
 WorkflowMain.initialise(workflow, params, log)
 workflow {
@@ -318,6 +309,7 @@ workflow {
     }
 
     // TODO: Implement parameter validation
+    validateExperimentDir(params.ex_dir)
 
     // TODO: Implement sequencing setup checks
 
@@ -346,8 +338,8 @@ workflow {
     // Start differential expression analysis if there is more than one run
     if (params.ex_run_number > 1) {
         quantResults = Channel.watchPath("$runDir/**counts.txt")
-        .until { it.name.startsWith("STOP") }
-        .filter { it.name.endsWith("counts.txt") }
+        .until { it.name.startsWith('STOP') }
+        .filter { it.name.endsWith('counts.txt') }
         .map { file("$params.ex_dir/**counts.txt") }
         // Waits until there are count files for all replicates
         .filter { it.size() == (params.ex_run_number * params.ex_replicate_count) }

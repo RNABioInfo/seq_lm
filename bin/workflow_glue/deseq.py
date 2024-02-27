@@ -5,6 +5,8 @@ from .util import get_named_logger, wf_parser
 import numpy as np
 import pandas as pd
 
+from math import pi
+
 from pathlib import Path
 from sklearn.decomposition import PCA
 from pydeseq2.dds import DeseqDataSet
@@ -17,6 +19,10 @@ from bokeh import model
 from bokeh.transform import factor_cmap
 from bokeh.palettes import Pastel1
 from bokeh.io import save, output_file
+from bokeh.models import ColorBar, LinearColorMapper
+from bokeh.transform import transform
+
+import colorcet as cc
 
 
 def argparser():
@@ -89,6 +95,7 @@ def main(args):
     sample_names: list[str] = []
     count_files: list[str] = []
 
+    # Expects quant files being prepared by featureCounts with merge_feature_counts.py
     for quant_file in quantFiles:
         path = Path(quant_file)
         file_name: str = path.stem
@@ -128,7 +135,7 @@ def main(args):
     counts_df: pd.DataFrame = dfs[0].join(dfs[1:])
 
     counts_df = counts_df.apply(pd.to_numeric, errors="coerce")
-    counts_df = counts_df[counts_df.sum(axis=1) > 10]
+    counts_df = counts_df[counts_df.sum(axis=1) > 20]
     counts_df = counts_df.T
 
     metadata_df.set_index("sample", inplace=True)
@@ -152,7 +159,6 @@ def main(args):
     nonNormPlot = createLibrarySizePlot(
         counts_df, title="Non-normalized library counts", yAxisLabel="Counts"
     )
-
     norm_data: pd.DataFrame = counts_df.div(data_set.obsm["size_factors"], axis=0)  # type: ignore
 
     normPlot = createLibrarySizePlot(
@@ -207,12 +213,14 @@ def main(args):
         comparison_metadata = metadata_df[
             metadata_df["run"].str.contains(f"{run}|{ground_truth}")
         ]
-        filtered_counts_df = counts_df.loc[comparison_metadata.index].T
+        norm_filtered_counts_df = norm_data.loc[comparison_metadata.index].T
 
         # Filter out the genes with padj > 0.05
-        filtered_count_df = filtered_counts_df.loc[stat_res.results_df["padj"] < 0.05]
+        norm_filtered_counts_df = norm_filtered_counts_df.loc[
+            stat_res.results_df["padj"] < 0.05
+        ]
 
-        log2_norm_data = np.log2(filtered_count_df.T + 1)
+        log2_norm_data = np.log2(norm_filtered_counts_df.T + 1)
 
         pca = PCA(n_components=2)
         pca_df = pd.DataFrame(pca.fit_transform(log2_norm_data), columns=["PC1", "PC2"])
@@ -239,6 +247,60 @@ def main(args):
             size=18,
         )
         save(pca_plot)  # type: ignore
+
+        heatmap_df = pd.melt(norm_filtered_counts_df.reset_index(), id_vars=["Geneid"])
+
+        TOOLS = "hover,save,pan,box_zoom,reset,wheel_zoom"
+        gene_ids = norm_filtered_counts_df.index.tolist()
+        sample_ids = norm_filtered_counts_df.columns.tolist()
+        print(heatmap_df)
+        output_file(f"{out_path}/heatmap.html")
+        heatmap_plot = figure(
+            title=f"Differential gene expression {name}",
+            x_axis_label="Sample",
+            y_axis_label="Gene",
+            sizing_mode="stretch_width",
+            x_range=sample_ids,
+            y_range=gene_ids,
+            x_axis_location="above",
+            width=400,
+            height=900,
+            tools=TOOLS,
+            toolbar_location="below",
+        )
+
+        heatmap_plot.grid.grid_line_color = None
+        heatmap_plot.axis.axis_line_color = None
+        heatmap_plot.axis.major_tick_line_color = None
+        heatmap_plot.axis.major_label_text_font_size = "7px"
+        heatmap_plot.axis.major_label_standoff = 0
+        heatmap_plot.xaxis.major_label_orientation = pi / 3
+
+        mapper = LinearColorMapper(
+            palette=cc.b_diverging_bkr_55_10_c35,
+            low=heatmap_df.value.min(),
+            high=heatmap_df.value.max(),
+        )
+
+        fill_color = transform("value", mapper)  # type: ignore
+
+        r = heatmap_plot.rect(
+            x="sample",
+            y="Geneid",
+            width=1,
+            height=1,
+            source=heatmap_df,
+            fill_color=fill_color,
+            line_color=None,
+        )
+
+        color_bar = ColorBar(
+            color_mapper=mapper, location=(0, 0), orientation="vertical"
+        )
+
+        heatmap_plot.add_layout(color_bar, "right")
+
+        save(heatmap_plot)  # type: ignore
 
         deseq_path = f"{out_path}/deseq2_results_{run}_vs_{ground_truth}.tsv"
 

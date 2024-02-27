@@ -17,47 +17,22 @@
         "ex_name": {
           "type": "string",
           "fa_icon": "fas fa-bacteria",
-          "description": "Name of the experiment."
+          "description": "Name of the experiment.",
+          "default": "seqLM"
         },
         "ex_dir": {
           "type": "string",
           "format": "path",
           "description": "BAM file(s) to use in the analysis.",
-          "help_text": "This accepts one of three cases: (i) the path to a single BAM file; (ii) the path to a top-level directory containing BAM files; (iii) the path to a directory containing one level of sub-directories which in turn contain BAM files. In the first and second case, a sample name can be supplied with `--sample`. In the last case, the data is assumed to be multiplexed with the names of the sub-directories as barcodes. In this case, a sample sheet can be provided with `--sample_sheet`."
+          "help_text": "This accepts one of three cases: (i) the path to a single BAM file; (ii) the path to a top-level directory containing BAM files; (iii) the path to a directory containing one level of sub-directories which in turn contain BAM files. In the first and second case, a sample name can be supplied with `--sample`. In the last case, the data is assumed to be multiplexed with the names of the sub-directories as barcodes. In this case, a sample sheet can be provided with `--sample_sheet`.",
+          "default": "output"
         },
         "ongoing": {
           "type": "boolean",
-          "default": false,
           "fa_icon": "fas fa-eye"
         }
       },
       "required": []
-    },
-    "samples": {
-      "title": "Sample Options",
-      "type": "object",
-      "fa_icon": "fas fa-vials",
-      "description": "Parameters that relate to samples such as sample sheets and sample names.",
-      "properties": {
-        "sample": {
-          "type": "string",
-          "description": "A single sample name for non-multiplexed data. Permissible if passing a single .fastq(.gz) file or directory of .fastq(.gz) files."
-        }
-      }
-    },
-    "output": {
-      "title": "Output Options",
-      "type": "object",
-      "fa_icon": "fas fa-arrow-left",
-      "description": "Parameters for saving and naming workflow outputs.",
-      "properties": {
-        "out_dir": {
-          "type": "string",
-          "default": "output",
-          "format": "directory-path",
-          "description": "Directory for output of all workflow results."
-        }
-      }
     },
     "misc": {
       "title": "Miscellaneous Options",
@@ -89,19 +64,10 @@
       "$ref": "#/definitions/input"
     },
     {
-      "$ref": "#/definitions/samples"
-    },
-    {
-      "$ref": "#/definitions/output"
-    },
-    {
       "$ref": "#/definitions/misc"
     }
   ],
   "properties": {
-    "new_param_1": {
-      "type": "string"
-    },
     "process_label": {
       "type": "string",
       "description": "The main process label for template processes to use by default",
@@ -126,16 +92,47 @@
     "show_hidden_params": {
       "type": "boolean"
     },
-    "config_file": {
+    "threads": {
+      "type": "integer",
+      "default": 8
+    },
+    "watch_path": {
+      "type": "boolean",
+      "default": true
+    },
+    "ex_run_number": {
+      "type": "integer",
+      "default": 1
+    },
+    "ex_replicate_count": {
+      "type": "integer",
+      "default": 2
+    },
+    "ex_basecall_config": {
       "type": "string"
     },
-    "run_number": {
-      "type": "integer",
-      "default": 1
+    "ex_kit": {
+      "type": "string"
     },
-    "replicate_number": {
-      "type": "integer",
-      "default": 1
+    "ex_reference_genome": {
+      "type": "string"
+    },
+    "ex_reference_annotation": {
+      "type": "string"
+    },
+    "ex_mk_cert": {
+      "type": "string"
+    },
+    "ex_mk_key": {
+      "type": "string"
+    },
+    "ex_special_alignment": {
+      "type": "boolean",
+      "default": true
+    },
+    "schema_ignore_params": {
+      "type": "string",
+      "default": "show_hidden_params,validate_params,monochrome_logs,aws_queue,aws_image_prefix,wf,watch_path"
     }
   },
   "docs": {
