@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Perform differential expression analysis using DESeq2."""
 import os
-from .util import get_named_logger, wf_parser
+from argparse import ArgumentParser
 import numpy as np
 import pandas as pd
 
@@ -13,89 +13,31 @@ from pydeseq2.dds import DeseqDataSet
 from pydeseq2.ds import DeseqStats
 from pydeseq2.default_inference import DefaultInference
 
-from bokeh.models import ColumnDataSource, Whisker
-from bokeh.plotting import figure, row, gridplot
+from bokeh.plotting import figure, row
 from bokeh import model
 from bokeh.transform import factor_cmap
 from bokeh.palettes import Pastel1
 from bokeh.io import save, output_file
-from bokeh.models import ColorBar, LinearColorMapper
-from bokeh.transform import transform
 
-import colorcet as cc
+from .plots.library_size_plot import createLibrarySizePlot
+from .plots.de_heatmap_plot import create_de_heatmap_plot
+
+__version__ = "0.0.1"
+_package_name = "deseq_analysis"
 
 
 def argparser():
     """Argument parser for entrypoint."""
-    parser = wf_parser("Differential expression analysis.")
+    parser = ArgumentParser("Differential expression analysis.")
     parser.add_argument("-q", "--quant_files", type=str, nargs="+", default=[])
     parser.add_argument("-t", "--threads", type=int, default=1)
 
     return parser
 
 
-def createLibrarySizePlot(
-    counts_df: pd.DataFrame, title: str, yAxisLabel: str
-) -> model.Model:
-    df = counts_df.T.melt(var_name="columns")
-    df = df[["columns", "value"]].rename(columns={"columns": "kind"})
+def main():
+    args = argparser().parse_args()
 
-    kinds = df.kind.unique()
-
-    # compute quantiles
-    qs = df.groupby("kind").value.quantile([0.25, 0.5, 0.75])
-    qs = qs.unstack().reset_index()
-    qs.columns = ["kind", "q1", "q2", "q3"]
-    df = pd.merge(df, qs, on="kind", how="left")
-
-    # compute IQR outlier bounds
-    iqr = df.q3 - df.q1
-    df["upper"] = df.q3 + 1.5 * iqr
-    df["lower"] = df.q1 - 1.5 * iqr
-
-    source = ColumnDataSource(df)
-
-    p = figure(
-        x_range=kinds,
-        toolbar_location="right",
-        title=title,
-        background_fill_color="#eaefef",
-        y_axis_label=yAxisLabel,
-        x_axis_label="Sample [Run_Replicate]",
-    )
-
-    # outlier range
-    whisker = Whisker(base="kind", upper="upper", lower="lower", source=source)
-    whisker.upper_head.size = whisker.lower_head.size = 20
-    p.add_layout(whisker)
-
-    # quantile boxes
-    cmap = factor_cmap("kind", Pastel1[len(kinds)], kinds)  # type: ignore
-    p.vbar("kind", 0.7, "q2", "q3", source=source, color=cmap, line_color="black")
-    p.vbar("kind", 0.7, "q1", "q2", source=source, color=cmap, line_color="black")
-
-    # outliers
-    outliers = df[~df.value.between(df.lower, df.upper)]
-    p.scatter("kind", "value", source=outliers, size=6, color="black", alpha=0.3)
-
-    p.xgrid.grid_line_color = None
-    p.axis.major_label_text_font_size = "14px"
-    p.axis.axis_label_text_font_size = "12px"
-
-    return p
-
-
-def z_score(df) -> pd.DataFrame:
-    # copy the dataframe
-    df_std = df.copy()
-    # apply the z-score method
-    for column in df_std.columns:
-        df_std[column] = (df_std[column] - df_std[column].mean()) / df_std[column].std()
-
-    return df_std
-
-
-def main(args):
     quantFiles: list[str] = args.quant_files
     quantFiles.sort()
     threads: int = args.threads
@@ -258,109 +200,9 @@ def main(args):
         )
         save(pca_plot)  # type: ignore
 
-        heatmap_df = z_score(norm_filtered_counts_df)
-        column_names: list[str] = []
-
-        for col in heatmap_df.columns:
-            elements = col.split("_")
-            name = f"run_{elements[0]}_replicate_{elements[1]}"
-            column_names.append(name)
-
-        heatmap_df.columns = column_names
-        gene_ids = heatmap_df.index.tolist()
-        sample_ids = heatmap_df.columns.tolist()
-        heatmap_df = pd.melt(heatmap_df.reset_index(), id_vars=["Geneid"])
-
         output_file(f"{out_path}/heatmap.html")
-
-        TOOLS = "hover,save,pan,box_zoom,reset,wheel_zoom"
-        heatmap_plot = figure(
-            title=f"Differential gene expression {name}",
-            y_axis_label="Gene ID",
-            sizing_mode="stretch_width",
-            x_range=sample_ids,
-            y_range=gene_ids,
-            x_axis_location="above",
-            width=400,
-            min_border_bottom=5,
-        )
-
-        heatmap_plot.grid.grid_line_color = None
-        heatmap_plot.axis.axis_line_color = None
-        heatmap_plot.axis.major_tick_line_color = None
-        heatmap_plot.axis.major_label_text_font_size = "7px"
-        heatmap_plot.axis.major_label_standoff = 0
-        heatmap_plot.xaxis.visible = False
-
-        mapper = LinearColorMapper(
-            palette=cc.b_diverging_bwr_20_95_c54,
-            low=heatmap_df.value.min(),
-            high=heatmap_df.value.max(),
-        )
-
-        colors = ["#1f77b4", "#1f77b4", "#2ca02c", "#2ca02c"]
-
-        # Create a data source with your samples and their types
-        source = ColumnDataSource(data=dict(samples=sample_ids))
-
-        # Create a new figure for the annotation bar
-        annotation_bar = figure(
-            x_axis_label="Samples",
-            y_axis_label="Run",
-            y_axis_location="left",
-            x_range=heatmap_plot.x_range,
-            y_range=(0, 1),
-            height=30,
-        )
-
-        # Add rectangles to the figure, colored based on the sample type
-        annotation_bar.rect(
-            x="samples",
-            y=0.5,
-            width=1,
-            height=30,
-            source=source,
-            fill_color=factor_cmap("samples", palette=colors, factors=sample_ids),
-            border_radius=1,
-        )
-
-        annotation_bar.xaxis.major_tick_line_color = None
-        annotation_bar.xaxis.minor_tick_line_color = None
-        annotation_bar.yaxis.major_tick_line_color = None
-        annotation_bar.yaxis.minor_tick_line_color = None
-
-        annotation_bar.yaxis.visible = True
-        annotation_bar.yaxis.major_label_text_font_size = "0px"
-        annotation_bar.yaxis.major_label_text_alpha = 0.0
-        annotation_bar.yaxis.axis_label_orientation = "horizontal"
-
-        fill_color = transform("value", mapper)  # type: ignore
-
-        heatmap_plot.rect(height=10)
-
-        heatmap_plot.rect(
-            x="variable",
-            y="Geneid",
-            width=1,
-            height=1,
-            source=heatmap_df,
-            fill_color=fill_color,
-            line_color=None,
-        )
-
-        color_bar = ColorBar(
-            color_mapper=mapper,
-            location=(0, 0),
-            orientation="vertical",
-            title="z-score",
-        )
-
-        heatmap_plot.add_layout(color_bar, "right")
-
-        p = gridplot(
-            [[heatmap_plot], [annotation_bar]],  # type: ignore
-            merge_tools=True,
-            toolbar_location="right",
+        p = create_de_heatmap_plot(
+            f"Differential gene expression {name}", norm_filtered_counts_df
         )
         save(p)  # type: ignore
 
@@ -370,7 +212,3 @@ def main(args):
             stat_res.results_df.to_csv(
                 f, sep="\t", index=True, header=True, float_format="%.10f"
             )
-
-
-if __name__ == "__main__":
-    main(argparser().parse_args())

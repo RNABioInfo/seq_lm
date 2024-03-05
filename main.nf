@@ -209,7 +209,7 @@ process differentiaExpression {
 
     script:
         """
-        workflow-glue deseq -q ${quantSF} -t "${task.cpus}"
+        deseq-analysis -q ${quantSF} -t "${task.cpus}"
         """
 }
 
