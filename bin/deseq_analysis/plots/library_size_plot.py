@@ -8,7 +8,7 @@ from bokeh.palettes import Pastel1
 import pandas as pd
 
 
-def createLibrarySizePlot(
+def create_library_size_plot(
     counts_df: pd.DataFrame, title: str, yAxisLabel: str
 ) -> model.Model:
     df = counts_df.T.melt(var_name="columns")

@@ -35,7 +35,7 @@ def create_de_heatmap_plot(title: str, norm_counts_df: pd.DataFrame) -> model.Mo
     heatmap_plot = figure(
         tools=TOOLS,
         tooltips=hover.tooltips,
-        title=f"Differential gene expression {name}",
+        title=f"Differential gene expression {title}",
         y_axis_label="Gene ID",
         sizing_mode="stretch_width",
         x_range=sample_ids,
