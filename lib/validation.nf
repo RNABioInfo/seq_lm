@@ -1,8 +1,5 @@
-import java.nio.file.DirectoryStream
-import java.nio.file.Files
-
 def validateExperimentDir(String experimentPath, int runNumber) {
-    experiment_dir = new File(experimentPath)
+    def experiment_dir = new File(experimentPath)
     if (!experiment_dir.exists()) {
         experiment_dir.mkdirs()
     } else if (!experiment_dir.isDirectory()) {
@@ -23,9 +20,8 @@ def validateExperimentDir(String experimentPath, int runNumber) {
     }
 }
 
-public boolean isEmpty(Path path) throws IOException {
-    try (DirectoryStream<Path> directory = Files.newDirectoryStream(path)) {
-        return !directory.iterator().hasNext()
+Boolean isEmpty(path) {
+    java.nio.file.Files.newDirectoryStream(path).withCloseable { directory ->
+        !directory.iterator().hasNext()
     }
-    return false
 }

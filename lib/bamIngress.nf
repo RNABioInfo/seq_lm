@@ -1,5 +1,3 @@
-import java.nio.file.NoSuchFileException
-
 /**
  * Take a map of input arguments, find valid inputs, and return a channel
  * with elements of `[metamap, seqs.fastq.gz, path-to-bamstats-stats]`.
@@ -17,9 +15,9 @@ import java.nio.file.NoSuchFileException
  *  the path to the directory with the bam statistics (or `null` if `bamStats`
  *  wasn't run).
  */
-def bamIngress(Map arguments) {
+def bamIngress(arguments: Map) {
     // check arguments
-    Map margs = parse_arguments(arguments)
+    def margs: Map = parse_arguments(arguments)
     // define the channel for holding the inputs [metamap, input_path]. It will be
     // either filled by `watchPath` (only emitting files) or by the data of the three
     // input types (single file or dir with bam or subdirs with bam).
@@ -27,11 +25,9 @@ def bamIngress(Map arguments) {
     // handle `watchPath` case
     if (margs['watch_path']) {
         ch_input = watch_path(margs)
-    } else {
-        error 'Retrospective analysis not yet implemented.'
-    // create a channel with the inputs (single file / dir with bam / subdirs
-    // with bam)
-    // ch_input = get_valid_inputs(margs)
+    }
+    else {
+        error('Retrospective analysis not yet implemented.')
     }
 
     def ch_result
@@ -39,7 +35,8 @@ def bamIngress(Map arguments) {
         // run bamstats regardless of input type
         //ch_result = bamStats(ch_input.map { [it[0], it[1]] })
         ch_result = ch_input.map { meta, bam, allBam -> [meta, bam, allBam] }
-    } else {
+    }
+    else {
         // the bam stats were not requested
         ch_result = ch_input.map { meta, bam, allBam -> [meta, bam, allBam] }
     }
@@ -55,31 +52,26 @@ def bamIngress(Map arguments) {
  * @param margs: map with parsed input arguments
  * @return: Channel of [metamap, path-to-bam]
  */
-def watch_path(Map margs) {
-    log.info "Watching path $margs.input"
+def watch_path(margs: Map) {
+    log.info("Watching path ${margs.input}")
     // we have one case to consider: (i) files being generated in sub-directories.
-    Path input
+    def input: Path
     try {
         input = file(margs.input, checkIfExists: true)
-    } catch (NoSuchFileException e) {
-        error "Input path $margs.input does not exist."
+    }
+    catch (e: NoSuchFileException) {
+        error("Input path ${margs.input} does not exist.")
     }
 
     if (input.isFile()) {
-        error "Input ($input) must be a directory when using `watch_path`."
+        error("Input (${input}) must be a directory when using `watch_path`.")
     }
     // get existing BAM files first (look for relevant files in the top-level dir and
     // all sub-dirs)
-    def ch_existing_input = Channel.fromPath(input)
-    | concat(Channel.fromPath("$input/*", type: 'dir'))
-    | map { get_bam_files_in_dir(it) }
-    | flatten
-    | filter { it.name.endsWith('.bam') }
+    def ch_existing_input = Channel.fromPath(input) | concat(Channel.fromPath("${input}/*", type: 'dir')) | map { get_bam_files_in_dir(it) } | flatten | filter { it.name.endsWith('.bam') }
 
     // now get channel with files found by `watchPath`
-    def ch_watched = Channel.watchPath("$input/**").until { it.name.startsWith('STOP') }
-    // only keep BAM files
-    | filter { it.name.endsWith('.bam') }
+    def ch_watched = Channel.watchPath("${input}/**").until { it.name.startsWith('STOP') } | filter { it.name.endsWith('.bam') }
     // merge the channels
     // ch_watched = ch_existing_input | concat(ch_watched)
     // check if input is as expected; start by throwing an error when finding files in
@@ -100,8 +92,7 @@ def watch_path(Map margs) {
     //     prev_input_type = input_type
     // }
 
-    ch_watched = ch_watched
-    | map {
+    ch_watched = ch_watched | map {
         // This file could be in the top-level dir or a sub-dir. In the first case
         // check if a sample name was provided. In the second case, the alias is
         // always the name of the sub-dir.
@@ -114,25 +105,28 @@ def watch_path(Map margs) {
 process bamStats {
     label 'preproc'
     cpus 3
-    input:
-        tuple val(meta), path(input)
-    output:
-        tuple val(meta), path(input), path('bam_stats')
-    script:
-        String bam_stats_outdir = 'bam_stats'
-        String out = "$bam_stats_outdir/bam_stats.tsv.gz"
 
-        """
+    input:
+    tuple val(meta), path(input)
+
+    output:
+    tuple val(meta), path(input), path('bam_stats')
+
+    script:
+    def bam_stats_outdir: String = 'bam_stats'
+    def out: String = "${bam_stats_outdir}/bam_stats.tsv.gz"
+
+    """
         bamstats --help
-        samtools index -@ $task.cpus $input
-        mkdir $bam_stats_outdir
+        samtools index -@ ${task.cpus} ${input}
+        mkdir ${bam_stats_outdir}
         bamstats \
-            --histograms=$bam_stats_outdir/histograms \
+            --histograms=${bam_stats_outdir}/histograms \
             -s ${meta['alias']} \
-            -f $bam_stats_outdir/flag_stats.tsv \
-            -t $task.cpus \
-            $input \
-            | bgzip -@ $task.cpus > $out
+            -f ${bam_stats_outdir}/flag_stats.tsv \
+            -t ${task.cpus} \
+            ${input} \
+            | bgzip -@ ${task.cpus} > ${out}
         """
 }
 
@@ -142,13 +136,8 @@ process bamStats {
  * @param arguments: map with input arguments (see `bam_ingress` for details)
  * @return: map of parsed arguments
  */
-Map parse_arguments(Map arguments) {
-    ArgumentParser parser = new ArgumentParser(
-        args:['input'],
-        kwargs:['runName': null,
-                'bam_stats': false,
-                'watch_path': true],
-        name: 'bam_ingress')
+def parse_arguments(arguments: Map) -> Map {
+    def parser: ArgumentParser = new ArgumentParser(args: ['input'], kwargs: ['runName': null, 'bam_stats': false, 'watch_path': true], name: 'bam_ingress')
     return parser.parse_args(arguments)
 }
 
@@ -227,14 +216,10 @@ Map parse_arguments(Map arguments) {
  * @param kwargs: map with input parameters; must contain `alias`
  * @return: map(alias, barcode, type, ...)
  */
-Map create_metamap(Map arguments) {
-    ArgumentParser parser = new ArgumentParser(
-        args: ['runName'],
-        kwargs: [
-            'replicateName': null,
-        ],
-        name: 'create_metamap',
-    )
+def create_metamap(arguments: Map) -> Map {
+    def parser: ArgumentParser = new ArgumentParser(args: ['runName'], kwargs: [
+        'replicateName': null
+    ], name: 'create_metamap')
     return parser.parse_known_args(arguments)
 }
 
@@ -244,6 +229,6 @@ Map create_metamap(Map arguments) {
  * @param dir: path to the target directory
  * @return: list of found bam files
  */
-ArrayList get_bam_files_in_dir(Path dir) {
+def get_bam_files_in_dir(dir: Path) -> ArrayList {
     return file(dir / '*.bam', type: 'file')
 }

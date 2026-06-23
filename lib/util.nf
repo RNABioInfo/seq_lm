@@ -1,19 +1,18 @@
-OPTIONAL_FILE = file("$projectDir/data/OPTIONAL_FILE")
+nextflow.enable.types = true
 
-def getSamplePath(Map meta) {
+String getSamplePath(Map meta) {
     return "${meta['runName']}/${meta['replicateName']}"
 }
 
-def getSeqSummaryFile(Path bamFile) {
-    summaryFile = file("${bamFile.parent}/seq_summary.txt")
+Path getSeqSummaryFile(Path bamFile) {
+    Path summaryFile = file("${bamFile.parent}/seq_summary.txt")
     if (summaryFile.exists()) {
         return summaryFile
-    } else {
-        return OPTIONAL_FILE
     }
+    return file("$projectDir/data/OPTIONAL_FILE")
 }
 
-Map getSequencingArguments(runDir) {
+Map getSequencingArguments(Path _runDir) {
     Map args = [:]
     args['experiment_id'] = params.ex_name
     args['run_id'] = params.ex_run_number

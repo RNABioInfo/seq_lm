@@ -1,70 +1,14 @@
 #!/usr/bin/env nextflow
 
-// Developer notes
-//
-// This template workflow provides a basic structure to copy in order
-// to create a new workflow. Current recommended practices are:
-//     i) create a simple command-line interface.
-//    ii) include an abstract workflow scope named "real_time_pipeline" to be used
-//        in a module fashion
-//   iii) a second concrete, but anonymous, workflow scope to be used
-//        as an entry point when using this workflow in isolation.
-
-import groovy.json.JsonBuilder
-
-
-nextflow.enable.dsl = 2
+nextflow.enable.types = true
 
 include { bamIngress } from './lib/bamIngress.nf'
 include { getSamplePath; getSeqSummaryFile; getSequencingArguments } from './lib/util.nf'
 include { validateExperimentDir } from './lib/validation.nf'
+include { getVersions; getParams; output } from './modules/generic_helpers.nf'
 
-OPTIONAL_FILE = file("$projectDir/data/OPTIONAL_FILE")
-
-process getVersions {
-    label 'preproc'
-    cpus 1
-    output:
-        path 'versions.txt'
-    script:
-    """
-    python -c "import pysam; print(f'pysam,{pysam.__version__}')" >> versions.txt
-    bamstats --version | sed 's/^/bamstats,/' >> versions.txt
-    """
-}
-
-process getParams {
-    label 'seqLM'
-    cpus 1
-    output:
-        path 'params.json'
-    script:
-        def paramsJSON = new JsonBuilder(params).toPrettyString()
-    """
-    # Output nextflow params object to JSON
-    echo '$paramsJSON' > params.json
-    """
-}
-
-// See https://github.com/nextflow-io/nextflow/issues/1636. This is the only way to
-// publish files from a workflow whilst decoupling the publish from the process steps.
-// The process takes a tuple containing the filename and the name of a sub-directory to
-// put the file into. If the latter is `null`, puts it into the top-level directory.
-process output {
-    // publish inputs to output directory
-    debug true
-    label 'seqLM'
-    publishDir(
-        params.ex_dir,
-        mode: 'copy',
-        saveAs: { dirname ? "$dirname/$fname" : fname }
-    )
-    input:
-        tuple path(fname), val(dirname)
-    output:
-        path fname
-    '''
-    '''
+Path optionalFile() {
+    return file("$projectDir/data/OPTIONAL_FILE")
 }
 
 process writeConfig {
@@ -74,7 +18,7 @@ process writeConfig {
         log.info 'Writing config file...'
 
         // Writing experiment config file should only happen at the first run of the experiment
-        configOut = new File("${params.ex_dir}/experiment.config")
+        def configOut = new File("${params.ex_dir}/experiment.config")
 
         configOut.withWriter { w ->
             w << 'params {\n'
@@ -83,7 +27,7 @@ process writeConfig {
                     if (k == 'ex_run_number') {
                         v = v + 1
                     }
-                    line = ''
+                    def line = ''
                     if (v instanceof String) {
                         line = "\t${k} = \"${v}\"\n"
                     } else {
@@ -99,25 +43,28 @@ process writeConfig {
 process makeReport {
     label 'seqLM'
     input:
-        val metadata
-        path per_read_stats
-        path 'versions/*'
-        path 'params.json'
+        metadata: Map
+        per_read_stats: Path
+        versions: Path
+        params_json: Path
+    stage:
+        stageAs versions, 'versions/*'
+        stageAs params_json, 'params.json'
     output:
-        path 'wf-template-*.html'
+        file('wf-template-*.html')
     script:
         String report_name = 'wf-template-report.html'
-        String metadata = new JsonBuilder(metadata).toPrettyString()
+        String metadataJSON = new groovy.json.JsonBuilder(metadata).toPrettyString()
         String stats_args = \
-            (per_read_stats.name == OPTIONAL_FILE.name) ? '' : "--stats $per_read_stats"
-    """
-    echo '${metadata}' > metadata.json
-    workflow-glue report $report_name \
-        --versions versions \
-        $stats_args \
-        --params params.json \
-        --metadata metadata.json
-    """
+            (per_read_stats.name == optionalFile().name) ? '' : "--stats $per_read_stats"
+        """
+        echo '${metadataJSON}' > metadata.json
+        workflow-glue report $report_name \
+            --versions versions \
+            $stats_args \
+            --params params.json \
+            --metadata metadata.json
+        """
 }
 
 process featureCounts {
@@ -125,14 +72,14 @@ process featureCounts {
     container 'pegi3s/feature-counts'
     cpus params.threads
     input:
-        tuple val(meta), path(bam)
-        path ref_annotation
+        tuple(meta: Map, bam: Path)
+        ref_annotation: Path
     output:
-        tuple val(meta), path(countsFile)
+        tuple(meta, countsFile: Path)
     script:
-        runName = meta['runName']
-        replicateName = meta['replicateName']
-        countsFile = "${runName}_${replicateName}_counts.txt"
+        def runName = meta['runName']
+        def replicateName = meta['replicateName']
+        def countsFile = "${runName}_${replicateName}_counts.txt"
         """
         featureCounts -a $ref_annotation --fracOverlap 0.9 -M -s 1 -T $task.cpus -L --largestOverlap -o $countsFile $bam
         echo "\$(tail -n +2 $countsFile)" > $countsFile
@@ -145,13 +92,16 @@ process mergeFeatureCounts {
     container 'seqlm_dea'
     cpus 1
     input:
-        tuple val(meta), path(newCounts, name: 'new_counts.txt'), path(allCounts, name: 'all_counts.txt')
+        tuple(meta: Map, newCounts: Path, allCounts: Path)
+    stage:
+        stageAs newCounts, 'new_counts.txt'
+        stageAs allCounts, 'all_counts.txt'
     output:
-        tuple val(meta), path(mergedCountsFile)
+        tuple(meta, file("${meta['runName']}_${meta['replicateName']}_counts.txt"))
     script:
-        runName = meta['runName']
-        replicateName = meta['replicateName']
-        mergedCountsFile = "${runName}_${replicateName}_counts.txt"
+        def runName = meta['runName']
+        def replicateName = meta['replicateName']
+        def mergedCountsFile = "${runName}_${replicateName}_counts.txt"
         """
         workflow-glue merge_feature_counts -n $newCounts -a $allCounts -o $mergedCountsFile
         """
@@ -163,16 +113,16 @@ process bamQC {
     container 'seqlm_quality'
     cpus 1
     input:
-        tuple val(meta), path(bam), path(bam_index)
-        path seq_summary
+        tuple(meta: Map, bam: Path, bam_index: Path)
+        seq_summary: Path
 
     output:
-        tuple val(meta), path(qcHTML), optional: true
+        tuple(meta, file("run_${params.ex_run_number}_qc.html", optional: true))
 
     script:
-        if (seq_summary.name != OPTIONAL_FILE.name) {
-            qcHTML = "run_${params.ex_run_number}_qc.html"
-            qcTitle = "Run ${params.ex_run_number} QC Report"
+        if (seq_summary.name != optionalFile().name) {
+            def qcHTML = "run_${params.ex_run_number}_qc.html"
+            def qcTitle = "Run ${params.ex_run_number} QC Report"
             """
             pycoQC --summary_file ${seq_summary} --bam_file ${bam} --report_title "${qcTitle}" --html_outfile ${qcHTML}
             """
@@ -189,11 +139,10 @@ process bamIndex {
     errorStrategy 'ignore'
     cpus 1
     input:
-        tuple val(meta), path(bam)
+        tuple(meta: Map, bam: Path)
     output:
-        tuple val(meta), path(bam), path(bam_index)
+        tuple(meta: Map, file(bam), file("${bam}.bai"))
     script:
-        bam_index = "${bam}.bai"
         """
         samtools sort -@ $task.cpus -o ${bam} ${bam}
         samtools index ${bam}
@@ -205,7 +154,7 @@ process differentiaExpression {
     cpus params.threads
 
     input:
-        path quantSF
+        quantSF: Path
 
     script:
         """
@@ -216,46 +165,41 @@ process differentiaExpression {
 // workflow module
 workflow sample_pipeline {
     take:
-        sampleChunk
+        sampleChunk: Channel
     main:
-        software_versions = getVersions()
+        getVersions()
         workflow_params = getParams()
 
-        newBamIn = sampleChunk.map { meta, newBam, allBam -> [meta, newBam] }
+        newBamIn = sampleChunk.map { meta, newBam, _allBam -> [meta, newBam] }
 
         bamIndexResult = bamIndex(newBamIn)
 
         //Quality control of aligned reads
-        bamQCRes = bamQC(bamIndexResult, OPTIONAL_FILE) |
-        map { meta, res ->
-            samplePath = getSamplePath(meta)
+        bamQCRes = bamQC(bamIndexResult, optionalFile()).map { meta, res ->
+            def samplePath = getSamplePath(meta)
             return [res, "${samplePath}/qc"]
         }
 
-        featureCountsRes = featureCounts(newBamIn, params.ex_reference_annotation) |
-        map { meta, newCounts ->
-            samplePath = getSamplePath(meta)
-            allCounts = file("${params.ex_dir}/${samplePath}/*counts.txt")
-            return [meta, newCounts, allCounts] } |
-        branch { meta, newCounts, allCounts ->
+        featureCountsRes = featureCounts(newBamIn, params.ex_reference_annotation).map { meta, newCounts ->
+            def samplePath = getSamplePath(meta)
+            def allCounts = file("${params.ex_dir}/${samplePath}/*counts.txt")
+            return [meta, newCounts, allCounts]
+        }.branch { meta, newCounts, allCounts ->
             initial: allCounts.empty
-                samplePath = getSamplePath(meta)
+                def samplePath = getSamplePath(meta)
                 return [newCounts, samplePath]
             merge: true
         }
 
-        mergedCountsRes = mergeFeatureCounts(featureCountsRes.merge) |
-        map { meta, mergedCounts ->
-            samplePath = getSamplePath(meta)
-            return [mergedCounts, samplePath] }
+        mergedCountsRes = mergeFeatureCounts(featureCountsRes.merge).map { meta, mergedCounts ->
+            def samplePath = getSamplePath(meta)
+            return [mergedCounts, samplePath]
+        }
 
-        featureCountsRes.initial |
-        mix(mergedCountsRes) |
-        mix(bamQCRes) |
-        output
+        output(featureCountsRes.initial.mix(mergedCountsRes).mix(bamQCRes))
 
     emit:
-        workflow_params
+        workflow_params as Value
 }
 
 process startSequencing {
@@ -264,12 +208,12 @@ process startSequencing {
     label 'seqLM'
     cpus 1
     input:
-        val argumentMap
-        path keyFile
-        path certificateFile
-        path metadataFile
+        argumentMap: Map
+        keyFile: Path
+        certificateFile: Path
+        metadataFile: Path
     script:
-        argumentString = argumentMap.collect { k, v -> "--${k} '${v}'" }.join(' ')
+        def argumentString = argumentMap.collect { k, v -> "--${k} '${v}'" }.join(' ')
         println argumentString
         """
         seq-run-manager ${argumentString} --key_path ${keyFile} --certificate_path ${certificateFile} --metadata ${metadataFile}
@@ -278,11 +222,11 @@ process startSequencing {
 
 
 
-def prepareRun(experiment_dir, run_number, replicate_count) {
-    runName = "run_${params.ex_run_number}"
-    runDir = file("${params.ex_dir}/${runName}")
+Map prepareRun(String experiment_dir, Integer _run_number, Integer replicate_count) {
+    def runName = "run_${params.ex_run_number}"
+    def runDir = file("${params.ex_dir}/${runName}")
 
-    metadataFile = new File("${experiment_dir}/metadata.tsv")
+    def metadataFile = new File("${experiment_dir}/metadata.tsv")
 
     // Add header to metadata file if file is empty
     if (metadataFile.length() == 0) {
@@ -293,23 +237,27 @@ def prepareRun(experiment_dir, run_number, replicate_count) {
 
     // Create run directories for each replicate
     (1..replicate_count).each { count ->
-        replicateName = "replicate_${count}"
-        replicateDir = file("${runDir}/${replicateName}")
+        def replicateName = "replicate_${count}"
+        def replicateDir = file("${runDir}/${replicateName}")
         replicateDir.mkdirs()
 
         metadataFile << "${params.ex_run_number}\t${count}\t${replicateDir}\n"
     }
+
+    return [runName: runName, runDir: runDir]
 }
 
 // Entrypoint workflow
-WorkflowMain.initialise(workflow, params, log)
 workflow {
+    main:
+    WorkflowMain.initialise(workflow, params, log)
+
     if (params.disable_ping == false) {
         Pinguscript.ping_post(workflow, 'start', 'none', params.ex_dir, params)
     }
 
     // TODO: Implement parameter validation
-    validateExperimentDir(params.ex_dir)
+    validateExperimentDir(params.ex_dir, params.ex_run_number)
 
     // TODO: Implement sequencing setup checks
 
@@ -317,12 +265,14 @@ workflow {
     writeConfig()
 
     // Setup the run
-    prepareRun(params.ex_dir, params.ex_run_number, params.ex_replicate_count)
+    runInfo = prepareRun(params.ex_dir, params.ex_run_number, params.ex_replicate_count)
+    runName = runInfo.runName
+    runDir = runInfo.runDir
 
     // Start the sequencing run
-    metadataFile = Channel.fromPath("${params.ex_dir}/metadata.tsv")
-    keyFile = Channel.fromPath(params.ex_mk_key)
-    certificateFile = Channel.fromPath(params.ex_mk_cert)
+    metadataFile = channel.fromPath("${params.ex_dir}/metadata.tsv")
+    keyFile = channel.fromPath(params.ex_mk_key)
+    certificateFile = channel.fromPath(params.ex_mk_cert)
     sequencingArgs = getSequencingArguments(runDir)
     startSequencing(sequencingArgs, keyFile, certificateFile, metadataFile)
 
@@ -337,23 +287,23 @@ workflow {
 
     // Start differential expression analysis if there is more than one run
     if (params.ex_run_number > 1) {
-        quantResults = Channel.watchPath("$runDir/**counts.txt")
-        .until { it.name.startsWith('STOP') }
-        .filter { it.name.endsWith('counts.txt') }
-        .map { file("$params.ex_dir/**counts.txt") }
+        quantResults = channel.watchPath("$runDir/**counts.txt")
+        .until { result -> result.name.startsWith('STOP') }
+        .filter { result -> result.name.endsWith('counts.txt') }
+        .map { _result -> file("$params.ex_dir/**counts.txt") }
         // Waits until there are count files for all replicates
-        .filter { it.size() == (params.ex_run_number * params.ex_replicate_count) }
+        .filter { result -> result.size() == (params.ex_run_number * params.ex_replicate_count) }
 
         differentiaExpression(quantResults)
     }
-}
 
-if (params.disable_ping == false) {
-    workflow.onComplete {
+    onComplete:
+    if (params.disable_ping == false) {
         Pinguscript.ping_post(workflow, 'end', 'none', params.ex_dir, params)
     }
 
-    workflow.onError {
+    onError:
+    if (params.disable_ping == false) {
         Pinguscript.ping_post(workflow, 'error', "$workflow.errorMessage", params.ex_dir, params)
     }
 }
