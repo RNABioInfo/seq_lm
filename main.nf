@@ -2,13 +2,154 @@
 
 nextflow.enable.types = true
 
-include { bamIngress } from './lib/bamIngress.nf'
+include { bam_ingress } from './lib/bam_ingress.nf'
+include {
+    ChunkQCResult;
+    IndexedChunkBAMGroup;
+    Sample;
+    SampleChunkBAM;
+    SampleQCReportInputs
+} from './lib/sample.nf'
 include { getSamplePath; getSeqSummaryFile; getSequencingArguments } from './lib/util.nf'
 include { validateExperimentDir } from './lib/validation.nf'
 include { getVersions; getParams; output } from './modules/generic_helpers.nf'
+include { quality_control } from './subworkflows/quality_control.nf'
 
 Path optionalFile() {
     return file("$projectDir/data/OPTIONAL_FILE")
+}
+
+String safeName(String value) {
+    return value.replaceAll(/[^A-Za-z0-9._-]/, '_')
+}
+
+/**
+ * Quote arbitrary text as one POSIX shell argument for process scripts.
+ */
+String shellQuote(String value) {
+    return "'" + value.replace("'", "'\"'\"'") + "'"
+}
+
+String sortedChunkBamName(SampleChunkBAM input_bam) {
+    return "${safeName(input_bam.sample.id)}_${input_bam.batch_index}_${input_bam.bam_index_in_chunk}.sorted.bam"
+}
+
+String mergedChunkBamName(Integer batch_index, Sample sample) {
+    return "${safeName(sample.id)}_${batch_index}.merged.bam"
+}
+
+/**
+ * Stable key for accumulating live QC state by biological sample.
+ */
+String sampleKey(Sample sample) {
+    return sample.id
+}
+
+/**
+ * Published directory for one chunk-level QC metric group.
+ */
+String sampleQCChunkDir(ChunkQCResult result, String metric_name) {
+    return "${result.sample.group}/${result.sample.alias}/qc/chunk_${result.batch_index}/${metric_name}"
+}
+
+/**
+ * Published directory for placeholder report-input manifests for one sample.
+ */
+String sampleQCReportInputDir(Sample sample) {
+    return "${sample.group}/${sample.alias}/qc/report_inputs"
+}
+
+/**
+ * Manifest filename for one placeholder report-input update.
+ */
+String qcReportInputManifestName(SampleQCReportInputs report_inputs) {
+    return "${safeName(report_inputs.sample.id)}_chunk_${report_inputs.latest_batch_index}_qc_report_inputs.tsv"
+}
+
+/**
+ * Append one chunk QC result to the mutable per-sample live state and emit the
+ * future report-generator input shape for that sample.
+ */
+SampleQCReportInputs accumulateSampleQCResult(Map<String, List<ChunkQCResult>> state, ChunkQCResult result) {
+    String key = sampleKey(result.sample)
+    List<ChunkQCResult> previous_chunks = state.containsKey(key) ? state[key] : []
+    List<ChunkQCResult> sorted_chunks = (previous_chunks + [result])
+        .toSorted { ChunkQCResult left, ChunkQCResult right ->
+            left.batch_index <=> right.batch_index
+        }
+
+    state[key] = sorted_chunks
+
+    return record(
+        latest_batch_index: result.batch_index,
+        sample: result.sample,
+        chunks: sorted_chunks
+    )
+}
+
+/**
+ * Tabular content logged by the placeholder report-input process.
+ */
+String qcReportManifestRows(SampleQCReportInputs report_inputs) {
+    return report_inputs.chunks
+        .collectMany { ChunkQCResult chunk ->
+            [
+                "${report_inputs.sample.id}\t${chunk.batch_index}\tnanoplot\t${chunk.nanoplot_data}",
+                "${report_inputs.sample.id}\t${chunk.batch_index}\tsamtools_flagstat\t${chunk.flagstat}"
+            ]
+        }
+        .join('\n')
+}
+
+/**
+ * TEMPORARY: sanitize table fields for the throwaway live QC report.
+ */
+String temporary_qc_report_field(Object value) {
+    return "${value}".replaceAll(/[\t\r\n]+/, ' ')
+}
+
+/**
+ * TEMPORARY: rows for the throwaway live QC report sample table.
+ */
+String temporary_qc_report_rows(List<SampleQCReportInputs> report_inputs_list) {
+    return report_inputs_list
+        .collect { SampleQCReportInputs report_inputs ->
+            [
+                temporary_qc_report_field(report_inputs.sample.id),
+                temporary_qc_report_field(report_inputs.sample.alias),
+                temporary_qc_report_field(report_inputs.sample.group),
+                temporary_qc_report_field(report_inputs.sample.type),
+                "${report_inputs.chunks.size()}",
+                "${report_inputs.latest_batch_index}"
+            ].join('\t')
+        }
+        .join('\n')
+}
+
+/**
+ * TEMPORARY: accumulate all sample rows for the throwaway live QC report.
+ */
+Map accumulate_temporary_qc_report_state(
+    Map<String, SampleQCReportInputs> state,
+    SampleQCReportInputs report_inputs
+) {
+    state[sampleKey(report_inputs.sample)] = report_inputs
+
+    List<SampleQCReportInputs> report_inputs_list = state
+        .values()
+        .toList()
+        .toSorted { SampleQCReportInputs left, SampleQCReportInputs right ->
+            "${left.sample.group}/${left.sample.alias}/${left.sample.id}" <=>
+                "${right.sample.group}/${right.sample.alias}/${right.sample.id}"
+        }
+    Integer latest_batch_index = report_inputs_list
+        .collect { SampleQCReportInputs input -> input.latest_batch_index }
+        .max()
+
+    return [
+        latest_batch_index: latest_batch_index,
+        rows: temporary_qc_report_rows(report_inputs_list)
+    ]
 }
 
 process writeConfig {
@@ -110,7 +251,7 @@ process mergeFeatureCounts {
 process bamQC {
     debug true
     label 'seqLM'
-    container 'seqlm_quality'
+    container 'seqlm_qualitycontrol'
     cpus 1
     input:
         tuple(meta: Map, bam: Path, bam_index: Path)
@@ -149,6 +290,147 @@ process bamIndex {
         """
 }
 
+process bam_sort_index {
+    label 'seqLM'
+    container 'seqlm/samtools'
+    cpus 4
+
+    input:
+        input_bam: SampleChunkBAM
+
+    output:
+        record(
+            batch_index: input_bam.batch_index,
+            sample: input_bam.sample,
+            bam_index_in_chunk: input_bam.bam_index_in_chunk,
+            bam_count: input_bam.bam_count,
+            bam: file(sortedChunkBamName(input_bam)),
+            bam_index: file("${sortedChunkBamName(input_bam)}.bai")
+        )
+
+    script:
+        String sorted_bam = sortedChunkBamName(input_bam)
+        """
+        samtools sort -o ${sorted_bam} -@ ${task.cpus} ${input_bam.bam}
+        samtools index -@ ${task.cpus} ${sorted_bam}
+        """
+}
+
+process bam_merge_index {
+    label 'seqLM'
+    container 'seqlm/samtools'
+    cpus 4
+
+    input:
+        input_group: IndexedChunkBAMGroup
+
+    stage:
+        stageAs input_group.bams*.bam, 'bam?'
+        stageAs input_group.bams*.bam_index, 'bam?.bai'
+
+    output:
+        record(
+            batch_index: input_group.batch_index,
+            sample: input_group.sample,
+            bam: file(mergedChunkBamName(input_group.batch_index, input_group.sample)),
+            bam_index: file("${mergedChunkBamName(input_group.batch_index, input_group.sample)}.bai")
+        )
+
+    script:
+        String merged_bam = mergedChunkBamName(input_group.batch_index, input_group.sample)
+        String bam_args = input_group.bams*.bam.join(' ')
+        """
+        printf '%s\\n' ${bam_args} > bams.txt
+        samtools merge -o ${merged_bam} -@ ${task.cpus} -b bams.txt
+        samtools index -@ ${task.cpus} ${merged_bam}
+        """
+}
+
+/**
+ * Placeholder for the future QC report generator.
+ *
+ * For now this process only logs and writes the accumulated list of chunk QC
+ * TSVs for one sample whenever a new chunk completes.
+ */
+process qc_report_input_log {
+    debug true
+    label 'seqLM_qc'
+    cpus 1
+
+    input:
+        report_inputs: SampleQCReportInputs
+
+    stage:
+        stageAs report_inputs.chunks*.nanoplot_data, 'qc_inputs/chunk?/nanoplot/NanoPlot-data.tsv.gz'
+        stageAs report_inputs.chunks*.flagstat, 'qc_inputs/chunk?/samtools_flagstat/*'
+
+    output:
+        record(
+            latest_batch_index: report_inputs.latest_batch_index,
+            sample: report_inputs.sample,
+            manifest: file(qcReportInputManifestName(report_inputs))
+        )
+
+    script:
+        String manifest = qcReportInputManifestName(report_inputs)
+        String manifest_rows = qcReportManifestRows(report_inputs)
+        String quoted_manifest_rows = shellQuote(manifest_rows)
+        """
+        printf 'sample_id\\tbatch_index\\tmetric\\tqc_tsv\\n' > ${manifest}
+        printf '%s\\n' ${quoted_manifest_rows} >> ${manifest}
+
+        echo "QC report inputs for sample ${report_inputs.sample.id} through chunk ${report_inputs.latest_batch_index}:"
+        cat ${manifest}
+        """
+}
+
+/**
+ * TEMPORARY: EPI2ME-displayable live QC placeholder report.
+ *
+ * This writes only the current list of samples with QC results and must be
+ * removed when the permanent live QC report is implemented.
+ */
+process temporary_qc_report {
+    debug true
+    label 'seqLM_qc'
+    container 'seqlm_dea'
+    cpus 1
+    maxForks 1
+
+    publishDir(
+        params.ex_dir,
+        mode: 'copy',
+        pattern: 'temporary_qc_report.html',
+        overwrite: true
+    )
+
+    input:
+        temporary_qc_report_inputs: Map
+
+    output:
+        file('temporary_qc_report.html')
+
+    script:
+        String rows = temporary_qc_report_inputs.rows
+        String quoted_rows = shellQuote(rows)
+        String params_json = new groovy.json.JsonBuilder(params).toPrettyString()
+        String quoted_params_json = shellQuote(params_json)
+        """
+        printf 'sample_id\\talias\\tgroup\\ttype\\tchunks_seen\\tlatest_batch_index\\n' > temporary_qc_report_samples.tsv
+        printf '%s\\n' ${quoted_rows} >> temporary_qc_report_samples.tsv
+
+        mkdir versions
+        printf 'temporary_qc_report,temporary\\n' > versions/versions.txt
+        printf '%s\\n' ${quoted_params_json} > params.json
+
+        workflow-glue temporary_qc_report temporary_qc_report.html \
+            --samples temporary_qc_report_samples.tsv \
+            --versions versions \
+            --params params.json \
+            --latest-batch ${temporary_qc_report_inputs.latest_batch_index}
+        """
+}
+
 process differentiaExpression {
     container 'seqlm/dea'
     cpus params.threads
@@ -170,30 +452,30 @@ workflow sample_pipeline {
         getVersions()
         workflow_params = getParams()
 
-        newBamIn = sampleChunk.map { meta, newBam, _allBam -> [meta, newBam] }
+        newBamIn = sampleChunk.map { meta, newBam, _allBam -> tuple(meta, newBam) }
 
         bamIndexResult = bamIndex(newBamIn)
 
         //Quality control of aligned reads
         bamQCRes = bamQC(bamIndexResult, optionalFile()).map { meta, res ->
             def samplePath = getSamplePath(meta)
-            return [res, "${samplePath}/qc"]
+            return tuple(res, "${samplePath}/qc")
         }
 
         featureCountsRes = featureCounts(newBamIn, params.ex_reference_annotation).map { meta, newCounts ->
             def samplePath = getSamplePath(meta)
             def allCounts = file("${params.ex_dir}/${samplePath}/*counts.txt")
-            return [meta, newCounts, allCounts]
+            return tuple(meta, newCounts, allCounts)
         }.branch { meta, newCounts, allCounts ->
             initial: allCounts.empty
                 def samplePath = getSamplePath(meta)
-                return [newCounts, samplePath]
+                return tuple(newCounts, samplePath)
             merge: true
         }
 
         mergedCountsRes = mergeFeatureCounts(featureCountsRes.merge).map { meta, mergedCounts ->
             def samplePath = getSamplePath(meta)
-            return [mergedCounts, samplePath]
+            return tuple(mergedCounts, samplePath)
         }
 
         output(featureCountsRes.initial.mix(mergedCountsRes).mix(bamQCRes))
@@ -201,26 +483,6 @@ workflow sample_pipeline {
     emit:
         workflow_params as Value
 }
-
-process startSequencing {
-    container 'seqlm_seq'
-    debug true
-    label 'seqLM'
-    cpus 1
-    input:
-        argumentMap: Map
-        keyFile: Path
-        certificateFile: Path
-        metadataFile: Path
-    script:
-        def argumentString = argumentMap.collect { k, v -> "--${k} '${v}'" }.join(' ')
-        println argumentString
-        """
-        seq-run-manager ${argumentString} --key_path ${keyFile} --certificate_path ${certificateFile} --metadata ${metadataFile}
-        """
-}
-
-
 
 Map prepareRun(String experiment_dir, Integer _run_number, Integer replicate_count) {
     def runName = "run_${params.ex_run_number}"
@@ -257,53 +519,116 @@ workflow {
     }
 
     // TODO: Implement parameter validation
-    validateExperimentDir(params.ex_dir, params.ex_run_number)
+    // validateExperimentDir(params.ex_dir, params.ex_run_number)
 
     // TODO: Implement sequencing setup checks
 
     // Config is stored in order to fetch parameters in subsequent runs
-    writeConfig()
+    // writeConfig()
 
-    // Setup the run
-    runInfo = prepareRun(params.ex_dir, params.ex_run_number, params.ex_replicate_count)
-    runName = runInfo.runName
-    runDir = runInfo.runDir
+    // // Setup the run
+    // runInfo = prepareRun(params.ex_dir, params.ex_run_number, params.ex_replicate_count)
+    // runDir = runInfo.runDir
 
-    // Start the sequencing run
-    metadataFile = channel.fromPath("${params.ex_dir}/metadata.tsv")
-    keyFile = channel.fromPath(params.ex_mk_key)
-    certificateFile = channel.fromPath(params.ex_mk_cert)
-    sequencingArgs = getSequencingArguments(runDir)
-    startSequencing(sequencingArgs, keyFile, certificateFile, metadataFile)
+    // // Start the sequencing run
+    // metadataFile = channel.fromPath("${params.ex_dir}/metadata.tsv")
+    // keyFile = channel.fromPath(params.ex_mk_key)
+    // certificateFile = channel.fromPath(params.ex_mk_cert)
+    // sequencingArgs = getSequencingArguments(runDir)
+    // startSequencing(sequencingArgs, keyFile, certificateFile, metadataFile)
 
-    // Sample chunk is [map[runName, replicateName], newBam, [allBam]]
-    sampleChunk = bamIngress([
-    'input':runDir,
-    'runName':runName,
-    'bam_stats': params.wf.bam_stats,
-    'watch_path': params.watch_path])
+    // The ingress emits synchronized sample batches. Each non-empty sample chunk
+    // is handled independently so live QC does not accumulate previous chunks.
+    sample_batch_ch = bam_ingress(
+        record(
+        live_analysis: params.live_analysis,
+        timeline_analysis: params.timeline_analysis,
+        sample_sheet_path: params.sample_sheet_path ? file(params.sample_sheet_path) : null
+        )
+    )
 
-    sample_pipeline(sampleChunk)
+    sample_chunk_bam_ch = sample_batch_ch
+        .flatMap { batch ->
+            batch.chunks
+                .findAll { chunk -> !chunk.bam_paths.isEmpty() }
+                .collectMany { chunk ->
+                    chunk.bam_paths.withIndex().collect { Path bam_path, Integer bam_index ->
+                        record(
+                            batch_index: batch.batch_index,
+                            sample: chunk.sample,
+                            bam_index_in_chunk: bam_index,
+                            bam_count: chunk.bam_paths.size(),
+                            bam: bam_path
+                        )
+                    }
+                }
+        }
+
+    indexed_chunk_bam_ch = bam_sort_index(sample_chunk_bam_ch)
+
+    indexed_chunk_bam_group_ch = indexed_chunk_bam_ch
+        .map { indexed_bam ->
+            tuple("${indexed_bam.batch_index}:${indexed_bam.sample.id}", indexed_bam.bam_count, indexed_bam)
+        }
+        .groupBy()
+        .map { String _group_key, Bag grouped_bams ->
+            List sorted_bams = grouped_bams.toSorted { left, right ->
+                left.bam_index_in_chunk <=> right.bam_index_in_chunk
+            }
+            def first_bam = sorted_bams[0]
+            return record(
+                batch_index: first_bam.batch_index,
+                sample: first_bam.sample,
+                bams: sorted_bams
+            )
+        }
+
+    merged_chunk_bam_ch = bam_merge_index(indexed_chunk_bam_group_ch)
+    qc_result_ch = quality_control(merged_chunk_bam_ch)
+
+    Map<String, List<ChunkQCResult>> sample_qc_report_state = [:]
+    sample_qc_report_inputs_ch = qc_result_ch.map { result ->
+        accumulateSampleQCResult(sample_qc_report_state, result)
+    }
+    qc_report_input_log_ch = qc_report_input_log(sample_qc_report_inputs_ch)
+
+    Map<String, SampleQCReportInputs> temporary_qc_report_state = [:]
+    temporary_qc_report_inputs_ch = sample_qc_report_inputs_ch.map { report_inputs ->
+        accumulate_temporary_qc_report_state(temporary_qc_report_state, report_inputs)
+    }
+    temporary_qc_report(temporary_qc_report_inputs_ch)
+
+    qc_publish_ch = qc_result_ch.flatMap { result ->
+        [
+            tuple(result.nanoplot_data, sampleQCChunkDir(result, 'nanoplot')),
+            tuple(result.flagstat, sampleQCChunkDir(result, 'samtools_flagstat'))
+        ]
+    }
+
+    qc_report_publish_ch = qc_report_input_log_ch.map { result ->
+        tuple(result.manifest, sampleQCReportInputDir(result.sample))
+    }
+
+    output(
+        qc_publish_ch.mix(qc_report_publish_ch)
+    )
+
+    // sample_pipeline(sample_pipeline_input)
 
     // Start differential expression analysis if there is more than one run
-    if (params.ex_run_number > 1) {
-        quantResults = channel.watchPath("$runDir/**counts.txt")
-        .until { result -> result.name.startsWith('STOP') }
-        .filter { result -> result.name.endsWith('counts.txt') }
-        .map { _result -> file("$params.ex_dir/**counts.txt") }
-        // Waits until there are count files for all replicates
-        .filter { result -> result.size() == (params.ex_run_number * params.ex_replicate_count) }
+    // if (params.ex_run_number > 1) {
+    //     quantResults = channel.watchPath("$runDir/**counts.txt")
+    //     .until { result -> result.name.startsWith('STOP') }
+    //     .filter { result -> result.name.endsWith('counts.txt') }
+    //     .map { _result -> file("$params.ex_dir/**counts.txt") }
+    //     // Waits until there are count files for all replicates
+    //     .filter { result -> result.size() == (params.ex_run_number * params.ex_replicate_count) }
 
-        differentiaExpression(quantResults)
-    }
+    //     differentiaExpression(quantResults)
+    // }
 
     onComplete:
     if (params.disable_ping == false) {
         Pinguscript.ping_post(workflow, 'end', 'none', params.ex_dir, params)
-    }
-
-    onError:
-    if (params.disable_ping == false) {
-        Pinguscript.ping_post(workflow, 'error', "$workflow.errorMessage", params.ex_dir, params)
     }
 }

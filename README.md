@@ -51,6 +51,9 @@ The primary outputs of the workflow include:
 * a simple text file providing a summary of sequencing reads,
 * an HTML report document detailing the primary findings of the workflow.
 
+See [Quality Control Workflow](docs/quality_control.md) for the chunk-level
+NanoPlot and samtools flagstat QC outputs used by live reporting.
+
 
 
 
