@@ -20,6 +20,10 @@
           "description": "Name of the experiment.",
           "default": "seq_lm"
         },
+        "live_analysis": {
+          "type": "boolean",
+          "fa_icon": "fas fa-eye"
+        },
         "ex_dir": {
           "type": "string",
           "format": "path",
@@ -31,6 +35,11 @@
           "type": "string",
           "format": "path",
           "description": "CSV sample sheet containing id, alias, type, group, and bam_dir columns for BAM ingress."
+        },
+        "ex_reference_annotation": {
+          "type": "string",
+          "format": "path",
+          "description": "Reference annotation file in gff3 format."
         },
         "ongoing": {
           "type": "boolean",
