@@ -50,8 +50,8 @@ workflow quality_control {
  * `NanoPlot-data.tsv.gz` table used by downstream QC reporting.
  */
 process nanoplot_qc {
-    label 'seqLM_qc'
-    container 'seqlm/quality_control'
+    label 'seq_lm_qc'
+    container 'seq_lm/quality_control'
     cpus 4
 
     input:
@@ -87,8 +87,8 @@ process nanoplot_qc {
  * report inputs can update after every live batch.
  */
 process samtools_flagstat_qc {
-    label 'seqLM_qc'
-    container 'seqlm/samtools'
+    label 'seq_lm_qc'
+    container 'seq_lm/samtools'
     cpus 4
 
     input:

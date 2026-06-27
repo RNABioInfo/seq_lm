@@ -7,15 +7,21 @@ from ezcharts.layout.snippets import Tabs
 from ezcharts.layout.snippets.table import DataTable
 import pandas as pd
 
+from .report_compat import labs_report
 from .util import get_named_logger, wf_parser  # noqa: ABS101
 
 
 def main(args):
     """Run the entry point."""
     logger = get_named_logger("Report")
-    report = labs.LabsReport(
-        "Workflow Template Sequencing report", "wf-template",
-        args.params, args.versions)
+    report = labs_report(
+        labs,
+        "Workflow Template Sequencing report",
+        "wf-template",
+        args.params,
+        args.versions,
+        f"{args.revision} ({args.commit})",
+    )
 
     with open(args.metadata) as metadata:
         sample_details = sorted([

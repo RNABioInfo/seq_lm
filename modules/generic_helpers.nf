@@ -12,7 +12,7 @@ process getVersions {
 }
 
 process getParams {
-    label 'seqLM'
+    label 'seq_lm'
     cpus 1
     output:
         file('params.json')
@@ -31,7 +31,7 @@ process getParams {
 process output {
     // publish inputs to output directory
     debug true
-    label 'seqLM'
+    label 'seq_lm'
     publishDir(
         params.ex_dir,
         mode: 'copy',

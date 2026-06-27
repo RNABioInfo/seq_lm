@@ -5,6 +5,7 @@ from ezcharts.components.reports import labs
 from ezcharts.layout.snippets.table import DataTable
 import pandas as pd
 
+from .report_compat import labs_report
 from .util import get_named_logger, wf_parser  # noqa: ABS101
 
 
@@ -64,11 +65,13 @@ def main(args):
     logger = get_named_logger("TemporaryQC")
     samples = load_temporary_qc_samples(args.samples)
 
-    report = labs.LabsReport(
-        "TEMPORARY seqLM QC report - remove later",
+    report = labs_report(
+        labs,
+        "TEMPORARY seq_lm QC report - remove later",
         "temporary_qc_report",
         args.params,
         args.versions,
+        "temporary",
     )
 
     with report.add_section("TEMPORARY notice", "Temporary notice"):

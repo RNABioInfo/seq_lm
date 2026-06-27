@@ -49,8 +49,8 @@ temporary notice plus the current QC-result sample list.
 
 Required local Docker images:
 
-* `seqlm/quality_control`: provides NanoPlot.
-* `seqlm/samtools`: provides samtools for sorting, merging, indexing, and
+* `seq_lm/quality_control`: provides NanoPlot.
+* `seq_lm/samtools`: provides samtools for sorting, merging, indexing, and
   flagstat.
 
 The QC workflow intentionally does not consume the reference annotation. The

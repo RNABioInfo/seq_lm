@@ -18,7 +18,7 @@
           "type": "string",
           "fa_icon": "fas fa-bacteria",
           "description": "Name of the experiment.",
-          "default": "seqLM"
+          "default": "seq_lm"
         },
         "ex_dir": {
           "type": "string",
@@ -77,7 +77,7 @@
       "type": "string",
       "description": "The main process label for template processes to use by default",
       "hidden": true,
-      "default": "seqLM"
+      "default": "seq_lm"
     },
     "aws_image_prefix": {
       "type": "string",

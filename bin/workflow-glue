@@ -1,6 +1,21 @@
 #!/usr/bin/env python3
 """Entrypoint of pseudo-package for all the code used in the workflow."""
 
+import os
+from pathlib import Path
+
+
+def configure_matplotlib_cache():
+    """Keep Matplotlib from trying to write under an unwritable HOME."""
+    mplconfigdir = os.environ.setdefault(
+        "MPLCONFIGDIR",
+        str(Path.cwd() / ".matplotlib"),
+    )
+    Path(mplconfigdir).mkdir(parents=True, exist_ok=True)
+
+
+configure_matplotlib_cache()
+
 from workflow_glue import cli
 
 if __name__ == "__main__":

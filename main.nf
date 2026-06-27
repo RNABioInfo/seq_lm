@@ -153,7 +153,7 @@ Map accumulate_temporary_qc_report_state(
 }
 
 process writeConfig {
-    label 'seqLM'
+    label 'seq_lm'
     cpus 1
     exec:
         log.info 'Writing config file...'
@@ -182,7 +182,7 @@ process writeConfig {
 }
 
 process makeReport {
-    label 'seqLM'
+    label 'seq_lm'
     input:
         metadata: Map
         per_read_stats: Path
@@ -209,7 +209,7 @@ process makeReport {
 }
 
 process featureCounts {
-    label 'seqLM'
+    label 'seq_lm'
     container 'pegi3s/feature-counts'
     cpus params.threads
     input:
@@ -229,8 +229,8 @@ process featureCounts {
 
 process mergeFeatureCounts {
     debug true
-    label 'seqLM'
-    container 'seqlm_dea'
+    label 'seq_lm'
+    container 'seq_lm_dea'
     cpus 1
     input:
         tuple(meta: Map, newCounts: Path, allCounts: Path)
@@ -250,8 +250,8 @@ process mergeFeatureCounts {
 
 process bamQC {
     debug true
-    label 'seqLM'
-    container 'seqlm_qualitycontrol'
+    label 'seq_lm'
+    container 'seq_lm_qualitycontrol'
     cpus 1
     input:
         tuple(meta: Map, bam: Path, bam_index: Path)
@@ -275,8 +275,8 @@ process bamQC {
 }
 
 process bamIndex {
-    label 'seqLM'
-    container 'seqlm/samtools'
+    label 'seq_lm'
+    container 'seq_lm/samtools'
     errorStrategy 'ignore'
     cpus 1
     input:
@@ -291,8 +291,8 @@ process bamIndex {
 }
 
 process bam_sort_index {
-    label 'seqLM'
-    container 'seqlm/samtools'
+    label 'seq_lm'
+    container 'seq_lm/samtools'
     cpus 4
 
     input:
@@ -317,8 +317,8 @@ process bam_sort_index {
 }
 
 process bam_merge_index {
-    label 'seqLM'
-    container 'seqlm/samtools'
+    label 'seq_lm'
+    container 'seq_lm/samtools'
     cpus 4
 
     input:
@@ -354,7 +354,7 @@ process bam_merge_index {
  */
 process qc_report_input_log {
     debug true
-    label 'seqLM_qc'
+    label 'seq_lm_qc'
     cpus 1
 
     input:
@@ -392,8 +392,8 @@ process qc_report_input_log {
  */
 process temporary_qc_report {
     debug true
-    label 'seqLM_qc'
-    container 'seqlm_dea'
+    label 'seq_lm_qc'
+    container 'seq_lm/seq_lm_dea'
     cpus 1
     maxForks 1
 
@@ -423,6 +423,9 @@ process temporary_qc_report {
         printf 'temporary_qc_report,temporary\\n' > versions/versions.txt
         printf '%s\\n' ${quoted_params_json} > params.json
 
+        export MPLCONFIGDIR="\$PWD/.matplotlib"
+        mkdir -p "\$MPLCONFIGDIR"
+
         workflow-glue temporary_qc_report temporary_qc_report.html \
             --samples temporary_qc_report_samples.tsv \
             --versions versions \
@@ -432,7 +435,7 @@ process temporary_qc_report {
 }
 
 process differentiaExpression {
-    container 'seqlm/dea'
+    container 'seq_lm/dea'
     cpus params.threads
 
     input:
