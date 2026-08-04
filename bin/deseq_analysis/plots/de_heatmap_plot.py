@@ -4,39 +4,43 @@ from bokeh.models import ColumnDataSource, ColorBar, LinearColorMapper
 from bokeh.transform import factor_cmap, transform
 from bokeh.plotting import figure, gridplot
 from bokeh.models import HoverTool
+from bokeh.palettes import Turbo256
 import pandas as pd
 
 import colorcet as cc
 
 
-def create_de_heatmap_plot(title: str, norm_counts_df: pd.DataFrame) -> model.Model:
+def create_de_heatmap_plot(
+    title: str,
+    norm_counts_df: pd.DataFrame,
+    metadata: pd.DataFrame,
+) -> model.Model:
     heatmap_df = z_score(norm_counts_df)
-
-    column_names: list[str] = []
-    for col in heatmap_df.columns:
-        elements = col.split("_")
-        name = f"run_{elements[0]}_replicate_{elements[1]}"
-        column_names.append(name)
-
-    heatmap_df.columns = column_names
 
     gene_ids = heatmap_df.index.tolist()
     sample_ids = heatmap_df.columns.tolist()
 
-    heatmap_df = pd.melt(heatmap_df.reset_index(), id_vars=["Geneid"])
+    # Oarfish names its identifier column ``tname``, while featureCounts uses
+    # ``Geneid``. Normalize the index name here so the plot supports both.
+    heatmap_df = pd.melt(
+        heatmap_df.rename_axis("feature_id").reset_index(),
+        id_vars=["feature_id"],
+        var_name="sample",
+        value_name="z_score",
+    )
 
     TOOLS = "save,ypan,reset,ywheel_zoom"
     hover = HoverTool()
     hover.tooltips = [
-        ("Gene ID", "@Geneid"),
-        ("Sample", "@variable"),
-        ("z-score", "@value"),
+        ("Feature ID", "@feature_id"),
+        ("Sample", "@sample"),
+        ("z-score", "@z_score"),
     ]
     heatmap_plot = figure(
         tools=TOOLS,
         tooltips=hover.tooltips,
         title=f"Differential gene expression {title}",
-        y_axis_label="Gene ID",
+        y_axis_label="Feature ID",
         sizing_mode="stretch_width",
         x_range=sample_ids,
         y_range=gene_ids,
@@ -53,12 +57,21 @@ def create_de_heatmap_plot(title: str, norm_counts_df: pd.DataFrame) -> model.Mo
 
     mapper = LinearColorMapper(
         palette=cc.b_diverging_bwr_20_95_c54,
-        low=heatmap_df.value.min(),
-        high=heatmap_df.value.max(),
+        low=heatmap_df.z_score.min(),
+        high=heatmap_df.z_score.max(),
     )
-    colors = ["#1f77b4", "#1f77b4", "#2ca02c", "#2ca02c"]
+    group_names = tuple(metadata["group"].unique())
+    group_palette = [
+        Turbo256[index * 255 // max(len(group_names) - 1, 1)]
+        for index in range(len(group_names))
+    ]
     # Create a data source with your samples and their types
-    source = ColumnDataSource(data=dict(samples=sample_ids))
+    source = ColumnDataSource(
+        data=dict(
+            samples=sample_ids,
+            groups=[metadata.loc[sample_id, "group"] for sample_id in sample_ids],
+        )
+    )
     # Create a new figure for the annotation bar
     annotation_bar: model.Model = figure(
         tools="",
@@ -79,7 +92,7 @@ def create_de_heatmap_plot(title: str, norm_counts_df: pd.DataFrame) -> model.Mo
         width=0.98,
         height=20,
         height_units="screen",
-        fill_color=factor_cmap("samples", palette=colors, factors=sample_ids),
+        fill_color=factor_cmap("groups", palette=group_palette, factors=group_names),
     )
 
     annotation_bar.xaxis.major_tick_line_color = None
@@ -89,13 +102,12 @@ def create_de_heatmap_plot(title: str, norm_counts_df: pd.DataFrame) -> model.Mo
     annotation_bar.yaxis.visible = True
     annotation_bar.yaxis.major_label_text_font_size = "0px"
     annotation_bar.yaxis.major_label_text_alpha = 0.0
-    annotation_bar.yaxis.axis_label_orientation = "horizontal"
     annotation_bar.grid.grid_line_color = None
 
-    fill_color = transform("value", mapper)  # type: ignore
+    fill_color = transform("z_score", mapper)  # type: ignore
     heatmap_plot.rect(
-        x="variable",
-        y="Geneid",
+        x="sample",
+        y="feature_id",
         width=0.98,
         height=1,
         source=heatmap_df,
@@ -118,11 +130,8 @@ def create_de_heatmap_plot(title: str, norm_counts_df: pd.DataFrame) -> model.Mo
     return p
 
 
-def z_score(df) -> pd.DataFrame:
-    # copy the dataframe
-    df_std = df.copy()
-    # apply the z-score method
-    for column in df_std.columns:
-        df_std[column] = (df_std[column] - df_std[column].mean()) / df_std[column].std()
-
-    return df_std
+def z_score(df: pd.DataFrame) -> pd.DataFrame:
+    """Standardize each feature across samples for heatmap display."""
+    feature_means = df.mean(axis=1)
+    feature_std = df.std(axis=1).replace(0, float("nan"))
+    return df.sub(feature_means, axis=0).div(feature_std, axis=0).fillna(0.0)

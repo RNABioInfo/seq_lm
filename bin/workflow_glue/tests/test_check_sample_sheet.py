@@ -1,17 +1,16 @@
 """Test check_sample_sheet.py."""
 
 import os
+from pathlib import Path
 
 import pytest
 from workflow_glue import check_sample_sheet
 
 
-# define a list of error messages (either the complete message or the first couple words
-# in case the error message is customized by `check_sample_sheet.py`) and required
-# sample types to be tested.
+# define a list of error messages to be tested.
 ERROR_MESSAGES = [
-    ("sample_sheet_1.csv", "Sample sheet requires at least 1 of ", "positive_control"),
-    ("sample_sheet_2.csv", "Not an allowed sample type: ", "invalid_sample_type")
+    ("sample_sheet_1.csv", "Sample sheet requires at least 2 'control' group samples"),
+    ("sample_sheet_2.csv", "values in 'alias' column not unique within group"),
 ]
 
 
@@ -24,18 +23,71 @@ def test_data(request):
         "check_sample_sheet")
 
 
-@pytest.mark.parametrize("sample_sheet_name,error_msg,required_types", ERROR_MESSAGES)
+@pytest.mark.parametrize("sample_sheet_name,error_msg", ERROR_MESSAGES)
 def test_check_sample_sheet(
-        capsys, test_data, sample_sheet_name, error_msg, required_types):
+        capsys, test_data, sample_sheet_name, error_msg):
     """Test the sample sheets."""
     expected_error_message = error_msg
     sample_sheet_path = f"{test_data}/{sample_sheet_name}"
-    args = check_sample_sheet.argparser().parse_args(
-        [sample_sheet_path, '--required_sample_types', required_types]
-    )
+    args = check_sample_sheet.argparser().parse_args([sample_sheet_path])
     try:
         check_sample_sheet.main(args)
     except SystemExit:
         pass
     out, _ = capsys.readouterr()
     assert out.startswith(expected_error_message)
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        (None, True),
+        ("", True),
+        ("  ", True),
+        ("true", True),
+        ("TrUe", True),
+        ("false", False),
+        ("FALSE", False),
+    ],
+)
+def test_parse_is_live(value, expected):
+    """The optional flag is strict but case-insensitive and defaults to live."""
+    assert check_sample_sheet.parse_is_live(value) is expected
+
+
+def test_parse_is_live_rejects_invalid_value():
+    """Ambiguous truthy and falsey spellings are rejected."""
+    with pytest.raises(ValueError, match="Invalid is_live value 'yes'"):
+        check_sample_sheet.parse_is_live("yes")
+
+
+@pytest.mark.parametrize("header,row", [
+    ("alias,group,bam_dir", "rep_1,control,/tmp/rep_1"),
+    ("alias,group,bam_dir,is_live", "rep_1,control,/tmp/rep_1,"),
+])
+def test_sample_sheet_without_explicit_is_live_is_valid(tmp_path, header, row):
+    """Legacy and blank-valued samplesheets retain all-live semantics."""
+    sample_sheet = Path(tmp_path) / "sample_sheet.csv"
+    sample_sheet.write_text(
+        f"{header}\n"
+        f"{row}\n"
+        f"rep_2,control,/tmp/rep_2"
+        f"{',' if 'is_live' in header else ''}\n"
+    )
+    args = check_sample_sheet.argparser().parse_args([str(sample_sheet)])
+    check_sample_sheet.main(args)
+
+
+def test_sample_sheet_rejects_invalid_is_live(capsys, tmp_path):
+    """The command reports the row-level boolean parsing error."""
+    sample_sheet = Path(tmp_path) / "sample_sheet.csv"
+    sample_sheet.write_text(
+        "alias,group,bam_dir,is_live\n"
+        "rep_1,control,/tmp/rep_1,true\n"
+        "rep_2,control,/tmp/rep_2,yes\n"
+    )
+    args = check_sample_sheet.argparser().parse_args([str(sample_sheet)])
+    with pytest.raises(SystemExit):
+        check_sample_sheet.main(args)
+    out, _ = capsys.readouterr()
+    assert "Invalid is_live value 'yes'" in out

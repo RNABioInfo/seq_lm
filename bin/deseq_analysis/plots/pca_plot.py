@@ -1,6 +1,6 @@
 from bokeh.plotting import figure
 from bokeh.model import Model
-from bokeh.palettes import Pastel1
+from bokeh.palettes import Turbo256
 from bokeh.transform import factor_cmap
 
 from sklearn.decomposition import PCA
@@ -15,9 +15,13 @@ def create_pca_plot(title: str, pca_df: pd.DataFrame, metadata: pd.DataFrame) ->
 
     pca = PCA(n_components=2)
     pca_df = pd.DataFrame(pca.fit_transform(log2_norm_data), columns=["PC1", "PC2"])
-    run_names: tuple[str, ...] = tuple(metadata["run"].unique())
-    pca_df["run"] = metadata["run"].tolist()
-    pca_df["sample"] = pca_df.index.tolist()
+    group_names: tuple[str, ...] = tuple(metadata["group"].unique())
+    group_palette = [
+        Turbo256[index * 255 // max(len(group_names) - 1, 1)]
+        for index in range(len(group_names))
+    ]
+    pca_df["group"] = metadata["group"].tolist()
+    pca_df["sample"] = metadata.index.tolist()
 
     pca_plot = figure(
         title=f"PCA Plot {title}",
@@ -31,9 +35,9 @@ def create_pca_plot(title: str, pca_df: pd.DataFrame, metadata: pd.DataFrame) ->
         source=pca_df,
         line_color="black",
         line_alpha=0.3,
-        fill_color=factor_cmap("run", Pastel1[3], run_names),
+        fill_color=factor_cmap("group", group_palette, group_names),
         fill_alpha=0.8,
-        legend_field="run",
+        legend_field="group",
         size=18,
     )
 

@@ -1,0 +1,63 @@
+#!/usr/bin/env python3
+"""Extract the NanoPlot-compatible per-read BAM table without rendering plots."""
+
+from argparse import ArgumentParser
+from pathlib import Path
+
+from nanoget.extraction_functions import process_bam
+
+
+EXPECTED_COLUMNS = [
+    "readIDs",
+    "quals",
+    "aligned_quals",
+    "lengths",
+    "aligned_lengths",
+    "mapQ",
+    "percentIdentity",
+]
+
+
+def argparser() -> ArgumentParser:
+    parser = ArgumentParser(description=__doc__)
+    parser.add_argument("--bam", required=True, help="Coordinate-sorted input BAM.")
+    parser.add_argument(
+        "--output",
+        required=True,
+        help="Output NanoPlot-compatible TSV, optionally ending in .gz.",
+    )
+    parser.add_argument("--threads", type=int, default=1)
+    return parser
+
+
+def main() -> None:
+    args = argparser().parse_args()
+    if args.threads < 1:
+        raise ValueError("--threads must be at least 1.")
+
+    data = process_bam(
+        args.bam,
+        threads=args.threads,
+        keep_supp=True,
+        huge=True,
+    )
+    missing_columns = [
+        column for column in EXPECTED_COLUMNS if column not in data.columns
+    ]
+    if missing_columns:
+        raise ValueError(
+            "Extracted BAM table is missing columns: " + ", ".join(missing_columns)
+        )
+
+    output = Path(args.output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    data[EXPECTED_COLUMNS].to_csv(
+        output,
+        sep="\t",
+        index=False,
+        compression="infer",
+    )
+
+
+if __name__ == "__main__":
+    main()

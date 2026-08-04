@@ -10,3 +10,7 @@ template-workflow
 *.crt
 *.DS_Store
 *.log
+*.log*
+
+output
+test_data

@@ -1,0 +1,335 @@
+source_np	source_locus_tag	source_gene	kt2440_current_protein	nbrc14164_protein	nbrc14164_transcript	nbrc14164_locus_tag	nbrc14164_gene	identity_percent	query_coverage_percent	subject_coverage_percent	method	status
+NP_742244.1	PP_0074	aroE	WP_010951480.1	WP_016497376.1	unassigned_transcript_69	PP4_RS00330	aroE	98.54	100.0	100.0	reciprocal_best_hit	mapped
+NP_742252.1	PP_0082	trpA	WP_010951488.1	WP_016497383.1	unassigned_transcript_76	PP4_RS00365	trpA	97.026	100.0	100.0	reciprocal_best_hit	mapped
+NP_742253.1	PP_0083	trpB	WP_010951489.1	WP_016497384.1	unassigned_transcript_77	PP4_RS00370	trpB	99.506	100.0	100.0	reciprocal_best_hit	mapped
+NP_742263.2	PP_0093		WP_049588425.1	WP_016497393.1	unassigned_transcript_87	PP4_RS00420		91.62	100.0	100.28	reciprocal_best_hit	mapped
+NP_742266.1	PP_0096	prlC		WP_016497396.1	unassigned_transcript_90	PP4_RS00435	prlC	98.097	100.0	98.273	direct_unique_best_hit	mapped
+NP_742291.1	PP_0121	thrB	WP_003252998.1	WP_016497417.1	unassigned_transcript_115	PP4_RS00560		98.734	100.0	100.0	reciprocal_best_hit	mapped
+NP_742314.1	PP_0144		WP_010951538.1	WP_016497437.1	unassigned_transcript_139	PP4_RS00680		94.872	100.0	100.0	reciprocal_best_hit	mapped
+NP_742336.1	PP_0167	paxB	WP_003256004.1	WP_019471019.1	unassigned_transcript_172	PP4_RS00845		99.025	100.0	100.0	reciprocal_best_hit	mapped
+NP_742353.1	PP_0184	argH		WP_016497479.1	unassigned_transcript_192	PP4_RS00940	argH	99.353	99.0	100.0	direct_unique_best_hit	mapped
+NP_742368.1	PP_0199	qmcA		WP_016497493.1	unassigned_transcript_206	PP4_RS01010		95.161	100.0	99.2	direct_unique_best_hit	mapped
+NP_742372.1	PP_0203										reciprocal_best_hit	unmapped
+NP_742381.1	PP_0213	davD	WP_010951596.1	WP_016484375.1	unassigned_transcript_241	PP4_RS01185	gabD	99.167	100.0	100.0	reciprocal_best_hit	mapped
+NP_742382.1	PP_0214	davT	WP_003255866.1	WP_016497525.1	unassigned_transcript_242	PP4_RS01190	gabT	97.882	100.0	100.0	reciprocal_best_hit	mapped
+NP_742396.2	PP_0228		WP_003255846.1	WP_016497539.1	unassigned_transcript_257	PP4_RS01265	epsC	97.419	100.0	100.0	reciprocal_best_hit	mapped
+NP_742436.1	PP_0269		WP_010951638.1	WP_016497578.1	unassigned_transcript_301	PP4_RS01485		95.144	100.0	100.0	reciprocal_best_hit	mapped
+NP_742456.1	PP_0289	hisB		WP_009682881.1	unassigned_transcript_329	PP4_RS01610	hisB	99.492	94.0	100.0	direct_unique_best_hit	mapped
+NP_742457.1	PP_0290	hisH	WP_010951658.1	WP_016497603.1	unassigned_transcript_330	PP4_RS01615	hisH	97.17	100.0	100.0	reciprocal_best_hit	mapped
+NP_742459.1	PP_0292	hisA	WP_003255731.1	WP_016484508.1	unassigned_transcript_332	PP4_RS01625	hisA	99.184	100.0	100.0	reciprocal_best_hit	mapped
+NP_742460.1	PP_0293	hisF	WP_003255729.1	WP_008091498.1	unassigned_transcript_333	PP4_RS01630	hisF	99.219	100.0	100.0	reciprocal_best_hit	mapped
+NP_742470.1	PP_0303		WP_010951668.1	WP_016497614.1	unassigned_transcript_344	PP4_RS01685		99.66	100.0	100.0	reciprocal_best_hit	mapped
+NP_742475.1	PP_0308		WP_003255700.1	WP_016497618.1	unassigned_transcript_348	PP4_RS01705		99.385	100.0	100.0	reciprocal_best_hit	mapped
+NP_742488.1	PP_0321	ltaE	WP_010951681.1	WP_016497628.1	unassigned_transcript_362	PP4_RS01770		98.256	99.0	99.422	reciprocal_best_hit	mapped
+NP_742489.1	PP_0322	glyA1	WP_003255681.1	WP_016497629.1	unassigned_transcript_363	PP4_RS01775		99.281	100.0	100.0	reciprocal_best_hit	mapped
+NP_742493.1	PP_0326	soxG	WP_003255677.1	WP_012270121.1	unassigned_transcript_367	PP4_RS01795		98.095	100.0	100.0	reciprocal_best_hit	mapped
+NP_742523.1	PP_0356	glcB	WP_010951708.1	WP_016497663.1	unassigned_transcript_402	PP4_RS01965		98.069	100.0	100.0	reciprocal_best_hit	mapped
+NP_742542.1	PP_0375		WP_010951726.1	WP_016497680.1	unassigned_transcript_420	PP4_RS02055		90.924	99.0	99.835	reciprocal_best_hit	mapped
+NP_742548.1	PP_0381	pqqF	WP_010951730.1	WP_016497685.1	unassigned_transcript_426	PP4_RS02080	pqqF	79.528	99.0	100.0	reciprocal_best_hit	mapped
+NP_742552.1	PP_0385		WP_003255582.1	WP_041167953.1	unassigned_transcript_433	PP4_RS02110		93.923	98.0	98.37	reciprocal_best_hit	mapped
+NP_742557.1	PP_0390	tsaD	WP_010951736.1	WP_016497697.1	unassigned_transcript_441	PP4_RS02145	tsaD	99.413	100.0	100.0	reciprocal_best_hit	mapped
+NP_742583.1	PP_0417	trpE	WP_010951754.1	WP_016484627.1	unassigned_transcript_468	PP4_RS02280	trpE	98.174	100.0	100.0	reciprocal_best_hit	mapped
+NP_742587.1	PP_0421	trpD	WP_010951756.1	WP_016497724.1	unassigned_transcript_471	PP4_RS02295	trpD	97.135	100.0	100.0	reciprocal_best_hit	mapped
+NP_742588.1	PP_0422	trpC	WP_010951757.1	WP_016497725.1	unassigned_transcript_472	PP4_RS02300	trpC	98.917	100.0	100.0	reciprocal_best_hit	mapped
+NP_742598.1	PP_0432	argC1	WP_010951765.1	WP_016497733.1	unassigned_transcript_482	PP4_RS02350	argC	99.419	100.0	100.0	reciprocal_best_hit	mapped
+NP_742702.1	PP_0539	mtfA	WP_010951819.1	WP_016497836.1	unassigned_transcript_641	PP4_RS03130		94.834	100.0	100.0	reciprocal_best_hit	mapped
+NP_742714.1	PP_0551			WP_016497848.1	unassigned_transcript_653	PP4_RS03190		93.414	90.0	100.0	direct_unique_best_hit	mapped
+NP_742721.1	PP_0558	accC	WP_003255333.1	WP_012270325.1	unassigned_transcript_660	PP4_RS03225	accC	99.778	99.0	99.778	reciprocal_best_hit	mapped
+NP_742722.1	PP_0559	accB	WP_010951833.1	WP_016497855.1	unassigned_transcript_661	PP4_RS03230	accB	96.732	100.0	100.0	reciprocal_best_hit	mapped
+NP_742723.1	PP_0560	aroQ1	WP_010951834.1	WP_003255330.1	unassigned_transcript_662	PP4_RS03235	aroQ	99.338	100.0	100.0	reciprocal_best_hit	mapped
+NP_742730.1	PP_0567	speA	WP_010951840.1	WP_016497862.1	unassigned_transcript_669	PP4_RS03270	speA	98.43	100.0	100.0	reciprocal_best_hit	mapped
+NP_742738.1	PP_0575		WP_010951848.1	WP_016497870.1	unassigned_transcript_677	PP4_RS03310		92.308	100.0	100.0	reciprocal_best_hit	mapped
+NP_742766.1	PP_0604	lspA		WP_016501596.1	unassigned_transcript_4754	PP4_RS23405	lspA	98.246	97.0	100.0	direct_unique_best_hit	mapped
+NP_742793.1	PP_0632	pilD	WP_010951890.1	WP_016501577.1	unassigned_transcript_4729	PP4_RS23280		92.014	100.0	100.0	reciprocal_best_hit	mapped
+NP_742815.2	PP_0654	mdh		WP_016501561.1	unassigned_transcript_4712	PP4_RS23215		96.44	99.0	100.0	direct_unique_best_hit	mapped
+NP_742819.1	PP_0658										reciprocal_best_hit	unmapped
+NP_742825.1	PP_0664										reciprocal_best_hit	unmapped
+NP_742832.1	PP_0671	glyA2	WP_003247505.1	WP_016501556.1	unassigned_transcript_4708	PP4_RS23190	glyA	99.52	100.0	100.0	reciprocal_best_hit	mapped
+NP_742841.1	PP_0680		WP_004575710.1	WP_016501547.1	unassigned_transcript_4699	PP4_RS23140		98.276	100.0	100.0	reciprocal_best_hit	mapped
+NP_742852.1	PP_0691	proB	WP_003247458.1	WP_016501542.1	unassigned_transcript_4688	PP4_RS23085	proB	98.656	100.0	100.0	reciprocal_best_hit	mapped
+NP_742873.1	PP_0712	ppkB	WP_010951960.1	WP_016501519.1	unassigned_transcript_4663	PP4_RS22965	ppk2	92.647	100.0	100.0	reciprocal_best_hit	mapped
+NP_742912.1	PP_0751	mqo-I	WP_010951993.1	WP_016501486.1	unassigned_transcript_4629	PP4_RS22795	mqo	98.207	100.0	100.0	reciprocal_best_hit	mapped
+NP_742919.1	PP_0758		WP_010952000.1	WP_016501479.1	unassigned_transcript_4621	PP4_RS22755		97.087	100.0	100.0	reciprocal_best_hit	mapped
+NP_742920.1	PP_0759			WP_016501478.1	unassigned_transcript_4620	PP4_RS22750		97.398	96.0	99.262	direct_unique_best_hit	mapped
+NP_742946.1	PP_0785	cysZ	WP_010952022.1	WP_016501458.1	unassigned_transcript_4600	PP4_RS22650	cysZ	96.694	100.0	100.0	reciprocal_best_hit	mapped
+NP_742965.1	PP_0804		WP_010952040.1	WP_016501436.1	unassigned_transcript_4576	PP4_RS22530		96.122	100.0	100.0	reciprocal_best_hit	mapped
+NP_742984.1	PP_0823	selD	WP_010952053.1	WP_016501420.1	unassigned_transcript_4558	PP4_RS22440	selD	96.512	100.0	100.0	reciprocal_best_hit	mapped
+NP_743001.1	PP_0840	cysE	WP_010952064.1	WP_016501401.1	unassigned_transcript_4536	PP4_RS22330	cysE	98.467	100.0	100.0	reciprocal_best_hit	mapped
+NP_743101.1	PP_0940	tldD	WP_010952138.1	WP_016501346.1	unassigned_transcript_4469	PP4_RS21995	tldD	99.165	100.0	100.0	reciprocal_best_hit	mapped
+NP_743103.1	PP_0942	pmbA		WP_016501344.1	unassigned_transcript_4467	PP4_RS21985	pmbA	97.098	99.0	100.0	direct_unique_best_hit	mapped
+NP_743105.1	PP_0944	fumC-I		WP_016501342.1	unassigned_transcript_4465	PP4_RS21975		95.633	99.0	100.0	direct_unique_best_hit	mapped
+NP_743126.1	PP_0965	hisG	WP_010952155.1	WP_016501322.1	unassigned_transcript_4444	PP4_RS21870	hisG	98.578	100.0	100.0	reciprocal_best_hit	mapped
+NP_743127.1	PP_0966	hisD	WP_010952156.1	WP_016501321.1	unassigned_transcript_4443	PP4_RS21865	hisD	98.413	100.0	100.0	reciprocal_best_hit	mapped
+NP_743128.1	PP_0967	hisC	WP_010952157.1	WP_016501320.1	unassigned_transcript_4442	PP4_RS21860	hisC	97.989	100.0	100.0	reciprocal_best_hit	mapped
+NP_743141.1	PP_0980	pepA	WP_010952169.1	WP_016501309.1	unassigned_transcript_4430	PP4_RS21800		96.579	100.0	100.0	reciprocal_best_hit	mapped
+NP_743147.1	PP_0986	gcvT-I	WP_010952173.1	WP_016501304.1	unassigned_transcript_4425	PP4_RS21775	gcvT	95.979	100.0	100.0	reciprocal_best_hit	mapped
+NP_743149.1	PP_0988	gcvP1	WP_003255089.1	WP_016501302.1	unassigned_transcript_4423	PP4_RS21765	gcvP	97.792	100.0	100.0	reciprocal_best_hit	mapped
+NP_743150.1	PP_0989	gcvH1	WP_010952175.1	WP_016501301.1	unassigned_transcript_4422	PP4_RS21760	gcvH	94.488	100.0	100.0	reciprocal_best_hit	mapped
+NP_743161.1	PP_1000	arcB	WP_010952185.1	WP_016501296.1	unassigned_transcript_4417	PP4_RS21735		98.81	100.0	100.0	reciprocal_best_hit	mapped
+NP_743162.1	PP_1001	arcA	WP_010952186.1	WP_016501295.1	unassigned_transcript_4416	PP4_RS21730	arcA	91.429	100.0	100.0	reciprocal_best_hit	mapped
+NP_743163.1	PP_1002	arcD-I	WP_010952187.1	WP_016501294.1	unassigned_transcript_4415	PP4_RS21725	arcD	98.105	100.0	100.0	reciprocal_best_hit	mapped
+NP_743164.1	PP_1003	arcD-II	WP_003255067.1	WP_016501293.1	unassigned_transcript_4414	PP4_RS21720	arcD	97.684	100.0	100.0	reciprocal_best_hit	mapped
+NP_743170.1	PP_1009	gapA	WP_010952192.1	WP_016501287.1	unassigned_transcript_4408	PP4_RS21690	gap	96.988	99.0	99.7	reciprocal_best_hit	mapped
+NP_743171.1	PP_1010	edd	WP_003255057.1	WP_016501286.1	unassigned_transcript_4407	PP4_RS21685	edd	99.013	100.0	100.0	reciprocal_best_hit	mapped
+NP_743172.1	PP_1011	glk	WP_010952193.1	WP_016501285.1	unassigned_transcript_4406	PP4_RS21680		95.611	100.0	99.688	reciprocal_best_hit	mapped
+NP_743176.1	PP_1015	gtsA	WP_010952197.1	WP_016501282.1	unassigned_transcript_4403	PP4_RS21665		93.705	96.0	96.495	reciprocal_best_hit	mapped
+NP_743177.1	PP_1016	gtsB	WP_003255050.1	WP_003255050.1	unassigned_transcript_4402	PP4_RS21660		100.0	100.0	100.0	reciprocal_best_hit	mapped
+NP_743178.1	PP_1017	gtsC	WP_010952198.1	WP_016501281.1	unassigned_transcript_4401	PP4_RS21655		97.509	100.0	100.0	reciprocal_best_hit	mapped
+NP_743179.1	PP_1018	gtsD	WP_003255047.1	WP_016501280.1	unassigned_transcript_4400	PP4_RS21650		96.094	100.0	100.0	reciprocal_best_hit	mapped
+NP_743183.1	PP_1022	zwfA	WP_010952201.1	WP_016501277.1	unassigned_transcript_4396	PP4_RS21630	zwf	97.137	100.0	100.0	reciprocal_best_hit	mapped
+NP_743184.1	PP_1023	pgl		WP_016501276.1	unassigned_transcript_4395	PP4_RS21625	pgl	94.093	98.0	100.0	direct_unique_best_hit	mapped
+NP_743185.1	PP_1024	eda		WP_016501275.1	unassigned_transcript_4394	PP4_RS21620		99.115	96.0	100.0	direct_unique_best_hit	mapped
+NP_743186.1	PP_1025	leuA	WP_010952204.1	WP_016501273.1	unassigned_transcript_4392	PP4_RS21610	leuA	99.102	100.0	100.0	reciprocal_best_hit	mapped
+NP_743221.1	PP_1060			WP_016497578.1	unassigned_transcript_301	PP4_RS01485		77.425	99.0	96.403	direct_unique_best_hit	mapped
+NP_743240.1	PP_1079	argF	WP_010952249.1	WP_016498209.1	unassigned_transcript_1062	PP4_RS05195	argF	99.02	100.0	100.0	reciprocal_best_hit	mapped
+NP_743249.1	PP_1088	argG	WP_003254941.1	WP_016498216.1	unassigned_transcript_1071	PP4_RS05245		99.506	100.0	100.0	reciprocal_best_hit	mapped
+NP_743271.2	PP_1110			WP_016498234.1	unassigned_transcript_1093	PP4_RS05355		94.421	99.0	98.312	direct_unique_best_hit	mapped
+NP_743330.1	PP_1170	gnl	WP_010952324.1	WP_016498290.1	unassigned_transcript_1159	PP4_RS05685		93.174	100.0	100.0	reciprocal_best_hit	mapped
+NP_743392.1	PP_1232		WP_010952374.1	WP_016498336.1	unassigned_transcript_1217	PP4_RS05980		95.607	100.0	100.0	reciprocal_best_hit	mapped
+NP_743397.1	PP_1237	dapA	WP_003254739.1	WP_016498340.1	unassigned_transcript_1223	PP4_RS06010	dapA	96.61	100.0	100.0	reciprocal_best_hit	mapped
+NP_743411.3	PP_1251	mqo-II		WP_016498351.1	unassigned_transcript_1237	PP4_RS06080	mqo	97.343	100.0	96.697	direct_unique_best_hit	mapped
+NP_743461.1	PP_1301	degS		WP_016498023.1	unassigned_transcript_849	PP4_RS04150	algW	97.927	96.0	100.0	direct_unique_best_hit	mapped
+NP_743481.1	PP_1321	sspB		WP_016498036.1	unassigned_transcript_867	PP4_RS04240		95.105	93.0	100.704	direct_unique_best_hit	mapped
+NP_743490.1	PP_1331	ftsI		WP_162471779.1	unassigned_transcript_878	PP4_RS04290		97.418	99.0	100.345	direct_unique_best_hit	mapped
+NP_743505.1	PP_1346	argJ	WP_010952461.1	WP_016498057.1	unassigned_transcript_893	PP4_RS04365	argJ	98.765	100.0	100.0	reciprocal_best_hit	mapped
+NP_743521.1	PP_1362	pykA	WP_003251912.1	WP_016498105.1	unassigned_transcript_947	PP4_RS04630	pyk	98.554	100.0	100.0	reciprocal_best_hit	mapped
+NP_743536.1	PP_1377	pcaF-I		WP_016498120.1	unassigned_transcript_963	PP4_RS04705	pcaF	97.5	100.0	100.0	direct_unique_best_hit	mapped
+NP_743588.1	PP_1430			WP_016498173.1	unassigned_transcript_1020	PP4_RS04985		96.567	95.0	100.0	direct_unique_best_hit	mapped
+NP_743590.1	PP_1432	lepB	WP_003252057.1	WP_016498175.1	unassigned_transcript_1022	PP4_RS04995	lepB	96.831	100.0	100.0	reciprocal_best_hit	mapped
+NP_743601.1	PP_1443	lon-I	WP_010952543.1	WP_016498184.1	unassigned_transcript_1033	PP4_RS05050	lon	97.764	100.0	100.0	reciprocal_best_hit	mapped
+NP_743602.1	PP_1444	gcd	WP_010952544.1	WP_016498185.1	unassigned_transcript_1034	PP4_RS05055		97.883	100.0	100.0	reciprocal_best_hit	mapped
+NP_743628.1	PP_1470	hom	WP_003252157.1	WP_016501225.1	unassigned_transcript_4342	PP4_RS21360		99.309	100.0	100.0	reciprocal_best_hit	mapped
+NP_743657.1	PP_1500		WP_010952592.1	WP_041167854.1	unassigned_transcript_4315	PP4_RS21220		96.091	100.0	100.0	reciprocal_best_hit	mapped
+NP_743682.1	PP_1525	dapE	WP_004574734.1	WP_016501176.1	unassigned_transcript_4292	PP4_RS21105	dapE	98.433	100.0	100.0	reciprocal_best_hit	mapped
+NP_743687.1	PP_1530	dapD	WP_004574732.1	WP_016485200.1	unassigned_transcript_4287	PP4_RS21080	dapD	98.256	100.0	100.0	reciprocal_best_hit	mapped
+NP_743745.1	PP_1588	dapC	WP_010952672.1	WP_016501170.1	unassigned_transcript_4282	PP4_RS21060	dapC	97.739	100.0	100.0	reciprocal_best_hit	mapped
+NP_743747.1	PP_1590	map	WP_003252286.1	WP_016501168.1	unassigned_transcript_4280	PP4_RS21050	map	98.462	100.0	100.0	reciprocal_best_hit	mapped
+NP_743755.1	PP_1598	rseP		WP_016501162.1	unassigned_transcript_4272	PP4_RS21010	rseP	94.889	99.0	100.0	direct_unique_best_hit	mapped
+NP_743759.1	PP_1602	fabZ		WP_008094893.1	unassigned_transcript_4268	PP4_RS20990	fabZ	99.315	90.0	100.0	direct_unique_best_hit	mapped
+NP_743764.1	PP_1607	accA	WP_003252323.1	WP_016501155.1	unassigned_transcript_4263	PP4_RS20965	accA	98.73	100.0	100.0	reciprocal_best_hit	mapped
+NP_743769.1	PP_1612	eno	WP_003252333.1	WP_016501151.1	unassigned_transcript_4259	PP4_RS20945	eno	99.068	100.0	100.0	reciprocal_best_hit	mapped
+NP_743811.1	PP_1654	cysM	WP_010952713.1	WP_041167848.1	unassigned_transcript_4218	PP4_RS20740	cysM	99.329	99.0	99.666	reciprocal_best_hit	mapped
+NP_743876.1	PP_1719	prc		WP_165605159.1	unassigned_transcript_4156	PP4_RS20435		97.547	98.0	100.0	direct_unique_best_hit	mapped
+NP_743887.1	PP_1730	apeB	WP_010952777.1	WP_016501051.1	unassigned_transcript_4145	PP4_RS20385		95.338	100.0	100.0	reciprocal_best_hit	mapped
+NP_743904.1	PP_1748		WP_010952789.1	WP_003252630.1	unassigned_transcript_4121	PP4_RS20265		98.477	100.0	100.0	reciprocal_best_hit	mapped
+NP_743906.1	PP_1750	asnB	WP_010952790.1	WP_016501029.1	unassigned_transcript_4119	PP4_RS20255		97.647	100.0	100.0	reciprocal_best_hit	mapped
+NP_743911.1	PP_1755	fumC-II	WP_010952795.1	WP_016501025.1	unassigned_transcript_4115	PP4_RS20235		97.198	100.0	100.0	reciprocal_best_hit	mapped
+NP_743922.1	PP_1766	mtnA	WP_010952804.1	WP_016501015.1	unassigned_transcript_4104	PP4_RS20180	mtnA	94.134	100.0	100.0	reciprocal_best_hit	mapped
+NP_743924.1	PP_1768	serC	WP_010952806.1	WP_041168115.1	unassigned_transcript_4102	PP4_RS20170	serC	97.507	100.0	100.0	reciprocal_best_hit	mapped
+NP_743925.1	PP_1769	pheA		WP_016501012.1	unassigned_transcript_4101	PP4_RS20165	pheA	99.176	99.0	100.0	direct_unique_best_hit	mapped
+NP_743926.1	PP_1770	aroA		WP_016501011.1	unassigned_transcript_4100	PP4_RS20160		96.8	100.0	100.0	direct_unique_best_hit	mapped
+NP_743985.1	PP_1830	aroC	WP_003252803.1	WP_016500963.1	unassigned_transcript_4047	PP4_RS19905	aroC	99.171	99.0	99.725	reciprocal_best_hit	mapped
+NP_744021.1	PP_1866	aroH	WP_010952895.1	WP_016500934.1	unassigned_transcript_4015	PP4_RS19745		98.884	100.0	100.0	reciprocal_best_hit	mapped
+NP_744026.1	PP_1871	htpX	WP_010952899.1	WP_016500929.1	unassigned_transcript_4010	PP4_RS19720	htpX	98.983	100.0	100.0	reciprocal_best_hit	mapped
+NP_744048.1	PP_1893	fadE	WP_010952920.1	WP_016500913.1	unassigned_transcript_3988	PP4_RS19610		91.553	99.0	98.773	reciprocal_best_hit	mapped
+NP_744062.1	PP_1908		WP_010952932.1	WP_016500898.1	unassigned_transcript_3972	PP4_RS19535		95.181	100.0	100.0	reciprocal_best_hit	mapped
+NP_744067.1	PP_1913	fabD	WP_010952936.1	WP_016500894.1	unassigned_transcript_3967	PP4_RS19510	fabD	97.115	100.0	100.0	reciprocal_best_hit	mapped
+NP_744068.1	PP_1914	fabG	WP_003247160.1	WP_016500893.1	unassigned_transcript_3966	PP4_RS19505	fabG	99.187	100.0	100.0	reciprocal_best_hit	mapped
+NP_744069.1	PP_1915	acpP	WP_010952937.1	WP_016500892.1	unassigned_transcript_3965	PP4_RS19500	acpP	93.59	100.0	100.0	reciprocal_best_hit	mapped
+NP_744070.1	PP_1916	fabF	WP_010952938.1	WP_012271164.1	unassigned_transcript_3964	PP4_RS19495	fabF	99.758	100.0	100.0	reciprocal_best_hit	mapped
+NP_744097.1	PP_1945	folD1									reciprocal_best_hit	unmapped
+NP_744099.1	PP_1947										reciprocal_best_hit	unmapped
+NP_744136.1	PP_1985	leuC	WP_010953002.1	WP_016500870.1	unassigned_transcript_3933	PP4_RS19345	leuC	98.742	100.0	100.0	reciprocal_best_hit	mapped
+NP_744137.1	PP_1986	leuD	WP_010953003.1	WP_016500869.1	unassigned_transcript_3932	PP4_RS19340	leuD	96.729	100.0	100.0	reciprocal_best_hit	mapped
+NP_744139.1	PP_1988	leuB	WP_003247194.1	WP_016500867.1	unassigned_transcript_3930	PP4_RS19330	leuB	99.444	100.0	100.0	reciprocal_best_hit	mapped
+NP_744140.1	PP_1989	asd	WP_003247195.1	WP_016500866.1	unassigned_transcript_3929	PP4_RS19325	asd	99.189	100.0	100.0	reciprocal_best_hit	mapped
+NP_744143.1	PP_1992	asd	WP_010953006.1	WP_016500865.1	unassigned_transcript_3928	PP4_RS19320		96.707	100.0	100.0	reciprocal_best_hit	mapped
+NP_744145.1	PP_1995	trpF	WP_010953008.1	WP_016500862.1	unassigned_transcript_3925	PP4_RS19305		97.087	100.0	100.0	reciprocal_best_hit	mapped
+NP_744146.1	PP_1996	accD	WP_004574892.1	WP_009686024.1	unassigned_transcript_3924	PP4_RS19300	accD	98.653	100.0	100.0	reciprocal_best_hit	mapped
+NP_744151.1	PP_2001	metZ	WP_010953012.1	WP_016500858.1	unassigned_transcript_3919	PP4_RS19275		98.511	100.0	100.0	reciprocal_best_hit	mapped
+NP_744162.1	PP_2012	ppnK		WP_008090067.1	unassigned_transcript_3905	PP4_RS19210		98.986	94.0	100.0	direct_unique_best_hit	mapped
+NP_744164.1	PP_2014										reciprocal_best_hit	unmapped
+NP_744167.1	PP_2017	pepN	WP_010953026.1	WP_016500843.1	unassigned_transcript_3900	PP4_RS19185	pepN	96.158	100.0	100.0	reciprocal_best_hit	mapped
+NP_744201.1	PP_2051	fadA	WP_010953057.1	WP_016500612.1	unassigned_transcript_3648	PP4_RS17965		75.127	100.0	100.0	reciprocal_best_hit	mapped
+NP_744227.1	PP_2077	lysA-I	WP_010953079.1	WP_016500800.1	unassigned_transcript_3856	PP4_RS18970	lysA	96.585	100.0	100.0	reciprocal_best_hit	mapped
+NP_744230.2	PP_2080	gdhB	WP_049586685.1	WP_016500797.1	unassigned_transcript_3853	PP4_RS18955		98.766	100.0	100.0	reciprocal_best_hit	mapped
+NP_744248.1	PP_2098	dacB		WP_016500780.1	unassigned_transcript_3834	PP4_RS18865	dacB	97.452	100.0	97.113	direct_unique_best_hit	mapped
+NP_744261.1	PP_2112	acnA-I	WP_010953110.1	WP_016500767.1	unassigned_transcript_3820	PP4_RS18795	acnA	95.504	99.0	99.89	reciprocal_best_hit	mapped
+NP_744285.1	PP_2136	fadB	WP_010953127.1	WP_016500746.1	unassigned_transcript_3797	PP4_RS18690	fadB	98.322	100.0	100.0	reciprocal_best_hit	mapped
+NP_744286.1	PP_2137	pcaF-II	WP_010953128.1	WP_016500745.1	unassigned_transcript_3796	PP4_RS18685	fadA	99.233	100.0	100.0	reciprocal_best_hit	mapped
+NP_744292.1	PP_2143	lexA1	WP_010953131.1	WP_016500740.1	unassigned_transcript_3790	PP4_RS18655	lexA	98.02	100.0	100.0	reciprocal_best_hit	mapped
+NP_744298.1	PP_2149	gapB	WP_010953137.1	WP_041167813.1	unassigned_transcript_3783	PP4_RS18620		98.768	100.0	100.0	reciprocal_best_hit	mapped
+NP_744355.1	PP_2206	yegQ		WP_016500645.1	unassigned_transcript_3691	PP4_RS18175	trhP	96.948	100.0	95.946	direct_unique_best_hit	mapped
+NP_744363.1	PP_2214	fadBA	WP_003250091.1	WP_016500635.1	unassigned_transcript_3681	PP4_RS18125		97.647	100.0	100.0	reciprocal_best_hit	mapped
+NP_744365.1	PP_2216	acd	WP_010953197.1	WP_016500633.1	unassigned_transcript_3679	PP4_RS18115		97.067	100.0	100.0	reciprocal_best_hit	mapped
+NP_744385.2	PP_2236		WP_049588163.1	WP_016500621.1	unassigned_transcript_3662	PP4_RS18035		92.969	100.0	100.0	reciprocal_best_hit	mapped
+NP_744387.1	PP_2238			WP_016500619.1	unassigned_transcript_3660	PP4_RS18025		92.691	95.0	100.0	direct_unique_best_hit	mapped
+NP_744414.1	PP_2265	folD2	WP_003250234.1	WP_016500563.1	unassigned_transcript_3596	PP4_RS17710	folD	98.239	100.0	100.0	reciprocal_best_hit	mapped
+NP_744449.1	PP_2300	clpP	WP_003259400.1	WP_012271562.1	unassigned_transcript_3587	PP4_RS17665	clpP	97.653	100.0	100.0	reciprocal_best_hit	mapped
+NP_744451.1	PP_2302	lon-II	WP_010953272.1	WP_016500558.1	unassigned_transcript_3585	PP4_RS17655	lon	99.123	100.0	100.0	reciprocal_best_hit	mapped
+NP_744467.1	PP_2318	tesA	WP_010953286.1	WP_016500544.1	unassigned_transcript_3569	PP4_RS17575		95.522	100.0	100.0	reciprocal_best_hit	mapped
+NP_744473.1	PP_2324	aroF-I		WP_016500541.1	unassigned_transcript_3564	PP4_RS17550		97.765	97.0	100.0	direct_unique_best_hit	mapped
+NP_744477.1	PP_2328	cysH	WP_003250299.1	WP_016500538.1	unassigned_transcript_3560	PP4_RS17530		99.59	100.0	100.0	reciprocal_best_hit	mapped
+NP_744485.1	PP_2336	acnA-II	WP_010953299.1	WP_016500531.1	unassigned_transcript_3552	PP4_RS17490	acnD	98.84	100.0	100.0	reciprocal_best_hit	mapped
+NP_744488.1	PP_2339	acnB	WP_010953302.1	WP_041167795.1	unassigned_transcript_3549	PP4_RS17475	acnB	98.619	100.0	100.0	reciprocal_best_hit	mapped
+NP_744513.1	PP_2364		WP_010953323.1	WP_041168096.1	unassigned_transcript_3525	PP4_RS17355		94.764	100.0	100.0	reciprocal_best_hit	mapped
+NP_744524.1	PP_2375	metH	WP_010953333.1	WP_016500491.1	unassigned_transcript_3509	PP4_RS17275	metH	97.814	100.0	100.0	reciprocal_best_hit	mapped
+NP_744554.1	PP_2406	aroE	WP_010953360.1	WP_041167787.1	unassigned_transcript_3478	PP4_RS17120		95.745	100.0	100.0	reciprocal_best_hit	mapped
+NP_744555.1	PP_2407	aroQ2	WP_003250469.1	WP_041167786.1	unassigned_transcript_3477	PP4_RS17115	aroQ	95.973	100.0	100.0	reciprocal_best_hit	mapped
+NP_744673.1	PP_2528		WP_010953458.1	WP_016499044.1	unassigned_transcript_2014	PP4_RS09905		98.118	100.0	100.0	reciprocal_best_hit	mapped
+NP_744704.1	PP_2559	hasE									reciprocal_best_hit	unmapped
+NP_744705.1	PP_2560	aprDA									reciprocal_best_hit	unmapped
+NP_744783.1	PP_2639	dapA									reciprocal_best_hit	unmapped
+NP_744837.1	PP_2693		WP_010953609.1	WP_016500202.1	unassigned_transcript_3212	PP4_RS15810		96.951	100.0	100.0	reciprocal_best_hit	mapped
+NP_744842.1	PP_2698	metE	WP_010953614.1	WP_016500134.1	unassigned_transcript_3143	PP4_RS15465		91.813	99.0	98.559	reciprocal_best_hit	mapped
+NP_744869.1	PP_2725	pfpI		WP_016500092.1	unassigned_transcript_3101	PP4_RS15255		92.135	99.0	99.441	direct_unique_best_hit	mapped
+NP_744906.1	PP_2762	sfnA									reciprocal_best_hit	unmapped
+NP_744920.1	PP_2776										reciprocal_best_hit	unmapped
+NP_744999.1	PP_2855		WP_010953761.1	WP_016500029.1	unassigned_transcript_3032	PP4_RS14935		95.133	100.0	100.0	reciprocal_best_hit	mapped
+NP_745053.1	PP_2909	glaH	WP_010953811.1	WP_016499976.1	unassigned_transcript_2979	PP4_RS14670	glaH	96.615	100.0	100.0	reciprocal_best_hit	mapped
+NP_745069.1	PP_2925	mqo-III	WP_010953827.1	WP_016499954.1	unassigned_transcript_2958	PP4_RS14565	mqo	94.476	97.0	100.0	reciprocal_best_hit	mapped
+NP_745085.1	PP_2941										reciprocal_best_hit	unmapped
+NP_745146.1	PP_3002	aroE	WP_010953902.1	WP_016500332.1	unassigned_transcript_3348	PP4_RS16470	aroE	88.603	100.0	100.0	reciprocal_best_hit	mapped
+NP_745147.1	PP_3003	aroQ-III	WP_010953903.1	WP_016500331.1	unassigned_transcript_3347	PP4_RS16465	aroQ	92.414	100.0	100.0	reciprocal_best_hit	mapped
+NP_745189.1	PP_3045										reciprocal_best_hit	unmapped
+NP_745215.1	PP_3071	aacS									reciprocal_best_hit	unmapped
+NP_745224.1	PP_3080	aroF-II	WP_010953978.1	WP_016499506.1	unassigned_transcript_2497	PP4_RS12310		95.467	100.0	100.0	reciprocal_best_hit	mapped
+NP_745260.1	PP_3116	lexA2		WP_115283618.1	unassigned_transcript_2553	PP4_RS12595	lexA	95.545	100.0	100.0	direct_unique_best_hit	mapped
+NP_745267.1	PP_3123	atoB	WP_010954014.1	WP_016499568.1	unassigned_transcript_2560	PP4_RS12630		98.165	100.0	100.0	reciprocal_best_hit	mapped
+NP_745280.1	PP_3136		WP_010954025.1	WP_016499581.1	unassigned_transcript_2575	PP4_RS12700		94.253	100.0	100.0	reciprocal_best_hit	mapped
+NP_745292.1	PP_3148		WP_010954037.1	WP_016499593.1	unassigned_transcript_2587	PP4_RS12760		99.115	100.0	100.0	reciprocal_best_hit	mapped
+NP_745339.1	PP_3195										reciprocal_best_hit	unmapped
+NP_745351.1	PP_3207										reciprocal_best_hit	unmapped
+NP_745410.1	PP_3267			WP_016499661.1	unassigned_transcript_2655	PP4_RS13090		90.164	92.0	100.0	direct_unique_best_hit	mapped
+NP_745425.1	PP_3282	paaH	WP_010954161.1	WP_016499679.1	unassigned_transcript_2674	PP4_RS13185	paaH	91.485	100.0	100.0	reciprocal_best_hit	mapped
+NP_745427.1	PP_3284	paaF	WP_010954163.1	WP_041168025.1	unassigned_transcript_2676	PP4_RS13195	paaF	89.883	100.0	100.0	reciprocal_best_hit	mapped
+NP_745517.1	PP_3377	kguT	WP_010954250.1	WP_016499836.1	unassigned_transcript_2836	PP4_RS13965		99.068	99.0	99.767	reciprocal_best_hit	mapped
+NP_745518.1	PP_3378	kguK	WP_010954251.1	WP_016499837.1	unassigned_transcript_2837	PP4_RS13970		93.671	100.0	100.0	reciprocal_best_hit	mapped
+NP_745519.1	PP_3379	kguE	WP_010954252.1	WP_016499838.1	unassigned_transcript_2838	PP4_RS13975		91.12	100.0	100.0	reciprocal_best_hit	mapped
+NP_745554.1	PP_3416	gnuK	WP_010954284.1	WP_016499891.1	unassigned_transcript_2893	PP4_RS14240		97.207	100.0	100.0	reciprocal_best_hit	mapped
+NP_745555.1	PP_3417	gntT	WP_010954285.1	WP_016499892.1	unassigned_transcript_2894	PP4_RS14245		98.667	100.0	100.0	reciprocal_best_hit	mapped
+NP_745584.1	PP_3446	ilvA-I		WP_016499486.1	unassigned_transcript_2478	PP4_RS12215	ilvA	96.339	98.0	100.0	direct_unique_best_hit	mapped
+NP_745634.1	PP_3497	ydcP	WP_004577525.1	WP_016499415.1	unassigned_transcript_2406	PP4_RS11855		97.297	100.0	100.0	reciprocal_best_hit	mapped
+NP_745648.1	PP_3511	ilvE	WP_010954369.1	WP_016487380.1	unassigned_transcript_2396	PP4_RS11805		99.115	100.0	100.0	reciprocal_best_hit	mapped
+NP_745670.1	PP_3533	ocd	WP_010954390.1	WP_016499379.1	unassigned_transcript_2368	PP4_RS11665		96.286	100.0	100.0	reciprocal_best_hit	mapped
+NP_745672.1	PP_3535		WP_010954392.1	WP_016499376.1	unassigned_transcript_2365	PP4_RS11650	ggt	88.423	100.0	100.0	reciprocal_best_hit	mapped
+NP_745708.1	PP_3571			WP_016499340.1	unassigned_transcript_2328	PP4_RS11470	argE	93.523	99.0	99.485	direct_unique_best_hit	mapped
+NP_745715.1	PP_3578	pgm	WP_010954431.1	WP_016499328.1	unassigned_transcript_2316	PP4_RS11410	pgm	96.514	100.0	100.0	reciprocal_best_hit	mapped
+NP_745769.1	PP_3633	argC2	WP_010954475.1	WP_016499278.1	unassigned_transcript_2262	PP4_RS11140	argC	93.61	100.0	100.0	reciprocal_best_hit	mapped
+NP_745848.1	PP_3715	catB	WP_010954551.1	WP_016499204.1	unassigned_transcript_2184	PP4_RS10750		96.783	100.0	100.0	reciprocal_best_hit	mapped
+NP_745872.1	PP_3741	mrdA-I	WP_010954574.1	WP_016499163.1	unassigned_transcript_2142	PP4_RS10540	mrdA	97.46	99.0	99.842	reciprocal_best_hit	mapped
+NP_745884.1	PP_3754	bktB	WP_010954586.1	WP_016499125.1	unassigned_transcript_2101	PP4_RS10335		94.416	100.0	100.0	reciprocal_best_hit	mapped
+NP_745908.1	PP_3778	proC									reciprocal_best_hit	unmapped
+NP_745920.1	PP_3790	dapF									reciprocal_best_hit	unmapped
+NP_745924.1	PP_3794	pbpG	WP_010954624.1	WP_041167677.1	unassigned_transcript_2078	PP4_RS10220	pbpG	98.052	100.0	100.0	reciprocal_best_hit	mapped
+NP_745974.1	PP_3844										reciprocal_best_hit	unmapped
+NP_746008.1	PP_3878										reciprocal_best_hit	unmapped
+NP_746052.1	PP_3922	sohB	WP_010954747.1	WP_016498905.1	unassigned_transcript_1860	PP4_RS09155	sohB	96.165	100.0	100.0	reciprocal_best_hit	mapped
+NP_746130.1	PP_4000	serS	WP_010954808.1	WP_016498861.1	unassigned_transcript_1812	PP4_RS08915	serS	96.948	100.0	100.0	reciprocal_best_hit	mapped
+NP_746136.1	PP_4006	bpt	WP_003251215.1	WP_016498855.1	unassigned_transcript_1806	PP4_RS08885		96.596	100.0	100.0	reciprocal_best_hit	mapped
+NP_746138.1	PP_4008	clpA	WP_010954812.1	WP_016498854.1	unassigned_transcript_1804	PP4_RS08875	clpA	98.413	100.0	100.0	reciprocal_best_hit	mapped
+NP_746139.1	PP_4009	clpS	WP_003251220.1	WP_016488124.1	unassigned_transcript_1803	PP4_RS08870	clpS	99.167	100.0	100.0	reciprocal_best_hit	mapped
+NP_746141.1	PP_4011	icd	WP_010954814.1	WP_016498852.1	unassigned_transcript_1801	PP4_RS08860	icd	98.565	100.0	100.0	reciprocal_best_hit	mapped
+NP_746168.1	PP_4042	zwfB	WP_010954837.1	WP_016498823.1	unassigned_transcript_1772	PP4_RS08715	zwf	96.607	100.0	100.0	reciprocal_best_hit	mapped
+NP_746176.1	PP_4050	glgA	WP_010954845.1	WP_016498821.1	unassigned_transcript_1769	PP4_RS08705	glgA	98.073	100.0	100.0	reciprocal_best_hit	mapped
+NP_746178.1	PP_4052	malQ	WP_010954847.1	WP_016498819.1	unassigned_transcript_1767	PP4_RS08695	malQ	92.163	100.0	100.0	reciprocal_best_hit	mapped
+NP_746181.1	PP_4055	glgX	WP_010954850.1	WP_041167663.1	unassigned_transcript_1764	PP4_RS08680	glgX	98.047	100.0	100.0	reciprocal_best_hit	mapped
+NP_746184.1	PP_4058	glgB	WP_010954852.1	WP_016498813.1	unassigned_transcript_1761	PP4_RS08665	glgB	95.109	100.0	100.0	reciprocal_best_hit	mapped
+NP_746232.1	PP_4113		WP_010954894.1	WP_016498755.1	unassigned_transcript_1700	PP4_RS08370		90.811	98.0	97.54	reciprocal_best_hit	mapped
+NP_746235.1	PP_4116	aceA	WP_010954897.1	WP_012273289.1	unassigned_transcript_1698	PP4_RS08360	aceA	98.186	100.0	100.0	reciprocal_best_hit	mapped
+NP_746292.1	PP_4175	fabB	WP_010954940.1	WP_016498705.1	unassigned_transcript_1640	PP4_RS08070	fabB	98.276	100.0	100.0	reciprocal_best_hit	mapped
+NP_746302.1	PP_4185	sucD	WP_003254203.1	WP_003254203.1	unassigned_transcript_1630	PP4_RS08020	sucD	100.0	100.0	100.0	reciprocal_best_hit	mapped
+NP_746303.1	PP_4186	sucC	WP_003254205.1	WP_008091914.1	unassigned_transcript_1629	PP4_RS08015	sucC	97.68	100.0	100.0	reciprocal_best_hit	mapped
+NP_746305.1	PP_4188	sucB	WP_010954950.1	WP_016498694.1	unassigned_transcript_1627	PP4_RS08005	odhB	98.771	100.0	100.246	reciprocal_best_hit	mapped
+NP_746306.1	PP_4189	sucA	WP_010954951.1	WP_016498693.1	unassigned_transcript_1626	PP4_RS08000		98.94	100.0	100.0	reciprocal_best_hit	mapped
+NP_746307.1	PP_4190	sdhB	WP_003254212.1	WP_008091906.1	unassigned_transcript_1625	PP4_RS07995		98.718	100.0	100.0	reciprocal_best_hit	mapped
+NP_746308.1	PP_4191	sdhA	WP_003254213.1	WP_016498692.1	unassigned_transcript_1624	PP4_RS07990	sdhA	97.458	100.0	100.0	reciprocal_best_hit	mapped
+NP_746309.1	PP_4192	sdhD	WP_003254214.1	WP_016498691.1	unassigned_transcript_1623	PP4_RS07985	sdhD	99.18	100.0	100.0	reciprocal_best_hit	mapped
+NP_746310.1	PP_4193	sdhC	WP_008091902.1	WP_008091902.1	unassigned_transcript_1622	PP4_RS07980	sdhC	100.0	100.0	100.0	reciprocal_best_hit	mapped
+NP_746311.1	PP_4194	gltA	WP_003254218.1	WP_016488282.1	unassigned_transcript_1621	PP4_RS07975	gltA	99.534	100.0	100.0	reciprocal_best_hit	mapped
+NP_746330.1	PP_4213	pvdM		WP_016498674.1	unassigned_transcript_1603	PP4_RS07885		78.747	97.0	99.777	direct_unique_best_hit	mapped
+NP_746417.1	PP_4301	pyk	WP_003254349.1	WP_016498601.1	unassigned_transcript_1521	PP4_RS07485	pyk	99.363	100.0	100.0	reciprocal_best_hit	mapped
+NP_746513.1	PP_4399		WP_010955109.1	WP_162471783.1	unassigned_transcript_1419	PP4_RS06975		96.368	100.0	100.243	reciprocal_best_hit	mapped
+NP_746545.2	PP_4432										reciprocal_best_hit	unmapped
+NP_746547.1	PP_4434	dadA1		WP_016502215.1	unassigned_transcript_5457	PP4_RS26875	dadA	79.953	99.0	98.848	direct_unique_best_hit	mapped
+NP_746584.1	PP_4473		WP_003254504.1	WP_016498499.1	unassigned_transcript_1400	PP4_RS06875		98.297	100.0	100.0	reciprocal_best_hit	mapped
+NP_746586.1	PP_4475	astE	WP_010955173.1	WP_016498495.1	unassigned_transcript_1397	PP4_RS06860	astE	95.821	100.0	100.0	reciprocal_best_hit	mapped
+NP_746588.1	PP_4477	astB	WP_010955174.1	WP_016498494.1	unassigned_transcript_1395	PP4_RS06850	astB	96.659	100.0	100.0	reciprocal_best_hit	mapped
+NP_746589.1	PP_4478	astD	WP_010955175.1	WP_016498493.1	unassigned_transcript_1394	PP4_RS06845	astD	97.331	100.0	100.0	reciprocal_best_hit	mapped
+NP_746590.1	PP_4479	astA-I	WP_010955176.1	WP_016498492.1	unassigned_transcript_1393	PP4_RS06840	astA	98.246	100.0	100.0	reciprocal_best_hit	mapped
+NP_746591.1	PP_4480	astA-II	WP_010955177.1	WP_016488492.1	unassigned_transcript_1392	PP4_RS06835	aruF	95.575	100.0	100.0	reciprocal_best_hit	mapped
+NP_746592.1	PP_4481	argD	WP_010955178.1	WP_016498491.1	unassigned_transcript_1391	PP4_RS06830		97.783	100.0	100.0	reciprocal_best_hit	mapped
+NP_746598.2	PP_4487	acsA-I		WP_016498485.1	unassigned_transcript_1385	PP4_RS06800	acs	99.234	94.0	100.0	direct_unique_best_hit	mapped
+NP_746601.1	PP_4490	phhA	WP_003254528.1	WP_016498483.1	unassigned_transcript_1382	PP4_RS06785	phhA	98.473	100.0	100.0	reciprocal_best_hit	mapped
+NP_746656.1	PP_4547		WP_010955221.1	WP_016498430.1	unassigned_transcript_1324	PP4_RS06500		97.577	100.0	100.0	reciprocal_best_hit	mapped
+NP_746658.1	PP_4549	fadD-I	WP_010955223.1	WP_016498428.1	unassigned_transcript_1322	PP4_RS06490	fadD1	98.761	100.0	100.0	reciprocal_best_hit	mapped
+NP_746659.1	PP_4550	fadD-II	WP_010955224.1	WP_016498427.1	unassigned_transcript_1321	PP4_RS06485	fadD2	96.975	100.0	100.0	reciprocal_best_hit	mapped
+NP_746680.1	PP_4571	cysK	WP_010955241.1	WP_016498392.1	unassigned_transcript_1284	PP4_RS06305	cysK	97.84	100.0	100.0	reciprocal_best_hit	mapped
+NP_746692.1	PP_4583		WP_010955252.1	WP_016498382.1	unassigned_transcript_1271	PP4_RS06250		94.845	99.0	99.853	reciprocal_best_hit	mapped
+NP_746730.1	PP_4621	hmgA	WP_010955283.1	WP_016497954.1	unassigned_transcript_775	PP4_RS03785	hmgA	96.305	100.0	100.0	reciprocal_best_hit	mapped
+NP_746745.1	PP_4636	yqeF	WP_010955297.1	WP_041167958.1	unassigned_transcript_756	PP4_RS03690		96.429	100.0	100.0	reciprocal_best_hit	mapped
+NP_746746.1	PP_4637		WP_010955298.1	WP_016497935.1	unassigned_transcript_755	PP4_RS03685		79.197	100.0	103.008	reciprocal_best_hit	mapped
+NP_746766.1	PP_4657	ypfJ		WP_016497917.1	unassigned_transcript_733	PP4_RS03575	ypfJ	95.318	93.0	100.0	direct_unique_best_hit	mapped
+NP_746768.1	PP_4659	ggt	WP_010955315.1	WP_016489113.1	unassigned_transcript_729	PP4_RS03560	ggt	99.64	100.0	100.0	reciprocal_best_hit	mapped
+NP_746775.1	PP_4666	mmsB	WP_010955321.1	WP_016497903.1	unassigned_transcript_714	PP4_RS03485	mmsB	98.644	100.0	100.0	reciprocal_best_hit	mapped
+NP_746787.1	PP_4678	ilvC	WP_003250043.1	WP_003250043.1	unassigned_transcript_4770	PP4_RS23485	ilvC	100.0	100.0	100.0	reciprocal_best_hit	mapped
+NP_746788.1	PP_4679	ilvH	WP_003250040.1	WP_003250040.1	unassigned_transcript_4771	PP4_RS23490	ilvN	100.0	100.0	100.0	reciprocal_best_hit	mapped
+NP_746789.1	PP_4680	ilvI	WP_010955332.1	WP_041168126.1	unassigned_transcript_4772	PP4_RS23495		98.606	100.0	100.0	reciprocal_best_hit	mapped
+NP_746792.1	PP_4683	mrcB	WP_010955335.1	WP_016501609.1	unassigned_transcript_4775	PP4_RS23510	mrcB	97.93	100.0	100.0	reciprocal_best_hit	mapped
+NP_746811.1	PP_4702	acsA-II	WP_010955351.1	WP_016501627.1	unassigned_transcript_4795	PP4_RS23610	acs	96.118	100.0	100.0	reciprocal_best_hit	mapped
+NP_746823.1	PP_4715	tpiA	WP_003249956.1	WP_016501639.1	unassigned_transcript_4812	PP4_RS23695	tpiA	98.008	100.0	100.0	reciprocal_best_hit	mapped
+NP_746826.1	PP_4718	ftsH		WP_041167879.1	unassigned_transcript_4815	PP4_RS23710	ftsH	99.211	99.0	100.0	direct_unique_best_hit	mapped
+NP_746831.3	PP_4723	carB		WP_016501646.1	unassigned_transcript_4820	PP4_RS23735	carB	99.068	99.0	100.0	direct_unique_best_hit	mapped
+NP_746832.1	PP_4724	carA	WP_010955364.1	WP_016501647.1	unassigned_transcript_4821	PP4_RS23740	carA	99.206	100.0	100.0	reciprocal_best_hit	mapped
+NP_746833.1	PP_4725	dapB	WP_003249933.1	WP_016501648.1	unassigned_transcript_4822	PP4_RS23745	dapB	99.625	100.0	100.0	reciprocal_best_hit	mapped
+NP_746851.1	PP_4743										reciprocal_best_hit	unmapped
+NP_746858.1	PP_4752		WP_010955382.1	WP_016501669.1	unassigned_transcript_4846	PP4_RS23860		98.621	100.0	100.0	reciprocal_best_hit	mapped
+NP_746893.1	PP_4788	ybeY	WP_010955408.1	WP_016501792.1	unassigned_transcript_4972	PP4_RS24480	ybeY	95.541	100.0	100.0	reciprocal_best_hit	mapped
+NP_746904.1	PP_4799		WP_010955415.1	WP_016501802.1	unassigned_transcript_4982	PP4_RS24530		92.332	100.0	100.0	reciprocal_best_hit	mapped
+NP_746908.1	PP_4803	dacA	WP_010955418.1	WP_016489361.1	unassigned_transcript_4986	PP4_RS24550		97.927	100.0	100.0	reciprocal_best_hit	mapped
+NP_746912.1	PP_4807	mrdA-II	WP_010955422.1	WP_016501807.1	unassigned_transcript_4990	PP4_RS24570	mrdA	98.092	100.0	100.0	reciprocal_best_hit	mapped
+NP_746916.1	PP_4811	proA	WP_004576854.1	WP_016501809.1	unassigned_transcript_4994	PP4_RS24590		97.163	100.0	100.0	reciprocal_best_hit	mapped
+NP_746919.1	PP_4814			WP_016501812.1	unassigned_transcript_4997	PP4_RS24605		97.959	99.0	100.0	direct_unique_best_hit	mapped
+NP_746993.1	PP_4890	hisZ	WP_010955481.1	WP_016501880.1	unassigned_transcript_5075	PP4_RS24985		98.481	100.0	100.0	reciprocal_best_hit	mapped
+NP_747016.1	PP_4913		WP_010955495.1	WP_016501900.1	unassigned_transcript_5098	PP4_RS25100		87.209	100.0	100.0	reciprocal_best_hit	mapped
+NP_747027.1	PP_4924										reciprocal_best_hit	unmapped
+NP_747030.1	PP_4927	cyaB									reciprocal_best_hit	unmapped
+NP_747050.1	PP_4947	putA	WP_010955523.1	WP_016501931.1	unassigned_transcript_5129	PP4_RS25255	putA	98.405	100.0	100.0	reciprocal_best_hit	mapped
+NP_747052.2	PP_4949		WP_049587479.1	WP_016501934.1	unassigned_transcript_5133	PP4_RS25275		96.875	100.0	100.0	reciprocal_best_hit	mapped
+NP_747053.1	PP_4950		WP_010955526.1	WP_016501935.1	unassigned_transcript_5134	PP4_RS25280		93.166	100.0	100.0	reciprocal_best_hit	mapped
+NP_747066.1	PP_4963	pgk	WP_010955537.1	WP_016501945.1	unassigned_transcript_5147	PP4_RS25345		98.966	100.0	100.0	reciprocal_best_hit	mapped
+NP_747079.1	PP_4977	metF		WP_016501958.1	unassigned_transcript_5161	PP4_RS25415	metF	97.509	95.0	100.0	direct_unique_best_hit	mapped
+NP_747102.1	PP_5000	hslV	WP_003249309.1	WP_003249309.1	unassigned_transcript_5186	PP4_RS25540	hslV	100.0	100.0	100.0	reciprocal_best_hit	mapped
+NP_747103.1	PP_5001	hslU	WP_003249308.1	WP_016501979.1	unassigned_transcript_5187	PP4_RS25545	hslU	98.881	100.0	100.0	reciprocal_best_hit	mapped
+NP_747105.1	PP_5003	phaA	WP_010955566.1	WP_016501981.1	unassigned_transcript_5189	PP4_RS25555	phaC	95.707	100.0	100.0	reciprocal_best_hit	mapped
+NP_747106.1	PP_5004	phaB	WP_010955567.1	WP_016501982.1	unassigned_transcript_5190	PP4_RS25560	phaZ	96.466	100.0	100.0	reciprocal_best_hit	mapped
+NP_747107.1	PP_5005	phaC-II	WP_010955568.1	WP_016501983.1	unassigned_transcript_5191	PP4_RS25565	phaC	91.25	100.0	100.0	reciprocal_best_hit	mapped
+NP_747115.1	PP_5014	hisI	WP_003249284.1	WP_016501991.1	unassigned_transcript_5200	PP4_RS25610	hisI	97.692	100.0	100.0	reciprocal_best_hit	mapped
+NP_747116.1	PP_5015	hisE	WP_003249283.1	WP_016489563.1	unassigned_transcript_5201	PP4_RS25615		97.297	100.0	100.0	reciprocal_best_hit	mapped
+NP_747128.1	PP_5027	dtd	WP_003249262.1	WP_016502001.1	unassigned_transcript_5214	PP4_RS25675	dtd	96.552	100.0	100.0	reciprocal_best_hit	mapped
+NP_747129.2	PP_5028	pip		WP_016489576.1	unassigned_transcript_5215	PP4_RS25680	pip	99.381	90.0	100.0	direct_unique_best_hit	mapped
+NP_747131.1	PP_5030	hutI	WP_010955587.1	WP_016502003.1	unassigned_transcript_5217	PP4_RS25690	hutI	97.257	100.0	100.0	reciprocal_best_hit	mapped
+NP_747133.1	PP_5032	hutH	WP_010955589.1	WP_016502005.1	unassigned_transcript_5219	PP4_RS25700	hutH	98.235	100.0	100.0	reciprocal_best_hit	mapped
+NP_747134.1	PP_5033	hutU	WP_004577162.1	WP_016502006.1	unassigned_transcript_5220	PP4_RS25705	hutU	99.461	100.0	100.0	reciprocal_best_hit	mapped
+NP_747142.1	PP_5041	glgP	WP_010955596.1	WP_016502012.1	unassigned_transcript_5228	PP4_RS25745		97.059	100.0	100.0	reciprocal_best_hit	mapped
+NP_747147.1	PP_5046	glnA	WP_003249219.1	WP_016489592.1	unassigned_transcript_5232	PP4_RS25765	glnA	99.573	100.0	100.0	reciprocal_best_hit	mapped
+NP_747159.1	PP_5058	ctpA	WP_004576741.1	WP_016502020.1	unassigned_transcript_5242	PP4_RS25815		98.398	99.0	99.772	reciprocal_best_hit	mapped
+NP_747176.1	PP_5075	gltD	WP_003249156.1	WP_016502038.1	unassigned_transcript_5260	PP4_RS25905		98.941	100.0	100.0	reciprocal_best_hit	mapped
+NP_747177.1	PP_5076	gltB	WP_010955622.1	WP_016502039.1	unassigned_transcript_5261	PP4_RS25910	gltB	98.582	100.0	100.0	reciprocal_best_hit	mapped
+NP_747179.1	PP_5078	aroB	WP_010955624.1	WP_016502041.1	unassigned_transcript_5263	PP4_RS25920	aroB	98.082	100.0	100.0	reciprocal_best_hit	mapped
+NP_747180.1	PP_5079	aroK	WP_010955625.1	WP_024717571.1	unassigned_transcript_5264	PP4_RS25925	aroK	96.512	100.0	100.0	reciprocal_best_hit	mapped
+NP_747196.1	PP_5095	proI	WP_010955638.1	WP_016502057.1	unassigned_transcript_5280	PP4_RS26005	proC	97.059	100.0	100.0	reciprocal_best_hit	mapped
+NP_747198.1	PP_5097	metXS	WP_010955639.1	WP_016502059.1	unassigned_transcript_5282	PP4_RS26015	metX	98.681	100.0	100.0	reciprocal_best_hit	mapped
+NP_747216.1	PP_5115										reciprocal_best_hit	unmapped
+NP_747229.1	PP_5128	ilvD	WP_010955664.1	WP_016502088.1	unassigned_transcript_5311	PP4_RS26160	ilvD	98.532	100.0	100.0	reciprocal_best_hit	mapped
+NP_747233.1	PP_5132	folA	WP_010955668.1	WP_016502091.1	unassigned_transcript_5314	PP4_RS26175		95.294	99.0	99.415	reciprocal_best_hit	mapped
+NP_747250.1	PP_5149	ilvA-II	WP_010955682.1	WP_016502109.1	unassigned_transcript_5333	PP4_RS26270	ilvA	98.81	100.0	100.0	reciprocal_best_hit	mapped
+NP_747284.1	PP_5183	spuB	WP_010955710.1	WP_016502145.1	unassigned_transcript_5374	PP4_RS26480		99.336	100.0	100.0	reciprocal_best_hit	mapped
+NP_747285.1	PP_5184	spuI	WP_010955711.1	WP_016502146.1	unassigned_transcript_5375	PP4_RS26485		98.69	100.0	100.0	reciprocal_best_hit	mapped
+NP_747286.1	PP_5185	argA	WP_003253723.1	WP_016502147.1	unassigned_transcript_5376	PP4_RS26490	argA	98.843	100.0	100.0	reciprocal_best_hit	mapped
+NP_747287.1	PP_5186	argE	WP_010955712.1	WP_016502148.1	unassigned_transcript_5377	PP4_RS26495	argE	96.053	100.0	100.0	reciprocal_best_hit	mapped
+NP_747293.1	PP_5192	gcvP2	WP_010955717.1	WP_016502154.1	unassigned_transcript_5383	PP4_RS26525	gcvP	96.552	100.0	100.0	reciprocal_best_hit	mapped
+NP_747294.1	PP_5193	gcvH2	WP_010955718.1	WP_016502155.1	unassigned_transcript_5384	PP4_RS26530	gcvH	93.701	100.0	100.0	reciprocal_best_hit	mapped
+NP_747295.1	PP_5194	gcvT	WP_010955719.1	WP_016502156.1	unassigned_transcript_5385	PP4_RS26535	gcvT	94.722	100.0	100.0	reciprocal_best_hit	mapped
+NP_747301.1	PP_5200	pepP	WP_010955724.1	WP_016502162.1	unassigned_transcript_5391	PP4_RS26565	pepP	97.523	100.0	100.0	reciprocal_best_hit	mapped
+NP_747318.1	PP_5217	ppk		WP_016502177.1	unassigned_transcript_5412	PP4_RS26660	ppk1	97.538	100.0	97.337	direct_unique_best_hit	mapped
+NP_747328.1	PP_5227	lysA-II	WP_010955746.1	WP_016502187.1	unassigned_transcript_5422	PP4_RS26710	lysA	96.627	100.0	100.0	reciprocal_best_hit	mapped
+NP_747329.1	PP_5228	dapF		WP_016502188.1	unassigned_transcript_5423	PP4_RS26715	dapF	98.188	96.0	100.0	direct_unique_best_hit	mapped
+NP_747370.1	PP_5269	dadX	WP_010955779.1	WP_016502214.1	unassigned_transcript_5456	PP4_RS26870	alr	96.078	100.0	100.0	reciprocal_best_hit	mapped
+NP_747371.1	PP_5270	dadA2	WP_010955780.1	WP_016502215.1	unassigned_transcript_5457	PP4_RS26875	dadA	97.465	100.0	100.0	reciprocal_best_hit	mapped
+NP_747385.1	PP_5284		WP_010955789.1	WP_016502224.1	unassigned_transcript_5470	PP4_RS26940	radC	81.778	99.0	99.558	reciprocal_best_hit	mapped
+NP_747389.1	PP_5288	algC									reciprocal_best_hit	unmapped
+NP_747390.1	PP_5289	argB	WP_004575216.1	WP_004575216.1	unassigned_transcript_5474	PP4_RS26960	argB	100.0	100.0	100.0	reciprocal_best_hit	mapped
+NP_747400.1	PP_5299	puuA-II	WP_010955798.1	WP_016502231.1	unassigned_transcript_5482	PP4_RS27000		98.696	100.0	100.0	reciprocal_best_hit	mapped
+YP_009237076.1	PP_5604		WP_049587702.1	WP_016499467.1	unassigned_transcript_2458	PP4_RS12120	qhpE	87.054	99.0	99.556	reciprocal_best_hit	mapped
+YP_009237104.1	PP_5629										reciprocal_best_hit	unmapped

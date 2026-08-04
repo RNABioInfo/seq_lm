@@ -1,73 +1,210 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema",
-  "$id": "https://raw.githubusercontent.com/./master/nextflow_schema.json",
-  "title": "epi2me-labs/wf-template",
-  "description": "Nextflow workflow template repository.",
-  "demo_url": "https://ont-exd-int-s3-euwst1-epi2me-labs.s3.amazonaws.com/wf-template/wf-template-demo.tar.gz",
-  "aws_demo_url": "https://ont-exd-int-s3-euwst1-epi2me-labs.s3.amazonaws.com/wf-template/wf-template-demo/aws.nextflow.config",
-  "url": "https://github.com/epi2me-labs/wf-template",
+  "$id": "https://raw.githubusercontent.com/RNABioInfo/seq_lm/master/nextflow_schema.json",
+  "title": "RNABioInfo/seq_lm",
+  "description": "Live quality-control and differential-expression analysis of Oxford Nanopore BAM data.",
+  "url": "https://github.com/RNABioInfo/seq_lm",
   "type": "object",
   "definitions": {
-    "input": {
+    "input_options": {
       "title": "Input Options",
       "type": "object",
       "fa_icon": "fas fa-arrow-right",
-      "description": "Parameters for finding and handling input data for analysis.",
+      "description": "Input samples and controls for live or one-shot BAM ingestion.",
       "properties": {
-        "ex_name": {
+        "sample_sheet": {
           "type": "string",
-          "fa_icon": "fas fa-bacteria",
-          "description": "Name of the experiment.",
-          "default": "seq_lm"
+          "format": "path",
+          "fa_icon": "fas fa-file-csv",
+          "description": "CSV sample sheet describing the BAM directories to analyze.",
+          "help_text": "The sheet must contain alias, group, and bam_dir columns. Optional is_live and order columns control live watching and timeline order. is_live accepts true or false case-insensitively; missing or blank values default to true. Samples that are not effectively live must contain at least one BAM at startup."
         },
         "live_analysis": {
           "type": "boolean",
-          "fa_icon": "fas fa-eye"
+          "default": true,
+          "fa_icon": "fas fa-eye",
+          "description": "Watch eligible sample directories for new BAM files.",
+          "help_text": "A sample is watched only when this option and the sample sheet row's is_live value are both true. Disable this option to process every sample once from the BAM files present at startup."
         },
-        "ex_dir": {
+        "timeline_analysis": {
+          "type": "boolean",
+          "default": false,
+          "fa_icon": "fas fa-stream",
+          "description": "Process samples according to the order values in the sample sheet.",
+          "help_text": "When enabled, every sample-sheet row must provide an order value."
+        }
+      },
+      "required": [
+        "sample_sheet"
+      ]
+    },
+    "reference_options": {
+      "title": "Reference and Gene Set Options",
+      "type": "object",
+      "fa_icon": "fas fa-dna",
+      "description": "Reference files used for transcript quantification and gene-set analysis.",
+      "properties": {
+        "reference_genome": {
           "type": "string",
           "format": "path",
-          "description": "BAM file(s) to use in the analysis.",
-          "help_text": "This accepts one of three cases: (i) the path to a single BAM file; (ii) the path to a top-level directory containing BAM files; (iii) the path to a directory containing one level of sub-directories which in turn contain BAM files. In the first and second case, a sample name can be supplied with `--sample`. In the last case, the data is assumed to be multiplexed with the names of the sub-directories as barcodes. In this case, a sample sheet can be provided with `--sample_sheet`.",
-          "default": "output"
-        },
-        "sample_sheet_path": {
-          "type": "string",
-          "format": "path",
-          "description": "CSV sample sheet containing id, alias, type, group, and bam_dir columns for BAM ingress."
+          "fa_icon": "fas fa-dna",
+          "description": "Reference genome FASTA used by Oarfish for soft-clip rescue."
         },
         "ex_reference_annotation": {
           "type": "string",
           "format": "path",
-          "description": "Reference annotation file in gff3 format."
+          "fa_icon": "fas fa-file-alt",
+          "description": "Reference transcript annotation in GTF or GFF format used by Oarfish."
         },
-        "ongoing": {
-          "type": "boolean",
-          "fa_icon": "fas fa-eye"
+        "gene_sets": {
+          "type": "string",
+          "format": "path",
+          "fa_icon": "fas fa-project-diagram",
+          "description": "Gene Matrix Transposed (GMT) file used for edgeR fry gene-set enrichment.",
+          "help_text": "GMT members may match count-table feature identifiers directly or identifiers in the supplied GTF/GFF annotation."
         }
       },
-      "required": []
+      "required": [
+        "reference_genome",
+        "ex_reference_annotation",
+        "gene_sets"
+      ]
     },
-    "misc": {
-      "title": "Miscellaneous Options",
+    "differential_analysis_options": {
+      "title": "Differential Analysis Options",
       "type": "object",
-      "description": "Everything else.",
-      "default": "",
+      "fa_icon": "fas fa-chart-line",
+      "description": "Significance thresholds used by edgeR and the differential-analysis report.",
+      "properties": {
+        "de_lfc_cutoff": {
+          "type": "number",
+          "minimum": 0,
+          "default": 1.0,
+          "description": "Minimum absolute log2 fold change used by edgeR glmTreat and the report's significance coloring."
+        },
+        "de_padj_cutoff": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1,
+          "default": 0.05,
+          "description": "Maximum edgeR false-discovery rate used to classify significant results."
+        }
+      }
+    },
+    "output_options": {
+      "title": "Output Options",
+      "type": "object",
+      "fa_icon": "fas fa-folder-open",
+      "description": "Names and locations used for workflow outputs.",
+      "properties": {
+        "ex_name": {
+          "type": "string",
+          "minLength": 1,
+          "default": "seq_lm",
+          "fa_icon": "fas fa-flask",
+          "description": "Name used to identify the experiment in workflow metadata and reports."
+        },
+        "out_dir": {
+          "type": "string",
+          "format": "path",
+          "default": "output",
+          "fa_icon": "fas fa-folder-open",
+          "description": "Directory in which workflow results and execution reports are published."
+        }
+      }
+    },
+    "resource_options": {
+      "title": "Resource Options",
+      "type": "object",
+      "fa_icon": "fas fa-microchip",
+      "description": "Global analysis limits retained for processes that consume them.",
+      "properties": {
+        "threads": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 8,
+          "description": "Global thread count available to workflow processes that use this setting."
+        },
+        "min_mapq": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 10,
+          "description": "Minimum read mapping quality available to analysis steps that apply a mapping-quality filter."
+        }
+      }
+    },
+    "advanced_options": {
+      "title": "Advanced Options",
+      "type": "object",
+      "fa_icon": "fas fa-cogs",
+      "description": "Telemetry, cloud, validation, and internal workflow settings.",
       "properties": {
         "disable_ping": {
           "type": "boolean",
-          "description": "Enable to prevent sending a workflow ping."
+          "default": false,
+          "description": "Prevent the workflow from sending start and completion telemetry pings."
+        },
+        "monochrome_logs": {
+          "type": "boolean",
+          "default": false,
+          "description": "Disable ANSI colors in workflow log messages."
+        },
+        "validate_params": {
+          "type": "boolean",
+          "default": true,
+          "description": "Validate workflow parameters against this schema before analysis starts."
+        },
+        "show_hidden_params": {
+          "type": "boolean",
+          "default": false,
+          "description": "Include internal parameters in command-line help output."
+        },
+        "aws_image_prefix": {
+          "type": "string",
+          "description": "Prefix applied to container image names when running on AWS.",
+          "hidden": true
+        },
+        "aws_queue": {
+          "type": "string",
+          "description": "AWS Batch queue used by an AWS execution profile.",
+          "hidden": true
+        },
+        "ex_mk_cert": {
+          "type": "string",
+          "format": "path",
+          "description": "Reserved path to a MinKNOW client certificate for sequencing-control integration.",
+          "hidden": true
+        },
+        "ex_mk_key": {
+          "type": "string",
+          "format": "path",
+          "description": "Reserved path to a MinKNOW client private key for sequencing-control integration.",
+          "hidden": true
+        },
+        "process_label": {
+          "type": "string",
+          "default": "seq_lm",
+          "description": "Default Nextflow process label used by workflow processes.",
+          "hidden": true
+        },
+        "schema_ignore_params": {
+          "type": "string",
+          "default": "show_hidden_params,validate_params,monochrome_logs,aws_queue,aws_image_prefix,wf,live_analysis",
+          "description": "Comma-separated parameters excluded from schema validation.",
+          "hidden": true
         },
         "help": {
           "type": "boolean",
-          "description": "Display help text.",
+          "default": false,
           "fa_icon": "fas fa-question-circle",
+          "description": "Display workflow help and exit.",
           "hidden": true
         },
         "version": {
           "type": "boolean",
-          "description": "Display version and exit.",
-          "fa_icon": "fas fa-question-circle",
+          "default": false,
+          "fa_icon": "fas fa-info-circle",
+          "description": "Display the workflow version and exit.",
           "hidden": true
         }
       }
@@ -75,86 +212,26 @@
   },
   "allOf": [
     {
-      "$ref": "#/definitions/input"
+      "$ref": "#/definitions/input_options"
     },
     {
-      "$ref": "#/definitions/misc"
+      "$ref": "#/definitions/reference_options"
+    },
+    {
+      "$ref": "#/definitions/differential_analysis_options"
+    },
+    {
+      "$ref": "#/definitions/output_options"
+    },
+    {
+      "$ref": "#/definitions/resource_options"
+    },
+    {
+      "$ref": "#/definitions/advanced_options"
     }
   ],
-  "properties": {
-    "process_label": {
-      "type": "string",
-      "description": "The main process label for template processes to use by default",
-      "hidden": true,
-      "default": "seq_lm"
-    },
-    "aws_image_prefix": {
-      "type": "string",
-      "hidden": true
-    },
-    "aws_queue": {
-      "type": "string",
-      "hidden": true
-    },
-    "monochrome_logs": {
-      "type": "boolean"
-    },
-    "validate_params": {
-      "type": "boolean",
-      "default": true
-    },
-    "show_hidden_params": {
-      "type": "boolean"
-    },
-    "threads": {
-      "type": "integer",
-      "default": 8
-    },
-    "live_analysis": {
-      "type": "boolean",
-      "default": true
-    },
-    "timeline_analysis": {
-      "type": "boolean",
-      "default": false
-    },
-    "ex_run_number": {
-      "type": "integer",
-      "default": 1
-    },
-    "ex_replicate_count": {
-      "type": "integer",
-      "default": 2
-    },
-    "ex_basecall_config": {
-      "type": "string"
-    },
-    "ex_kit": {
-      "type": "string"
-    },
-    "ex_reference_genome": {
-      "type": "string"
-    },
-    "ex_reference_annotation": {
-      "type": "string"
-    },
-    "ex_mk_cert": {
-      "type": "string"
-    },
-    "ex_mk_key": {
-      "type": "string"
-    },
-    "ex_special_alignment": {
-      "type": "boolean",
-      "default": true
-    },
-    "schema_ignore_params": {
-      "type": "string",
-      "default": "show_hidden_params,validate_params,monochrome_logs,aws_queue,aws_image_prefix,wf,live_analysis"
-    }
-  },
   "docs": {
-    "intro": "## Introduction\n\nThis section of documentation typically contains an overview of the workflow in terms of motivation\nand bioinformatics methods, listing any key tools or algorithms employed, whilst also describing its\nrange of use-cases and what a suitable input dataset should look like.\n\n",
-    "links": "## Useful links\n\n* [nextflow](https://www.nextflow.io/)\n* [docker](https://www.docker.com/products/docker-desktop)\n* [singularity](https://docs.sylabs.io/guides/latest/user-guide/)\n"
+    "intro": "## Introduction\n\nseq_lm performs live or one-shot quality control, transcript quantification, differential-expression analysis, and gene-set enrichment for Oxford Nanopore BAM data.\n\n",
+    "links": "## Useful links\n\n* [Nextflow](https://www.nextflow.io/)\n* [Workflow repository](https://github.com/RNABioInfo/seq_lm)\n* [Docker](https://www.docker.com/products/docker-desktop)\n* [Singularity](https://docs.sylabs.io/guides/latest/user-guide/)\n"
   }
 }

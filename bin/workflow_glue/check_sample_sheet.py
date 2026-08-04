@@ -5,20 +5,35 @@ import sys
 from .util import get_named_logger, wf_parser  # noqa: ABS101
 
 
+def parse_is_live(value):
+    """Parse the optional per-sample live-analysis flag."""
+    normalized = (value or "").strip().lower()
+    if normalized in {"", "true"}:
+        return True
+    if normalized == "false":
+        return False
+    raise ValueError(
+        f"Invalid is_live value '{value}'. Expected true, false, or a blank value."
+    )
+
+
 def main(args):
     """Run the entry point."""
     logger = get_named_logger("checkSheet")
 
-    barcodes = []
-    aliases = []
-    sample_types = []
-    allowed_sample_types = [
-        "test_sample", "positive_control", "negative_control", "no_template_control"
-        ]
+    group_names = []
+    control_count = 0
 
     try:
         with open(args.sample_sheet, "r") as f:
             csv_reader = csv.DictReader(f)
+            removed_fields = {"id", "type"}.intersection(csv_reader.fieldnames or [])
+            if removed_fields:
+                sys.stdout.write(
+                    "Sample sheet contains removed fields: "
+                    + ", ".join(sorted(removed_fields))
+                )
+                sys.exit()
             n_row = 0
             for row in csv_reader:
                 n_row += 1
@@ -31,51 +46,39 @@ def main(args):
                             f"Unexpected number of cells in row number {n_row}."
                         )
                 try:
-                    barcodes.append(row["barcode"])
-                except KeyError:
-                    sys.stdout.write("'barcode' column missing")
-                    sys.exit()
-                try:
-                    aliases.append(row["alias"])
+                    alias = row["alias"].strip()
                 except KeyError:
                     sys.stdout.write("'alias' column missing")
                     sys.exit()
                 try:
-                    sample_types.append(row["type"])
+                    group = row["group"].strip()
                 except KeyError:
-                    pass
+                    sys.stdout.write("'group' column missing")
+                    sys.exit()
+                if not alias:
+                    sys.stdout.write("empty value in 'alias' column")
+                    sys.exit()
+                if not group:
+                    sys.stdout.write("empty value in 'group' column")
+                    sys.exit()
+                parse_is_live(row.get("is_live"))
+                group_names.append((group, alias))
+                if group.lower() == args.control_group.lower():
+                    control_count += 1
     except Exception as e:
         sys.stdout.write(f"Parsing error: {e}")
         sys.exit()
 
-    # check barcode and alias values are unique
-    if len(barcodes) > len(set(barcodes)):
-        sys.stdout.write("values in 'barcode' column not unique")
-        sys.exit()
-    if len(aliases) > len(set(aliases)):
-        sys.stdout.write("values in 'alias' column not unique")
+    if len(group_names) > len(set(group_names)):
+        sys.stdout.write("values in 'alias' column not unique within group")
         sys.exit()
 
-    if sample_types:
-        # check if "type" column has unexpected values
-        unexp_type_vals = set(sample_types) - set(allowed_sample_types)
-
-        if unexp_type_vals:
-            sys.stdout.write(
-                f"found unexpected values in 'type' column: {unexp_type_vals}. "
-                f"Allowed values are: {allowed_sample_types}"
-            )
-            sys.exit()
-
-        if args.required_sample_types:
-            for required_type in args.required_sample_types:
-                if required_type not in allowed_sample_types:
-                    sys.stdout.write(f"Not an allowed sample type: {required_type}")
-                    sys.exit()
-                if sample_types.count(required_type) < 1:
-                    sys.stdout.write(
-                        f"Sample sheet requires at least 1 of {required_type}")
-                    sys.exit()
+    if control_count < args.min_control_samples:
+        sys.stdout.write(
+            f"Sample sheet requires at least {args.min_control_samples} "
+            f"'{args.control_group}' group samples"
+        )
+        sys.exit()
 
     logger.info(f"Checked sample sheet {args.sample_sheet}.")
 
@@ -85,9 +88,14 @@ def argparser():
     parser = wf_parser("check_sample_sheet")
     parser.add_argument("sample_sheet", help="Sample sheet to check")
     parser.add_argument(
-        "--required_sample_types",
-        help="List of required sample types. Each sample type provided must "
-             "appear at least once in the sample sheet",
-        nargs="*"
+        "--control_group",
+        default="control",
+        help="Group name used to identify control samples.",
+    )
+    parser.add_argument(
+        "--min_control_samples",
+        default=2,
+        type=int,
+        help="Minimum number of control-group rows required in the sample sheet.",
     )
     return parser

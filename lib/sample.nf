@@ -1,12 +1,11 @@
 nextflow.enable.types = true
 
 record Sample {
-    id: String
-    alias: String
-    type: SampleType
+    name: String
     group: String
     order: Integer?
     bam_dir: Path
+    is_live: Boolean
 }
 
 record SampleChunk {
@@ -17,36 +16,72 @@ record SampleChunk {
 record SampleBatch {
     batch_index: Integer
     chunks: List<SampleChunk>
+    experiment_sample_count: Integer
 }
 
-record SampleChunkBAM {
+record SampleBatchSize {
     batch_index: Integer
-    sample: Sample
-    bam_index_in_chunk: Integer
-    bam_count: Integer
-    bam: Path
+    active_sample_count: Integer
+    experiment_sample_count: Integer
 }
 
-record IndexedChunkBAM {
+record SampleChunkBAMGroup {
     batch_index: Integer
     sample: Sample
-    bam_index_in_chunk: Integer
-    bam_count: Integer
+    bams: List<Path>
+}
+
+record MergedIndexedChunkBAM {
+    batch_index: Integer
+    sample: Sample
     bam: Path
     bam_index: Path
-}
-
-record IndexedChunkBAMGroup {
-    batch_index: Integer
-    sample: Sample
-    bams: List<IndexedChunkBAM>
 }
 
 record MergedChunkBAM {
     batch_index: Integer
     sample: Sample
     bam: Path
-    bam_index: Path
+}
+
+record MergedIndexedChunkBAMBatch {
+    batch_index: Integer
+    bams: List<MergedIndexedChunkBAM>
+    experiment_sample_count: Integer
+}
+
+record CumulativeSampleBAMGroup {
+    batch_index: Integer
+    sample: Sample
+    bams: List<MergedIndexedChunkBAM>
+}
+
+record CumulativeSampleBAMSnapshot {
+    batch_index: Integer
+    sample_bams: List<CumulativeSampleBAMGroup>
+    experiment_sample_count: Integer
+}
+
+record QuantifiedSample {
+    batch_index: Integer
+    sample: Sample
+    counts: Path
+}
+
+record QuantifiedSampleBatch {
+    batch_index: Integer
+    samples: List<QuantifiedSample>
+}
+
+record QuantifiedSampleUpdateBatch {
+    batch_index: Integer
+    samples: List<QuantifiedSample>
+    experiment_sample_count: Integer
+}
+
+record DifferentialExpressionResult {
+    batch_index: Integer
+    results: Path
 }
 
 /**
@@ -102,9 +137,4 @@ record SampleQCReportInputs {
     latest_batch_index: Integer
     sample: Sample
     chunks: List<ChunkQCResult>
-}
-
-enum SampleType {
-    CONTROL,
-    CONDITION
 }

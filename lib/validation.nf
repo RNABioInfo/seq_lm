@@ -1,26 +1,26 @@
-def validateExperimentDir(String experimentPath, int runNumber) {
-    def experiment_dir = new File(experimentPath)
+def validate_experiment_dir(String experiment_path, int run_number) {
+    def experiment_dir = new File(experiment_path)
     if (!experiment_dir.exists()) {
         experiment_dir.mkdirs()
     } else if (!experiment_dir.isDirectory()) {
-        throw new RuntimeException("Experiment directory ${experimentPath} is not a directory.")
+        throw new RuntimeException("Experiment directory ${experiment_path} is not a directory.")
     } else if (!experiment_dir.canWrite()) {
-        throw new RuntimeException("Experiment directory ${experimentPath} is not writable.")
+        throw new RuntimeException("Experiment directory ${experiment_path} is not writable.")
     } else if (!experiment_dir.canRead()) {
-        throw new RuntimeException("Experiment directory ${experimentPath} is not readable.")
+        throw new RuntimeException("Experiment directory ${experiment_path} is not readable.")
     }
 
-    String configFileName = "experiment.config"
-    File configFile = new File(experimentPath, configFileName)
-    boolean configFileExists = configFile.exists()
-    if (!configFileExists && runNumber > 1 ) {
-        throw new RuntimeException("Experiment directory ${experimentPath} does not contain a configuration file.")
-    } else if ( configFileExists && runNumber == 1 ) {
-        throw new RuntimeException("Experiment directory ${experimentPath} already contains a configuration file.")
+    String config_file_name = "experiment.config"
+    File config_file = new File(experiment_path, config_file_name)
+    boolean config_file_exists = config_file.exists()
+    if (!config_file_exists && run_number > 1 ) {
+        throw new RuntimeException("Experiment directory ${experiment_path} does not contain a configuration file.")
+    } else if ( config_file_exists && run_number == 1 ) {
+        throw new RuntimeException("Experiment directory ${experiment_path} already contains a configuration file.")
     }
 }
 
-Boolean isEmpty(path) {
+Boolean is_empty(path) {
     java.nio.file.Files.newDirectoryStream(path).withCloseable { directory ->
         !directory.iterator().hasNext()
     }

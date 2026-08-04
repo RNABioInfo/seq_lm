@@ -2,30 +2,11 @@ nextflow.enable.types = true
 
 include {
     ChunkQCResult;
-    MergedChunkBAM;
+    FlagstatQCResult;
+    MergedIndexedChunkBAM;
     NanoPlotQCResult
 } from '../lib/sample.nf'
-
-/**
- * Return a filesystem-safe token for process-local QC output names.
- */
-String safeName(String value) {
-    return value.replaceAll(/[^A-Za-z0-9._-]/, '_')
-}
-
-/**
- * Build the stable NanoPlot output directory for one sample chunk.
- */
-String nanoplotOutputDir(MergedChunkBAM merged_bam) {
-    return "${safeName(merged_bam.sample.id)}_${merged_bam.batch_index}.nanoplot"
-}
-
-/**
- * Build the stable flagstat TSV filename for one sample chunk.
- */
-String flagstatFileName(Integer batch_index, String sample_id) {
-    return "${safeName(sample_id)}_${batch_index}.flagstat.tsv"
-}
+include { flagstat_file_name; nanoplot_output_dir } from '../modules/generic_helpers.nf'
 
 /**
  * Run chunk-level QC for each merged sample chunk.
@@ -36,26 +17,52 @@ String flagstatFileName(Integer batch_index, String sample_id) {
  */
 workflow quality_control {
     take:
-        merged_bams: Channel<MergedChunkBAM>
+        merged_bams: Channel<MergedIndexedChunkBAM>
 
     main:
         nanoplot_qc_ch = nanoplot_qc(merged_bams)
+        flagstat_qc_ch = samtools_flagstat_qc(merged_bams)
+        qc_results_ch = nanoplot_qc_ch
+            .map { NanoPlotQCResult result ->
+                tuple(qc_result_key(result), result)
+            }
+            .join(
+                flagstat_qc_ch.map { FlagstatQCResult result ->
+                    tuple(qc_result_key(result), result)
+                },
+                by: 0
+            )
+            .map { _key, NanoPlotQCResult nanoplot_result, FlagstatQCResult flagstat_result ->
+                record(
+                    batch_index: nanoplot_result.batch_index,
+                    sample: nanoplot_result.sample,
+                    bam: nanoplot_result.bam,
+                    bam_index: nanoplot_result.bam_index,
+                    nanoplot_data: nanoplot_result.nanoplot_data,
+                    flagstat: flagstat_result.flagstat
+                )
+            }
 
     emit:
-        samtools_flagstat_qc(nanoplot_qc_ch)
+        qc_results_ch
+}
+
+String qc_result_key(result) {
+    return "${result.batch_index}\t${result.sample.group}\t${result.sample.name}"
 }
 
 /**
- * Run NanoPlot for one merged sample chunk and emit the compressed raw
- * `NanoPlot-data.tsv.gz` table used by downstream QC reporting.
+ * Extract the NanoPlot-compatible per-read table for one merged sample chunk.
+ * The report only consumes this table, so skip NanoPlot's unused plot and HTML
+ * rendering.
  */
 process nanoplot_qc {
     label 'seq_lm_qc'
-    container 'seq_lm/quality_control'
-    cpus 4
+    container 'rnabioinfo/seq_lm_quality_control:v1.0.0'
+    cpus 1
 
     input:
-        merged_bam: MergedChunkBAM
+        merged_bam: MergedIndexedChunkBAM
 
     output:
         record(
@@ -63,50 +70,43 @@ process nanoplot_qc {
             sample: merged_bam.sample,
             bam: merged_bam.bam,
             bam_index: merged_bam.bam_index,
-            nanoplot_data: file("${nanoplotOutputDir(merged_bam)}/NanoPlot-data.tsv.gz")
+            nanoplot_data: file("${nanoplot_output_dir(merged_bam)}/NanoPlot-data.tsv.gz")
         )
 
     script:
-        String output_dir = nanoplotOutputDir(merged_bam)
+        String output_dir = nanoplot_output_dir(merged_bam)
         """
-        NanoPlot -t ${task.cpus} \
-            --raw \
-            -o ${output_dir} \
-            --no_static \
-            --tsv_stats \
-            --drop_outliers \
-            --loglength \
-            --title ${merged_bam.bam.name} \
-            --bam ${merged_bam.bam}
+        bam-qc-table \
+            --threads ${task.cpus} \
+            --bam ${merged_bam.bam} \
+            --output ${output_dir}/NanoPlot-data.tsv.gz
         """
 }
 
 /**
- * Run samtools flagstat after NanoPlot for the same merged sample chunk and
- * emit the combined chunk QC record. This is intentionally chunk-level so
- * report inputs can update after every live batch.
+ * Run samtools flagstat independently for one merged sample chunk. NanoPlot
+ * and flagstat are joined after both complete so neither blocks the other.
  */
 process samtools_flagstat_qc {
     label 'seq_lm_qc'
-    container 'seq_lm/samtools'
-    cpus 4
+    container 'rnabioinfo/seq_lm_samtools:v1.0.0'
+    cpus 2
 
     input:
-        nanoplot_result: NanoPlotQCResult
+        merged_bam: MergedIndexedChunkBAM
 
     output:
         record(
-            batch_index: nanoplot_result.batch_index,
-            sample: nanoplot_result.sample,
-            bam: nanoplot_result.bam,
-            bam_index: nanoplot_result.bam_index,
-            nanoplot_data: nanoplot_result.nanoplot_data,
-            flagstat: file(flagstatFileName(nanoplot_result.batch_index, nanoplot_result.sample.id))
+            batch_index: merged_bam.batch_index,
+            sample: merged_bam.sample,
+            bam: merged_bam.bam,
+            bam_index: merged_bam.bam_index,
+            flagstat: file(flagstat_file_name(merged_bam.batch_index, merged_bam.sample.name))
         )
 
     script:
-        String flagstat = flagstatFileName(nanoplot_result.batch_index, nanoplot_result.sample.id)
+        String flagstat = flagstat_file_name(merged_bam.batch_index, merged_bam.sample.name)
         """
-        samtools flagstat -@ ${task.cpus} -O tsv ${nanoplot_result.bam} > ${flagstat}
+        samtools flagstat -@ ${task.cpus - 1} -O tsv ${merged_bam.bam} > ${flagstat}
         """
 }

@@ -3,13 +3,13 @@ from bokeh import model
 from bokeh.models import ColumnDataSource, Whisker
 from bokeh.transform import factor_cmap
 from bokeh.plotting import figure
-from bokeh.palettes import Pastel1
+from bokeh.palettes import Turbo256
 
 import pandas as pd
 
 
 def create_library_size_plot(
-    counts_df: pd.DataFrame, title: str, yAxisLabel: str
+    counts_df: pd.DataFrame, title: str, y_axis_label: str
 ) -> model.Model:
     df = counts_df.T.melt(var_name="columns")
     df = df[["columns", "value"]].rename(columns={"columns": "kind"})
@@ -34,7 +34,7 @@ def create_library_size_plot(
         toolbar_location="right",
         title=title,
         background_fill_color="#eaefef",
-        y_axis_label=yAxisLabel,
+        y_axis_label=y_axis_label,
         x_axis_label="Sample [Run_Replicate]",
     )
 
@@ -44,7 +44,8 @@ def create_library_size_plot(
     p.add_layout(whisker)
 
     # quantile boxes
-    cmap = factor_cmap("kind", Pastel1[len(kinds)], kinds)  # type: ignore
+    palette = [Turbo256[index * 255 // max(len(kinds) - 1, 1)] for index in range(len(kinds))]
+    cmap = factor_cmap("kind", palette, kinds)  # type: ignore
     p.vbar("kind", 0.7, "q2", "q3", source=source, color=cmap, line_color="black")
     p.vbar("kind", 0.7, "q1", "q2", source=source, color=cmap, line_color="black")
 
