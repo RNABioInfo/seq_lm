@@ -9,7 +9,7 @@ from ezcharts.components.reports import labs
 from ezcharts.layout.snippets import Tabs
 from ezcharts.layout.snippets.table import DataTable
 
-from .report_compat import labs_report
+from .report_compat import apply_report_branding, labs_report
 from .util import get_named_logger, wf_parser  # noqa: ABS101
 
 from .qc_report_types.differential_plots import (
@@ -258,6 +258,7 @@ def write_report(report, report_path, latest_batch, refresh_seconds):
     """Write either a static report or a live shell with a versioned snapshot."""
     if refresh_seconds <= 0:
         report.write(report_path)
+        apply_report_branding(report_path)
         return
 
     report_path, state_path, snapshot_path = _live_report_paths(
@@ -265,6 +266,7 @@ def write_report(report, report_path, latest_batch, refresh_seconds):
         latest_batch,
     )
     report.write(snapshot_path)
+    apply_report_branding(snapshot_path)
     report_path.write_text(
         _live_report_shell(
             state_path.name,

@@ -50,7 +50,7 @@
           "fa_icon": "fas fa-dna",
           "description": "Reference genome FASTA used by Oarfish for soft-clip rescue."
         },
-        "ex_reference_annotation": {
+        "reference_annotation": {
           "type": "string",
           "format": "path",
           "fa_icon": "fas fa-file-alt",
@@ -66,7 +66,7 @@
       },
       "required": [
         "reference_genome",
-        "ex_reference_annotation",
+        "reference_annotation",
         "gene_sets"
       ]
     },

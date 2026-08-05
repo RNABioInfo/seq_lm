@@ -39,6 +39,30 @@ def test_write_report_uses_live_shell_and_versioned_snapshot(tmp_path):
     assert 'method: "HEAD"' in shell
 
 
+def test_write_report_rebrands_labs_header(tmp_path):
+    """Generated reports use the embedded project logo and header color."""
+
+    class Report:
+        def write(self, path):
+            path.write_text(
+                "<html><head></head><body><header>"
+                '<nav class="fixed-top bg-dark">'
+                '<a href="https://labs.epi2me.io/">'
+                '<div alt="EPI2ME Labs Logo"><svg></svg></div>'
+                "</a></nav></header></body></html>"
+            )
+
+    report_path = tmp_path / "qc_report.html"
+    qc_report.write_report(Report(), report_path, "2", 0)
+
+    html = report_path.read_text()
+    assert "https://labs.epi2me.io/" not in html
+    assert "EPI2ME Labs Logo" not in html
+    assert 'alt="RNA BioInfo AUCG logo"' in html
+    assert "data:image/png;base64," in html
+    assert "#004191" in html
+
+
 def write_flagstat(path):
     """Write enough samtools flagstat rows for the QC report parser."""
     path.parent.mkdir(parents=True, exist_ok=True)
