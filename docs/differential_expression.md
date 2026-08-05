@@ -9,7 +9,7 @@ is cumulative rather than chunk-local:
    merged into one cumulative BAM. Final samples are processed only at startup.
 3. The cumulative BAM is collated by read name with `samtools collate`.
 4. Oarfish 0.10 quantifies the collated genome alignments against
-   `--ex_reference_annotation`, using `--ex_reference_genome` for soft-clip
+   `--reference_annotation`, using `--ex_reference_genome` for soft-clip
    rescue.
 5. The latest quantification is retained for every sample. Each synchronized
    live batch replaces the live-sample entries, reuses final-sample entries,
@@ -45,7 +45,7 @@ which rebuilds the current count matrix for every complete live batch.
 NCBI prokaryotic GTF files normally describe protein-coding genes with `gene`
 and `CDS` records but do not emit the `transcript` and `exon` records required
 as Oarfish projection targets. Convert such an annotation before passing it to
-`--ex_reference_annotation`:
+`--reference_annotation`:
 
 ```bash
 bin/oarfish-gtf-convert genomic.gtf genomic.oarfish.gtf

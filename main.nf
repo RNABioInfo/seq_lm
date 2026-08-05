@@ -447,7 +447,7 @@ workflow {
         error('Differential expression requires --ex_reference_genome.')
     }
     if (!params.reference_annotation) {
-        error('Differential expression requires --ex_reference_annotation.')
+        error('Differential expression requires --reference_annotation.')
     }
 
     reference_genome = file(params.reference_genome, checkIfExists: true)
