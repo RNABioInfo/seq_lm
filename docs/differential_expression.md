@@ -40,6 +40,29 @@ group. Each other group is tested separately against the control group.
 Oarfish's EM-estimated `num_reads` values are consumed by the edgeR analysis,
 which rebuilds the current count matrix for every complete live batch.
 
+### NCBI prokaryotic annotations
+
+NCBI prokaryotic GTF files normally describe protein-coding genes with `gene`
+and `CDS` records but do not emit the `transcript` and `exon` records required
+as Oarfish projection targets. Convert such an annotation before passing it to
+`--ex_reference_annotation`:
+
+```bash
+bin/oarfish-gtf-convert genomic.gtf genomic.oarfish.gtf
+```
+
+The converter preserves existing RNA transcript/exon models and synthesizes one
+single-exon transcript per protein-coding gene. It uses the complete `gene`
+span, including stop-codon bases that NCBI may exclude from the corresponding
+`CDS`, and retains the CDS `transcript_id`, protein ID, gene name, and locus tag.
+It rejects missing or ambiguous CDS-to-transcript mappings and refuses to
+overwrite an output unless `--force` is supplied.
+
+This representation supports gene-sized bacterial quantification targets; it
+does not infer operons, transcription start/termination sites, or untranslated
+regions. Use an experimentally curated transcript annotation when those units
+are required.
+
 Quantifications are published under:
 
 ```text

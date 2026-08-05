@@ -295,10 +295,11 @@ process merge_collate_sample_bams {
         // One BAM file
         if (input_group.bams.size() == 1) {
             return """
+            samtools view -u -x ts ${input_group.bams[0].bam} |
             samtools collate \
                 -o ${collated_bam} \
                 -@ ${task.cpus - 1} \
-                ${input_group.bams[0].bam}
+                -
             """
         }
 
@@ -306,7 +307,9 @@ process merge_collate_sample_bams {
         String bam_args = input_group.bams*.bam.join(' ')
         return """
         printf '%s\\n' ${bam_args} > bams.txt
+
         samtools merge -u -@ 0 -o - -b bams.txt |
+            samtools view -u -x ts - |
             samtools collate -o ${collated_bam} -@ 0 -
         """
 }
