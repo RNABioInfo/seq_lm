@@ -119,12 +119,6 @@
       "fa_icon": "fas fa-microchip",
       "description": "Global analysis limits retained for processes that consume them.",
       "properties": {
-        "threads": {
-          "type": "integer",
-          "minimum": 1,
-          "default": 8,
-          "description": "Global thread count available to workflow processes that use this setting."
-        },
         "min_mapq": {
           "type": "integer",
           "minimum": 0,
