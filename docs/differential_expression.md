@@ -84,8 +84,9 @@ Differential-expression checkpoints are published under:
 <ex_dir>/differential_expression/batch_<batch_index>/
 ```
 
-Each checkpoint contains the edgeR differential-expression and gene-set
-analysis tables consumed by the integrated report. Results produced while
+Each checkpoint contains edgeR differential-expression results, fry gene-set
+tests, and GSVA sample-level scores and limma contrasts. The integrated report
+continues to consume only the edgeR and fry files. Results produced while
 sequencing is active are provisional and are replaced statistically by later,
 better-powered checkpoints.
 
@@ -199,6 +200,51 @@ organism, conditions, and sampling context. It does not by itself demonstrate
 pathway activity, biological mechanism, or causality. Live-analysis enrichment
 results are provisional and may change as additional reads alter expression
 estimates and statistical power.
+
+## GSVA sample-level gene-set analysis
+
+After edgeR completes, `gsva-analysis` reuses `feature_counts.tsv`,
+`sample_metadata.tsv`, and `gene_set_resolution.tsv`. It transforms the
+edgeR-filtered TMM-normalized CPM matrix with `log2(CPM + 1)`, removes features
+that do not vary across the current samples, and runs the standard GSVA method
+with a Gaussian kernel. Gene sets require at least two variable retained
+features. The standalone command is:
+
+```bash
+gsva-analysis \
+    --feature_counts edgeR_results/feature_counts.tsv \
+    --sample_metadata edgeR_results/sample_metadata.tsv \
+    --gene_set_resolution edgeR_results/gene_set_resolution.tsv \
+    --output_dir edgeR_results
+```
+
+The batch root receives:
+
+* `gsva_scores.tsv`, a gene-set-by-sample score matrix;
+* `gsva_scores_long.tsv`, a Python-friendly tidy score table with sample groups;
+* `gsva_gene_set_coverage.tsv`, including variable-feature filtering status;
+* `gsva_parameters.tsv`, recording the fixed scoring configuration;
+* `gsva_score_heatmap.png`, with row-standardized colors for display only;
+* `gsva_group_boxplots.pdf`, with raw sample scores by group.
+
+Each existing `group_<target>_vs_<control>/` directory also receives
+`gsva_limma_results.tsv`. Its `effect_size` is the target-minus-control
+difference in GSVA scores, and its `adjusted_p_value` is Benjamini-Hochberg
+adjusted within that contrast. The score tables retain raw GSVA scores; only
+the heatmap is row-standardized.
+
+GSVA scores summarize relative expression patterns within this dataset. They
+are not direct biochemical measurements of pathway activity and do not
+establish mechanism or causality. The current HTML report deliberately does
+not parse or display these files.
+
+The workflow uses `rnabioinfo/seq_lm_gsva:v1.1.0`. Build and publish that image
+before deploying this workflow version:
+
+```bash
+docker_containers/helper_scripts/build_and_publish_docker_image.sh \
+    seq_lm_gsva rnabioinfo
+```
 
 Organism- and strain-specific carbon-stress GMT files are documented in
 [`data/gene_sets/README.md`](../data/gene_sets/README.md).

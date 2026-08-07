@@ -53,7 +53,7 @@ The primary outputs of the workflow include:
 
 See [Quality Control Workflow](docs/quality_control.md) for the live QC report.
 See [Differential Expression Workflow](docs/differential_expression.md) for
-cumulative BAM quantification and per-batch edgeR refreshes.
+cumulative BAM quantification and per-batch edgeR, fry, and GSVA refreshes.
 
 
 

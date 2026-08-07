@@ -221,10 +221,11 @@ workflow differential_expression {
             gene_sets,
             annotation
         )
+        gsva_results_ch = run_gene_set_variation_analysis(differential_results_ch)
 
     emit:
         quantifications = quantified_samples_ch
-        results = differential_results_ch
+        results = gsva_results_ch
 }
 
 /**
@@ -420,6 +421,42 @@ process run_differential_expression_edgeR {
             --gene_sets ${gene_sets} \
             --annotation ${annotation} \
             --lfc ${params.de_lfc_cutoff}
+        """
+}
+
+/**
+ * Score resolved gene sets per sample and test score differences after edgeR.
+ * The copied edgeR tree and GSVA additions form one complete batch result.
+ */
+process run_gene_set_variation_analysis {
+    label 'seq_lm_gsva'
+    container 'rnabioinfo/seq_lm_gsva:v1.1.0'
+    cpus 1
+    maxForks 1
+
+    input:
+        differential_result: Map
+
+    stage:
+        stageAs differential_result.results, 'edgeR_results'
+
+    output:
+        record(
+            batch_index: differential_result.batch_index,
+            results: file(differential_expression_results_dir(differential_result.batch_index))
+        )
+
+    script:
+        String results_dir = differential_expression_results_dir(differential_result.batch_index)
+        """
+        mkdir ${results_dir}
+        cp -R edgeR_results/. ${results_dir}/
+
+        gsva-analysis \
+            --feature_counts ${results_dir}/feature_counts.tsv \
+            --sample_metadata ${results_dir}/sample_metadata.tsv \
+            --gene_set_resolution ${results_dir}/gene_set_resolution.tsv \
+            --output_dir ${results_dir}
         """
 }
 

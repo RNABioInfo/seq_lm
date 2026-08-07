@@ -60,7 +60,7 @@
           "type": "string",
           "format": "path",
           "fa_icon": "fas fa-project-diagram",
-          "description": "Gene Matrix Transposed (GMT) file used for edgeR fry gene-set enrichment.",
+          "description": "Gene Matrix Transposed (GMT) file used for edgeR fry and GSVA gene-set analysis.",
           "help_text": "GMT members may match count-table feature identifiers directly or identifiers in the supplied GTF/GFF annotation."
         }
       },

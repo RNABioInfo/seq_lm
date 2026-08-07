@@ -781,6 +781,16 @@ count_annotation = make_count_annotation(identifier_map)
 sample_groups = factor(quant_manifest$group)
 sample_groups = relevel(sample_groups, ref = args$control_group)
 
+sample_metadata = quant_manifest %>%
+    transmute(
+        sample = as.character(name),
+        group = as.character(group)
+    )
+write_tsv(
+    sample_metadata,
+    file.path(output_dir, "sample_metadata.tsv")
+)
+
 dge_list = DGEList(counts = counts, group = sample_groups)
 keep = filterByExpr(dge_list)
 dge_list = dge_list[keep, , keep.lib.sizes = FALSE]

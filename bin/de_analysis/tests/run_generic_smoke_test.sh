@@ -101,6 +101,7 @@ awk -F '\t' '
 ' "${test_dir}/results/gene_set_coverage.tsv"
 
 test -s "${test_dir}/results/gene_set_resolution.tsv"
+test -s "${test_dir}/results/sample_metadata.tsv"
 test -s "${test_dir}/results/group_challenge_vs_baseline/fry_results.tsv"
 test -s "${test_dir}/results/group_challenge_vs_baseline/edgeR_results.tsv"
 test -s "${test_dir}/results/group_challenge_vs_baseline/fry_signed_significance.png"
@@ -119,6 +120,7 @@ awk -F '\t' '
         exit 1
     }
 ' "${test_dir}/direct_results/gene_set_coverage.tsv"
+test -s "${test_dir}/direct_results/sample_metadata.tsv"
 test -s "${test_dir}/direct_results/group_challenge_vs_baseline/fry_results.tsv"
 
 printf 'Generic edgeR/GMT smoke test passed.\n'
