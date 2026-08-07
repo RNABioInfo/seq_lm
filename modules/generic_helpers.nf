@@ -1,8 +1,8 @@
 nextflow.enable.types = true
 
 include {
-    CumulativeSampleBAMGroup;
-    MergedIndexedChunkBAM;
+    ChunkBAM;
+    CumulativeCollatedBAMGroup;
     Sample
 } from '../lib/sample.nf'
 
@@ -21,15 +21,19 @@ String shell_quote(String value) {
     return "'" + value.replace("'", "'\"'\"'") + "'"
 }
 
-String merged_chunk_bam_name(Integer batch_index, Sample sample) {
-    return "${safe_name(sample.name)}_${batch_index}.merged.bam"
+String chunk_bam_name(Integer batch_index, Sample sample) {
+    return "${safe_name(sample.name)}_${batch_index}.chunk.bam"
 }
 
-String cumulative_collated_bam_name(CumulativeSampleBAMGroup input_group) {
+String collated_chunk_bam_name(Integer batch_index, Sample sample) {
+    return "${safe_name(sample.name)}_${batch_index}.chunk.collated.bam"
+}
+
+String cumulative_collated_bam_name(CumulativeCollatedBAMGroup input_group) {
     return "${safe_name(input_group.sample.name)}_${input_group.batch_index}.cumulative.collated.bam"
 }
 
-String nanoplot_output_dir(MergedIndexedChunkBAM merged_bam) {
+String nanoplot_output_dir(ChunkBAM merged_bam) {
     return "${safe_name(merged_bam.sample.name)}_${merged_bam.batch_index}.nanoplot"
 }
 

@@ -3,11 +3,12 @@
 nextflow.enable.types = true
 
 include {
-    CumulativeSampleBAMGroup;
-    CumulativeSampleBAMSnapshot;
-    MergedChunkBAM;
-    MergedIndexedChunkBAM;
-    MergedIndexedChunkBAMBatch;
+    ChunkBAM;
+    CollatedChunkBAM;
+    CollatedChunkBAMBatch;
+    CumulativeCollatedBAM;
+    CumulativeCollatedBAMGroup;
+    CumulativeCollatedBAMSnapshot;
     QuantifiedSample;
     QuantifiedSampleBatch;
     QuantifiedSampleUpdateBatch;
@@ -17,6 +18,7 @@ include {
 include { order_batches } from '../lib/util.nf'
 
 include {
+    collated_chunk_bam_name;
     cumulative_collated_bam_name;
     differential_expression_results_dir;
     oarfish_counts_file_name;
@@ -28,23 +30,24 @@ include {
  * Quantify the cumulative BAM snapshot and rerun differential expression for
  * every complete live batch.
  *
- * A complete batch contains one newly merged chunk for each active sample.
+ * A complete batch contains one newly collated chunk for each active sample.
  * Active samples are accumulated and requantified; unchanged final samples
  * reuse their startup quantification. edgeR starts only after every sample in
  * the experiment has a current quantification.
  */
 workflow differential_expression {
     take:
-        merged_bams: Channel<MergedIndexedChunkBAM>
+        merged_bams: Channel<ChunkBAM>
         batch_sizes: Channel<SampleBatchSize>
         genome: Path
         annotation: Path
         gene_sets: Path
 
     main:
+        collated_bams = collate_chunk_bam(merged_bams)
         Map<Integer, Map> pending_merged_bam_batches = [:]
-        nonempty_merged_bam_batches_ch = merged_bams
-            .map { MergedIndexedChunkBAM merged_bam ->
+        nonempty_merged_bam_batches_ch = collated_bams
+            .map { CollatedChunkBAM merged_bam ->
                 record(
                     batch_index: merged_bam.batch_index,
                     merged_bam: merged_bam
@@ -103,12 +106,12 @@ workflow differential_expression {
             nonempty_merged_bam_batches_ch.mix(empty_merged_bam_batches_ch)
         )
 
-        Map<String, List<MergedIndexedChunkBAM>> cumulative_bam_state = [:]
-        cumulative_snapshots_ch = merged_bam_batches_ch.map { MergedIndexedChunkBAMBatch batch ->
+        Map<String, List<CollatedChunkBAM>> cumulative_bam_state = [:]
+        cumulative_snapshots_ch = merged_bam_batches_ch.map { CollatedChunkBAMBatch batch ->
             accumulate_cumulative_bam_state(cumulative_bam_state, batch)
         }
 
-        snapshot_sizes_ch = cumulative_snapshots_ch.map { CumulativeSampleBAMSnapshot snapshot ->
+        snapshot_sizes_ch = cumulative_snapshots_ch.map { CumulativeCollatedBAMSnapshot snapshot ->
                 record(
                     batch_index: snapshot.batch_index,
                     active_sample_count: snapshot.sample_bams.size(),
@@ -116,11 +119,11 @@ workflow differential_expression {
                 )
             }
 
-        Channel<CumulativeSampleBAMGroup> cumulative_sample_bams_ch = cumulative_snapshots_ch.flatMap { CumulativeSampleBAMSnapshot snapshot ->
+        Channel<CumulativeCollatedBAMGroup> cumulative_sample_bams_ch = cumulative_snapshots_ch.flatMap { CumulativeCollatedBAMSnapshot snapshot ->
             snapshot.sample_bams
         }
         quantified_samples_ch = oarfish_quant(
-            merge_collate_sample_bams(cumulative_sample_bams_ch),
+            assemble_cumulative_collated_bam(cumulative_sample_bams_ch),
             genome,
             annotation
         )
@@ -227,13 +230,13 @@ workflow differential_expression {
 /**
  * Fold one synchronized batch into the cumulative per-sample BAM state.
  */
-CumulativeSampleBAMSnapshot accumulate_cumulative_bam_state(
-    Map<String, List<MergedIndexedChunkBAM>> state,
-    MergedIndexedChunkBAMBatch batch
+CumulativeCollatedBAMSnapshot accumulate_cumulative_bam_state(
+    Map<String, List<CollatedChunkBAM>> state,
+    CollatedChunkBAMBatch batch
 ) {
-    batch.bams.each { MergedIndexedChunkBAM merged_bam ->
+    batch.bams.each { CollatedChunkBAM merged_bam ->
         String sample_key = "${merged_bam.sample.group}\t${merged_bam.sample.name}"
-        List<MergedIndexedChunkBAM> previous_bams = state.containsKey(sample_key) ? state[sample_key] : []
+        List<CollatedChunkBAM> previous_bams = state.containsKey(sample_key) ? state[sample_key] : []
         state[sample_key] = (previous_bams.findAll { previous_bam ->
             previous_bam.batch_index != merged_bam.batch_index
         } + [merged_bam]).toSorted { left, right ->
@@ -241,10 +244,10 @@ CumulativeSampleBAMSnapshot accumulate_cumulative_bam_state(
         }
     }
 
-    List<CumulativeSampleBAMGroup> sample_bams = batch.bams
-        .collect { MergedIndexedChunkBAM updated_bam ->
-            List<MergedIndexedChunkBAM> bams = state[sample_key(updated_bam.sample)]
-            MergedIndexedChunkBAM latest_bam = bams[-1]
+    List<CumulativeCollatedBAMGroup> sample_bams = batch.bams
+        .collect { CollatedChunkBAM updated_bam ->
+            List<CollatedChunkBAM> bams = state[sample_key(updated_bam.sample)]
+            CollatedChunkBAM latest_bam = bams[-1]
             record(
                 batch_index: batch.batch_index,
                 sample: latest_bam.sample,
@@ -268,19 +271,51 @@ String sample_key(sample) {
 }
 
 /**
- * Merge every chunk seen for one sample and collate the resulting BAM by read
- * name. Oarfish's genome-alignment mode requires name-collated input.
+ * Strip Oarfish-unsupported tags and collate each newly arrived chunk exactly
+ * once. Cumulative snapshots can then be assembled with block-level BAM
+ * concatenation instead of repeatedly collating old alignments.
  */
-process merge_collate_sample_bams {
+process collate_chunk_bam {
     label 'seq_lm_dea'
     container 'rnabioinfo/seq_lm_samtools:v1.0.0'
     cpus 2
 
     input:
-        input_group: CumulativeSampleBAMGroup
+        chunk_bam: ChunkBAM
+
+    output:
+        record(
+            batch_index: chunk_bam.batch_index,
+            sample: chunk_bam.sample,
+            bam: file(collated_chunk_bam_name(chunk_bam.batch_index, chunk_bam.sample))
+        )
+
+    script:
+        String collated_bam = collated_chunk_bam_name(chunk_bam.batch_index, chunk_bam.sample)
+        """
+        samtools view -u -x ts ${chunk_bam.bam} |
+            samtools collate \
+                -o ${collated_bam} \
+                -@ ${task.cpus - 1} \
+                -
+        """
+}
+
+/**
+ * Assemble all already-collated chunks for one cumulative sample snapshot.
+ * samtools cat copies BAM blocks without decompressing and recollating the
+ * historical chunks. Read names must be globally unique across chunks.
+ */
+process assemble_cumulative_collated_bam {
+    label 'seq_lm_dea'
+    container 'rnabioinfo/seq_lm_samtools:v1.0.0'
+    cpus 1
+
+    input:
+        input_group: CumulativeCollatedBAMGroup
 
     stage:
-        stageAs input_group.bams*.bam, 'input_bam?.bam'
+        stageAs input_group.bams*.bam, 'collated_chunk?.bam'
 
     output:
         record(
@@ -290,27 +325,19 @@ process merge_collate_sample_bams {
         )
 
     script:
-        String collated_bam = cumulative_collated_bam_name(input_group)
+        String cumulative_bam = cumulative_collated_bam_name(input_group)
+        String cumulative_bam_arg = shell_quote(cumulative_bam)
+        String bam_args = input_group.bams*.bam.collect { bam -> shell_quote(bam.toString()) }.join(' ')
 
-        // One BAM file
         if (input_group.bams.size() == 1) {
             return """
-            samtools view -u -x ts ${input_group.bams[0].bam} |
-            samtools collate \
-                -o ${collated_bam} \
-                -@ ${task.cpus - 1} \
-                -
+            ln -s -- ${bam_args} ${cumulative_bam_arg}
             """
         }
 
-        // Multiple BAM files
-        String bam_args = input_group.bams*.bam.join(' ')
         return """
         printf '%s\\n' ${bam_args} > bams.txt
-
-        samtools merge -u -@ 0 -o - -b bams.txt |
-            samtools view -u -x ts - |
-            samtools collate -o ${collated_bam} -@ 0 -
+        samtools cat -o ${cumulative_bam_arg} -b bams.txt
         """
 }
 
@@ -323,7 +350,7 @@ process oarfish_quant {
     cpus 4
 
     input:
-        merged_bam: MergedChunkBAM
+        merged_bam: CumulativeCollatedBAM
         genome: Path
         annotation: Path
 

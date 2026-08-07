@@ -31,35 +31,40 @@ record SampleChunkBAMGroup {
     bams: List<Path>
 }
 
-record MergedIndexedChunkBAM {
-    batch_index: Integer
-    sample: Sample
-    bam: Path
-    bam_index: Path
-}
-
-record MergedChunkBAM {
+record ChunkBAM {
     batch_index: Integer
     sample: Sample
     bam: Path
 }
 
-record MergedIndexedChunkBAMBatch {
-    batch_index: Integer
-    bams: List<MergedIndexedChunkBAM>
-    experiment_sample_count: Integer
-}
-
-record CumulativeSampleBAMGroup {
+record CollatedChunkBAM {
     batch_index: Integer
     sample: Sample
-    bams: List<MergedIndexedChunkBAM>
+    bam: Path
 }
 
-record CumulativeSampleBAMSnapshot {
+record CollatedChunkBAMBatch {
     batch_index: Integer
-    sample_bams: List<CumulativeSampleBAMGroup>
+    bams: List<CollatedChunkBAM>
     experiment_sample_count: Integer
+}
+
+record CumulativeCollatedBAMGroup {
+    batch_index: Integer
+    sample: Sample
+    bams: List<CollatedChunkBAM>
+}
+
+record CumulativeCollatedBAMSnapshot {
+    batch_index: Integer
+    sample_bams: List<CumulativeCollatedBAMGroup>
+    experiment_sample_count: Integer
+}
+
+record CumulativeCollatedBAM {
+    batch_index: Integer
+    sample: Sample
+    bam: Path
 }
 
 record QuantifiedSample {
@@ -94,7 +99,6 @@ record NanoPlotQCResult {
     batch_index: Integer
     sample: Sample
     bam: Path
-    bam_index: Path
     nanoplot_data: Path
 }
 
@@ -108,7 +112,6 @@ record FlagstatQCResult {
     batch_index: Integer
     sample: Sample
     bam: Path
-    bam_index: Path
     flagstat: Path
 }
 
@@ -122,7 +125,6 @@ record ChunkQCResult {
     batch_index: Integer
     sample: Sample
     bam: Path
-    bam_index: Path
     nanoplot_data: Path
     flagstat: Path
 }

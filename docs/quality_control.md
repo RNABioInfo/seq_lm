@@ -2,15 +2,16 @@
 
 The quality control workflow runs once per sample chunk. A chunk is the set of
 new BAM files observed for one sample at a synchronized live-analysis batch
-index. The chunk BAMs are sorted, merged, and indexed before QC starts, so each
-QC result describes one merged sample chunk rather than a final accumulated
-sample BAM.
+index. Multiple startup BAMs are block-concatenated, while a one-BAM chunk is
+reused directly. Neither path sorts or indexes the chunk, so each QC result
+describes one sample chunk rather than a final accumulated sample BAM.
 
 The workflow currently runs two tabular QC steps:
 
-* `bam-qc-table` uses NanoGet's BAM extraction logic to write the
-  NanoPlot-compatible `NanoPlot-data.tsv.gz` without rendering unused plots.
-* `samtools flagstat -O tsv` reads the same merged chunk BAM and writes a TSV
+* `bam-qc-table` performs a sequential scan using NanoGet's per-alignment metric
+  calculations and writes the NanoPlot-compatible `NanoPlot-data.tsv.gz`
+  without requiring a coordinate index or rendering unused plots.
+* `samtools flagstat -O tsv` reads the same chunk BAM and writes a TSV
   alignment summary.
 
 The main workflow publishes an EPI2ME-displayable HTML analysis report after

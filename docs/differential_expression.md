@@ -4,11 +4,14 @@ The differential-expression workflow refreshes after every synchronized live
 BAM batch. It uses the same chunk stream as quality control, but quantification
 is cumulative rather than chunk-local:
 
-1. BAMs belonging to the same sample chunk are coordinate-sorted and merged.
-2. For each live sample, all merged chunks seen through the current batch are
-   merged into one cumulative BAM. Final samples are processed only at startup.
-3. The cumulative BAM is collated by read name with `samtools collate`.
-4. Oarfish 0.10 quantifies the collated genome alignments against
+1. BAMs belonging to the same sample chunk are concatenated without sorting or
+   indexing. A single input BAM is reused directly.
+2. Each new chunk is stripped of its `ts` tags and collated by read name exactly
+   once with `samtools collate`.
+3. For each live sample, the already-collated chunks seen through the current
+   batch are assembled into a temporary cumulative BAM with block-level
+   `samtools cat`. Final samples are processed only at startup.
+4. Oarfish 0.10 quantifies the cumulative genome alignments against
    `--reference_annotation`, using `--ex_reference_genome` for soft-clip
    rescue.
 5. The latest quantification is retained for every sample. Each synchronized
@@ -39,6 +42,12 @@ incomplete synchronized run. At least two samples must use `control` as their
 group. Each other group is tested separately against the control group.
 Oarfish's EM-estimated `num_reads` values are consumed by the edgeR analysis,
 which rebuilds the current count matrix for every complete live batch.
+
+Read names must be globally unique across the BAM chunks for a sample. This is
+normally guaranteed by Nanopore UUID read identifiers. It ensures that all
+alignment records for one read remain adjacent when independently collated
+chunks are concatenated. Oarfish rereads the complete temporary cumulative BAM
+on every update, but historical chunks are not decompressed and recollated.
 
 ### NCBI prokaryotic annotations
 

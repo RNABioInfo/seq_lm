@@ -4,7 +4,10 @@
 from argparse import ArgumentParser
 from pathlib import Path
 
-from nanoget.extraction_functions import process_bam
+import pandas as pd
+import pysam
+from nanoget.extraction_functions import get_pID
+from nanoget.utils import ave_qual, reduce_memory_usage
 
 
 EXPECTED_COLUMNS = [
@@ -20,7 +23,7 @@ EXPECTED_COLUMNS = [
 
 def argparser() -> ArgumentParser:
     parser = ArgumentParser(description=__doc__)
-    parser.add_argument("--bam", required=True, help="Coordinate-sorted input BAM.")
+    parser.add_argument("--bam", required=True, help="Input BAM; no index or sort order is required.")
     parser.add_argument(
         "--output",
         required=True,
@@ -35,12 +38,32 @@ def main() -> None:
     if args.threads < 1:
         raise ValueError("--threads must be at least 1.")
 
-    data = process_bam(
-        args.bam,
-        threads=args.threads,
-        keep_supp=True,
-        huge=True,
-    )
+    # NanoGet's process_bam wrapper unconditionally creates an index and rejects
+    # non-coordinate-sorted BAMs, even though its --huge extraction path scans
+    # records sequentially. Perform the same per-record calculation explicitly
+    # so chunk QC can consume fast, block-concatenated BAMs.
+    with pysam.AlignmentFile(args.bam, "rb") as samfile:
+        rows = [
+            (
+                read.query_name,
+                ave_qual(read.query_qualities),
+                ave_qual(read.query_alignment_qualities),
+                read.query_length,
+                read.query_alignment_length,
+                read.mapping_quality,
+                get_pID(read),
+            )
+            for read in samfile.fetch(until_eof=True)
+            if not read.is_secondary and not read.is_unmapped
+        ]
+
+    data = pd.DataFrame(
+        rows,
+        columns=EXPECTED_COLUMNS,
+    ).dropna(axis="columns", how="all").dropna(axis="index", how="any")
+    data = reduce_memory_usage(data)
+    if data.empty:
+        raise ValueError(f"BAM contains no mapped primary alignments: {args.bam}")
     missing_columns = [
         column for column in EXPECTED_COLUMNS if column not in data.columns
     ]

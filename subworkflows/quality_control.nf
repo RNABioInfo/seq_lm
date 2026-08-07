@@ -1,9 +1,9 @@
 nextflow.enable.types = true
 
 include {
+    ChunkBAM;
     ChunkQCResult;
     FlagstatQCResult;
-    MergedIndexedChunkBAM;
     NanoPlotQCResult
 } from '../lib/sample.nf'
 include { flagstat_file_name; nanoplot_output_dir } from '../modules/generic_helpers.nf'
@@ -11,13 +11,13 @@ include { flagstat_file_name; nanoplot_output_dir } from '../modules/generic_hel
 /**
  * Run chunk-level QC for each merged sample chunk.
  *
- * Each input is already sorted, merged, and indexed for exactly one sample and
- * one batch index. QC stays per chunk so live reports can be refreshed as new
- * sequencing chunks arrive instead of waiting for a final sample BAM.
+ * Each input contains exactly one sample and one batch index. QC scans the BAM
+ * sequentially, so coordinate sorting and indexing are unnecessary. QC stays
+ * per chunk so live reports can refresh as sequencing chunks arrive.
  */
 workflow quality_control {
     take:
-        merged_bams: Channel<MergedIndexedChunkBAM>
+        merged_bams: Channel<ChunkBAM>
 
     main:
         nanoplot_qc_ch = nanoplot_qc(merged_bams)
@@ -37,7 +37,6 @@ workflow quality_control {
                     batch_index: nanoplot_result.batch_index,
                     sample: nanoplot_result.sample,
                     bam: nanoplot_result.bam,
-                    bam_index: nanoplot_result.bam_index,
                     nanoplot_data: nanoplot_result.nanoplot_data,
                     flagstat: flagstat_result.flagstat
                 )
@@ -62,14 +61,13 @@ process nanoplot_qc {
     cpus 1
 
     input:
-        merged_bam: MergedIndexedChunkBAM
+        merged_bam: ChunkBAM
 
     output:
         record(
             batch_index: merged_bam.batch_index,
             sample: merged_bam.sample,
             bam: merged_bam.bam,
-            bam_index: merged_bam.bam_index,
             nanoplot_data: file("${nanoplot_output_dir(merged_bam)}/NanoPlot-data.tsv.gz")
         )
 
@@ -93,14 +91,13 @@ process samtools_flagstat_qc {
     cpus 2
 
     input:
-        merged_bam: MergedIndexedChunkBAM
+        merged_bam: ChunkBAM
 
     output:
         record(
             batch_index: merged_bam.batch_index,
             sample: merged_bam.sample,
             bam: merged_bam.bam,
-            bam_index: merged_bam.bam_index,
             flagstat: file(flagstat_file_name(merged_bam.batch_index, merged_bam.sample.name))
         )
 

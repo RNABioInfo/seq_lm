@@ -10,7 +10,7 @@ include {
     SampleChunkBAMGroup
 } from './lib/sample.nf'
 include {
-    merged_chunk_bam_name;
+    chunk_bam_name;
     optional_file;
     shell_quote
 } from './modules/generic_helpers.nf'
@@ -78,10 +78,10 @@ process make_report {
         """
 }
 
-process bam_merge_index {
+process prepare_chunk_bam {
     label 'seq_lm'
     container 'rnabioinfo/seq_lm_samtools:v1.0.0'
-    cpus 4
+    cpus 1
 
     input:
         input_group: SampleChunkBAMGroup
@@ -93,49 +93,38 @@ process bam_merge_index {
         record(
             batch_index: input_group.batch_index,
             sample: input_group.sample,
-            bam: file(merged_chunk_bam_name(input_group.batch_index, input_group.sample)),
-            bam_index: file("${merged_chunk_bam_name(input_group.batch_index, input_group.sample)}.bai")
+            bam: file(chunk_bam_name(input_group.batch_index, input_group.sample))
         )
 
     script:
-        String merged_bam = merged_chunk_bam_name(input_group.batch_index, input_group.sample)
-        String prepare_bams = input_group.bams.withIndex().collect { Path input_bam, Integer index ->
-            String input_bam_arg = shell_quote(input_bam.toString())
-            String sorted_bam_arg = shell_quote("sorted_input${index + 1}.bam")
-            """
-            if samtools view -H ${input_bam_arg} | awk '
-                BEGIN { FS = "\\t" }
-                \$1 == "@HD" {
-                    for (field = 2; field <= NF; field++) {
-                        if (\$field == "SO:coordinate") {
-                            coordinate_sorted = 1
-                        }
-                    }
-                }
-                END { exit !coordinate_sorted }
-            '; then
-                printf '%s\\n' ${input_bam_arg} >> bams.txt
-            else
-                samtools sort -o ${sorted_bam_arg} -@ ${task.cpus} ${input_bam_arg}
-                printf '%s\\n' ${sorted_bam_arg} >> bams.txt
-            fi
-            """
-        }.join('\n')
-        String merged_bam_arg = shell_quote(merged_bam)
-        String indexed_output_arg = shell_quote("${merged_bam}##idx##${merged_bam}.bai")
-        String merge_and_index = input_group.bams.size() == 1 ? """
-            read -r prepared_bam < bams.txt
-            ln -s -- "\$prepared_bam" ${merged_bam_arg}
-            samtools index -@ ${task.cpus - 1} ${merged_bam_arg}
+        String chunk_bam = chunk_bam_name(input_group.batch_index, input_group.sample)
+        String chunk_bam_arg = shell_quote(chunk_bam)
+        String bam_args = input_group.bams.collect { Path bam -> shell_quote(bam.toString()) }.join(' ')
+        String prepare_chunk = input_group.bams.size() == 1 ? """
+            ln -s -- ${bam_args} ${chunk_bam_arg}
         """ : """
-            samtools merge --write-index -@ ${task.cpus} \
-                -o ${indexed_output_arg} \
-                -b bams.txt
+            : > bams.txt
+            printf '%s\\n' ${bam_args} > bams.txt
+
+            first_bam=1
+            while IFS= read -r input_bam; do
+                samtools view -H "\$input_bam" | awk '\$1 == "@SQ"' > current.sq
+                if [ "\$first_bam" -eq 1 ]; then
+                    cp current.sq expected.sq
+                    first_bam=0
+                elif ! cmp -s expected.sq current.sq; then
+                    printf 'Incompatible BAM sequence dictionaries in sample %s batch %s: %s\\n' \
+                        ${shell_quote(input_group.sample.name)} \
+                        ${input_group.batch_index} \
+                        "\$input_bam" >&2
+                    exit 1
+                fi
+            done < bams.txt
+
+            samtools cat -o ${chunk_bam_arg} -b bams.txt
         """
         """
-        : > bams.txt
-        ${prepare_bams}
-        ${merge_and_index}
+        ${prepare_chunk}
         """
 }
 
@@ -237,10 +226,10 @@ workflow sample_pipeline {
     main:
         /*
          * `bam_ingress` emits synchronized sample batches. The pipeline spreads
-         * each non-empty batch into one record per BAM, regroups sorted BAMs by
-         * sample chunk, and then refreshes the live QC report after each complete
-         * batch. Keep this flow in channel operators; only use Groovy helpers for
-         * naming and report-state formatting.
+         * each non-empty batch into one record per sample chunk, prepares a
+         * sequential BAM for QC, and then refreshes the live QC report after
+         * each complete batch. Keep this flow in channel operators; only use
+         * Groovy helpers for naming and report-state formatting.
          */
         sample_batch_size_ch = sample_batches
             .map { batch ->
@@ -264,7 +253,7 @@ workflow sample_pipeline {
                     }
             }
 
-        merged_chunk_bam_ch = bam_merge_index(sample_chunk_bam_group_ch)
+        merged_chunk_bam_ch = prepare_chunk_bam(sample_chunk_bam_group_ch)
         qc_result_ch = quality_control(merged_chunk_bam_ch)
         differential_expression(
             merged_chunk_bam_ch,
@@ -296,7 +285,6 @@ workflow sample_pipeline {
                     batch_index: joined.batch_index,
                     sample: joined.sample,
                     bam: joined.bam,
-                    bam_index: joined.bam_index,
                     nanoplot_data: joined.nanoplot_data,
                     flagstat: joined.flagstat
                 )
