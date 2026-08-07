@@ -754,41 +754,47 @@ def add_differential_analysis(
     lfc_cutoff: float,
     padj_cutoff: float,
 ) -> None:
-    """Add PCA and contrast-specific plots to the current report section."""
+    """Add overview, contrast, and plot-type tabs to the report section."""
     tabs = Tabs()
-    with tabs.add_tab("PCA"):
+    with tabs.add_tab("Overview"):
         EZChart(create_pca_plot(data), "epi2melabs", height="460px")
 
-    for contrast in data.contrasts:
-        with tabs.add_tab(contrast.label):
-            EZChart(
-                create_ma_plot(
-                    contrast,
-                    data.condition_colors,
-                    lfc_cutoff,
-                    padj_cutoff,
-                ),
-                "epi2melabs",
-                height="460px",
-            )
-            EZChart(
-                create_volcano_plot(
-                    contrast,
-                    data.condition_colors,
-                    lfc_cutoff,
-                    padj_cutoff,
-                ),
-                "epi2melabs",
-                height="460px",
-            )
-            heatmap = create_heatmap_plot(
-                data,
-                contrast,
-                lfc_cutoff,
-                padj_cutoff,
-            )
-            EZChart(
-                heatmap,
-                "epi2melabs",
-                height=f"{getattr(heatmap, 'report_height', 720)}px",
-            )
+    with tabs.add_tab("Contrasts"):
+        contrast_tabs = Tabs()
+        for contrast in data.contrasts:
+            with contrast_tabs.add_tab(contrast.label):
+                plot_tabs = Tabs()
+                with plot_tabs.add_tab("MA plot"):
+                    EZChart(
+                        create_ma_plot(
+                            contrast,
+                            data.condition_colors,
+                            lfc_cutoff,
+                            padj_cutoff,
+                        ),
+                        "epi2melabs",
+                        height="460px",
+                    )
+                with plot_tabs.add_tab("Volcano"):
+                    EZChart(
+                        create_volcano_plot(
+                            contrast,
+                            data.condition_colors,
+                            lfc_cutoff,
+                            padj_cutoff,
+                        ),
+                        "epi2melabs",
+                        height="460px",
+                    )
+                with plot_tabs.add_tab("Heatmap"):
+                    heatmap = create_heatmap_plot(
+                        data,
+                        contrast,
+                        lfc_cutoff,
+                        padj_cutoff,
+                    )
+                    EZChart(
+                        heatmap,
+                        "epi2melabs",
+                        height=f"{getattr(heatmap, 'report_height', 720)}px",
+                    )

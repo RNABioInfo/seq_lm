@@ -34,17 +34,25 @@ output root with overwrite enabled so EPI2ME can display one stable report path
 while live chunks arrive. The shell polls `qc_report_state.json` and refreshes
 only its internal report frame when a complete snapshot becomes available.
 Active Bootstrap tabs, dropdown selections, and scroll position are restored
-after the frame update, so the browser page itself is not reloaded. The report
-has exactly three top-level sections:
+after the frame update using hierarchy-based tab keys, so the browser page
+itself is not reloaded. Hidden Bokeh and ECharts views are resized when their
+tabs open. The report has three primary tabs:
 
 * **Quality Control** contains the existing read-flow, metrics, read-length,
   read-quality, mapping-quality, and sample views.
-* **Differential Analysis** contains a global PCA and one tab per edgeR
-  contrast with logFC-versus-logCPM, volcano, and top-gene heatmap plots.
-* **Gene Set Enrichment** contains one tab per edgeR contrast with a signed
-  directional-fry summary and the same Bootstrap dropdown-tab selector used by
-  read-flow samples. Concise labels appear in the selector, while each barcode
-  view exposes its complete label and statistics in **Gene-set details**.
+* **Differential Analysis** separates its overview from contrasts, then uses
+  contrast and plot-type subtabs for logFC-versus-logCPM, volcano, and top-gene
+  heatmap plots.
+* **Gene Set Enrichment** separates raw GSVA scores, GSVA limma testing, and
+  directional fry. GSVA includes score heatmaps, raw score distributions,
+  coverage, a multi-contrast dot plot, and per-contrast volcano and heatmap
+  views. fry retains the gene-set dropdown used for barcode plots. Concise
+  identifiers appear in long dropdowns, while barcode views expose complete
+  labels and statistics in **Gene-set details**.
+
+Nested tab content uses reduced padding, while the primary tab bar uses the
+workflow brand color to remain visually distinct from analysis, contrast, and
+plot-type subtabs.
 
 The report sample TSV uses this shape:
 

@@ -70,6 +70,48 @@ _BRAND_STYLES = f"""
         object-fit: contain;
         width: auto;
       }}
+      main .tab-content.p-5 {{
+        padding: 1.25rem !important;
+      }}
+      main .tab-content .tab-content.p-5 {{
+        padding: 0.75rem 0.25rem !important;
+      }}
+      main .tab-content .tab-content .tab-content.p-5 {{
+        padding: 0.5rem 0 !important;
+      }}
+      .seq-lm-primary-tablist {{
+        border-bottom: 2px solid {_BRAND_COLOR};
+        gap: 0.35rem;
+      }}
+      .seq-lm-primary-tablist > .nav-item > .nav-link {{
+        border: 1px solid transparent;
+        border-radius: 0.375rem 0.375rem 0 0;
+        color: #495057 !important;
+        font-weight: 600;
+        margin-right: 0 !important;
+        padding: 0.75rem 1rem !important;
+      }}
+      .seq-lm-primary-tablist > .nav-item > .nav-link.active {{
+        background: {_BRAND_COLOR};
+        border-color: {_BRAND_COLOR};
+        color: #fff !important;
+      }}
+      .seq-lm-subtablist {{
+        border-bottom-color: #adb5bd;
+        margin-top: 0.35rem;
+      }}
+      .seq-lm-subtablist > .nav-item > .nav-link {{
+        padding-bottom: 0.4rem !important;
+        padding-top: 0.4rem !important;
+      }}
+      @media (max-width: 767.98px) {{
+        .seq-lm-primary-tablist > .nav-item > .nav-link {{
+          padding: 0.55rem 0.65rem !important;
+        }}
+        main .tab-content.p-5 {{
+          padding: 0.75rem 0.25rem !important;
+        }}
+      }}
     </style>
 """
 _BRAND_MARKUP = (
@@ -78,20 +120,112 @@ _BRAND_MARKUP = (
     f'<img src="{_BRAND_LOGO_DATA_URI}" alt="RNA BioInfo AUCG logo">'
     "</div>"
 )
+_REPORT_NAVIGATION_SCRIPT = r"""
+    <script id="seq-lm-report-navigation">
+      (() => {
+        const text = (element) => element
+          ? element.textContent.trim().replace(/\s+/g, " ")
+          : "";
+
+        const directTabButtons = (tabList) => [...tabList.children]
+          .flatMap((child) => [...child.querySelectorAll(":scope > button")])
+          .filter((button) => button.matches('[data-bs-toggle="tab"]'));
+
+        const paneLabel = (pane) => {
+          const labelledBy = (pane.getAttribute("aria-labelledby") || "")
+            .replace(/^#/, "");
+          return text(document.getElementById(labelledBy));
+        };
+
+        const markTabLevels = () => {
+          const tabLists = [...document.querySelectorAll('[role="tablist"]')];
+          tabLists.forEach((tabList) => {
+            const labels = directTabButtons(tabList).map(text);
+            const isPrimary = [
+              "Quality Control",
+              "Differential Analysis",
+              "Gene Set Enrichment"
+            ].every((label) => labels.includes(label));
+            tabList.classList.toggle("seq-lm-primary-tablist", isPrimary);
+            tabList.classList.toggle("seq-lm-subtablist", !isPrimary);
+
+            const ancestors = [];
+            let parent = tabList.parentElement;
+            while (parent) {
+              if (parent.classList && parent.classList.contains("tab-pane")) {
+                const label = paneLabel(parent);
+                if (label) ancestors.unshift(label);
+              }
+              parent = parent.parentElement;
+            }
+            const ownIdentity = labels.length
+              ? labels.join(" / ")
+              : text(tabList.querySelector(".dropdown-toggle"));
+            tabList.dataset.seqLmTabKey = [...ancestors, ownIdentity].join(" > ");
+          });
+        };
+
+        const resizeVisibleCharts = () => {
+          window.dispatchEvent(new Event("resize"));
+          if (window.Bokeh && window.Bokeh.index) {
+            Object.values(window.Bokeh.index).forEach((view) => {
+              if (view && typeof view.resize_layout === "function") {
+                view.resize_layout();
+              }
+            });
+          }
+          if (window.echarts) {
+            document.querySelectorAll("[_echarts_instance_]").forEach((element) => {
+              const chart = window.echarts.getInstanceByDom(element);
+              if (chart) chart.resize();
+            });
+          }
+        };
+
+        markTabLevels();
+        document.addEventListener("shown.bs.tab", () => {
+          window.setTimeout(resizeVisibleCharts, 0);
+          window.setTimeout(resizeVisibleCharts, 150);
+        });
+        window.addEventListener("load", () => {
+          markTabLevels();
+          window.setTimeout(resizeVisibleCharts, 0);
+        });
+      })();
+    </script>
+"""
+
+
+def _insert_before_last(html, closing_tag, content):
+    """Insert content before the document-level closing tag.
+
+    Vendored JavaScript can contain strings such as ``</body>``. Using a
+    first-match replacement would insert report markup into those strings.
+    """
+    index = html.rfind(closing_tag)
+    if index == -1:
+        return html
+    return f"{html[:index]}{content}{html[index:]}"
 
 
 def apply_report_branding(report_path):
-    """Replace the EPI2ME header logo and color in a generated LabsReport."""
+    """Apply branding and robust nested-tab behavior to a LabsReport."""
     report_path = Path(report_path)
     html = report_path.read_text()
     html = _EPI2ME_HEADER_LINK.sub(_BRAND_MARKUP, html, count=1)
     if 'id="seq-lm-report-branding"' not in html and "</head>" in html:
-        html = html.replace("</head>", f"{_BRAND_STYLES}</head>", 1)
+        html = _insert_before_last(html, "</head>", _BRAND_STYLES)
+    if 'id="seq-lm-report-navigation"' not in html and "</body>" in html:
+        html = _insert_before_last(
+            html,
+            "</body>",
+            _REPORT_NAVIGATION_SCRIPT,
+        )
     report_path.write_text(html)
 
 
 def patch_bokeh_resources():
-    """Provide the Bokeh resource API and widget bundle needed by ezCharts."""
+    """Provide the chart resources needed by self-contained ezCharts reports."""
     if not hasattr(Resources, "components_for") and hasattr(Resources, "components"):
         Resources.components_for = Resources.components
 

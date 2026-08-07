@@ -86,15 +86,17 @@ Differential-expression checkpoints are published under:
 
 Each checkpoint contains edgeR differential-expression results, fry gene-set
 tests, and GSVA sample-level scores and limma contrasts. The integrated report
-continues to consume only the edgeR and fry files. Results produced while
+consumes the edgeR, fry, and GSVA result tables. Results produced while
 sequencing is active are provisional and are replaced statistically by later,
 better-powered checkpoints.
 
 ## Integrated differential-analysis report
 
-The stable `qc_report.html` artifact includes an edgeR-backed Differential
-Analysis section once matching QC and edgeR outputs exist for a batch. Its PCA
-uses `log2(CPM + 1)` for all samples. Each target-versus-reference tab contains:
+The stable `qc_report.html` artifact exposes **Quality Control**, **Differential
+Analysis**, and **Gene Set Enrichment** as primary tabs once matching QC and
+differential outputs exist for a batch. Within Differential Analysis, the
+overview PCA uses `log2(CPM + 1)` for all samples. Contrast and plot-type
+subtabs separate:
 
 * an edgeR `logFC` versus `logCPM` plot;
 * a volcano plot of `logFC` versus `-log10(FDR)`;
@@ -115,8 +117,9 @@ These plots report differential-expression associations. They do not establish
 that a reported gene causally drives the experimental phenotype. Results from
 live sequencing batches remain provisional until the final batch is analyzed.
 
-The report also includes a Gene Set Enrichment section with one tab per
-contrast. Its signed summary displays up to 30 gene sets with the smallest
+The Gene Set Enrichment primary tab separates **GSVA scores**, **GSVA
+differential**, and **fry enrichment** analyses. The fry contrast and plot-type
+subtabs include a signed summary displaying up to 30 gene sets with the smallest
 directional fry FDR values. Positive bars represent coordinated expression
 toward the target condition and negative bars represent the reference
 condition. Significant bars use the corresponding condition color; gene sets
@@ -235,8 +238,13 @@ the heatmap is row-standardized.
 
 GSVA scores summarize relative expression patterns within this dataset. They
 are not direct biochemical measurements of pathway activity and do not
-establish mechanism or causality. The current HTML report deliberately does
-not parse or display these files.
+establish mechanism or causality. The HTML report displays a variance-ranked,
+row-standardized score heatmap, raw score distributions selected through a
+gene-set dropdown, and the coverage table. Its limma views include a
+multi-contrast effect/significance dot plot plus per-contrast volcano and
+significant-score heatmap subtabs. Volcano x-axes are labeled as target-minus-
+control **GSVA score differences**, not log fold changes; BH-adjusted p-values
+control the report significance threshold.
 
 The workflow uses `rnabioinfo/seq_lm_gsva:v1.1.0`. Build and publish that image
 before deploying this workflow version:

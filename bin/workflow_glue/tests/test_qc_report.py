@@ -27,12 +27,16 @@ def test_write_report_uses_live_shell_and_versioned_snapshot(tmp_path):
     state = json.loads((tmp_path / "qc_report_state.json").read_text())
     snapshot = tmp_path / state["snapshot"]
     assert snapshot.name == "qc_report_snapshot_batch_2.html"
-    assert snapshot.read_text() == "<html><body>snapshot</body></html>"
+    snapshot_html = snapshot.read_text()
+    assert "snapshot" in snapshot_html
+    assert 'id="seq-lm-report-navigation"' in snapshot_html
     assert state["latest_batch"] == "batch 2"
     assert state["snapshot_bytes"] == snapshot.stat().st_size
     assert '<meta http-equiv="refresh"' not in shell
     assert "captureViewState" in shell
     assert "restoreViewState" in shell
+    assert "seqLmTabKey" in shell
+    assert "Object.fromEntries" in shell
     assert "frameReady" in shell
     assert "stateIsOlder" in shell
     assert "fetch(requestUrl" in shell
@@ -127,6 +131,28 @@ def write_differential_results(path):
         "Carbon response\t2\t2\t2\t2\t2\t1.0\t1.0\n"
         "carbon_mixed\t2\tDown\t0.8\t0.8\t0.001\t0.01\t"
         "Mixed response\t2\t2\t2\t2\t2\t1.0\t1.0\n"
+    )
+    (path / "gsva_scores_long.tsv").write_text(
+        "gene_set\tdescription\tn_genes\tsample\tgroup\tscore\n"
+        "carbon_up\tCarbon response\t2\tcontrol_1\tcontrol\t-0.6\n"
+        "carbon_up\tCarbon response\t2\ttreatment_1\ttime_point_1\t0.7\n"
+        "carbon_mixed\tMixed response\t2\tcontrol_1\tcontrol\t0.4\n"
+        "carbon_mixed\tMixed response\t2\ttreatment_1\ttime_point_1\t-0.3\n"
+    )
+    (path / "gsva_gene_set_coverage.tsv").write_text(
+        "gene_set\tdescription\tresolved_members\tretained_members\t"
+        "variable_members\tscored_members\tstatus\n"
+        "carbon_up\tCarbon response\t2\t2\t2\t2\tscored\n"
+        "carbon_mixed\tMixed response\t2\t2\t2\t2\tscored\n"
+    )
+    (contrast / "gsva_limma_results.tsv").write_text(
+        "gene_set\tdescription\tn_genes\ttarget_group\tcontrol_group\t"
+        "effect_size\taverage_score\tt_statistic\tp_value\t"
+        "adjusted_p_value\tlog_odds\n"
+        "carbon_up\tCarbon response\t2\ttime_point_1\tcontrol\t"
+        "1.3\t0.05\t5.0\t0.001\t0.002\t2.0\n"
+        "carbon_mixed\tMixed response\t2\ttime_point_1\tcontrol\t"
+        "-0.7\t0.05\t-3.0\t0.01\t0.01\t1.0\n"
     )
     (path / "gene_set_resolution.tsv").write_text(
         "gene_set\tfeature_id\n"
@@ -319,6 +345,12 @@ def test_qc_report_writes_html(tmp_path):
     assert "Top differential genes" in html
     assert "fry signed directional significance" in html
     assert "Gene-set barcode and enrichment worm" in html
+    assert "GSVA scores across samples" in html
+    assert "Raw GSVA scores" in html
+    assert "GSVA limma volcano" in html
+    assert "GSVA score difference" in html
+    assert "GSVA limma across contrasts" in html
+    assert "Differential GSVA scores" in html
     assert "Carbon response" in html
     assert "Mixed response" in html
     assert "Relative local enrichment" in html
@@ -327,11 +359,18 @@ def test_qc_report_writes_html(tmp_path):
     assert "Gene-set details" in html
     assert "BEGIN bokeh.min.js" in html
     assert "BEGIN bokeh-widgets.min.js" in html
+    assert html.index('t.version="5.3.3"') < html.index(
+        'id="seq-lm-report-navigation"'
+    )
     assert html.index("BEGIN bokeh.min.js") < html.index("BEGIN bokeh-widgets.min.js")
     assert "time_point_1 vs control" in html
     assert "control/control_1" in html
     assert "time_point_1/treatment_1" in html
     assert "dropdown-menu" in html
+    assert "seq-lm-primary-tablist" in html
+    assert "shown.bs.tab" in html
+    assert "resize_layout" in html
+    assert "getInstanceByDom" in html
 
 
 def test_create_read_fate_sankey_html_returns_embeddable_fragment():

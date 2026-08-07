@@ -20,6 +20,11 @@ from .qc_report_types.gene_set_plots import (
     add_gene_set_enrichment,
     load_gene_set_results,
 )
+from .qc_report_types.gsva_plots import (
+    add_gsva_differential,
+    add_gsva_scores,
+    load_gsva_results,
+)
 from .qc_report_types.sankey_plot import (
     add_sample_read_fate_sankeys,
     create_read_fate_sankey_html,
@@ -123,18 +128,24 @@ def _live_report_shell(
       const text = (element) =>
         element ? element.textContent.trim().replace(/\\s+/g, " ") : null;
 
+      const tabKey = (tabList, index) =>
+        tabList.dataset.seqLmTabKey || `tab-list-${{index}}`;
+
       const captureViewState = () => {{
         try {{
           const doc = frame.contentDocument;
           const win = frame.contentWindow;
-          const tabs = [...doc.querySelectorAll('[role="tablist"]')].map(
-            (tabList) => text(
-              tabList.querySelector('[data-bs-toggle="tab"].active')
+          const tabs = Object.fromEntries(
+            [...doc.querySelectorAll('[role="tablist"]')].map(
+              (tabList, index) => [
+                tabKey(tabList, index),
+                text(tabList.querySelector('[data-bs-toggle="tab"].active'))
+              ]
             )
           );
           return {{ tabs, scrollX: win.scrollX, scrollY: win.scrollY }};
         }} catch (error) {{
-          return {{ tabs: [], scrollX: 0, scrollY: 0 }};
+          return {{ tabs: {{}}, scrollX: 0, scrollY: 0 }};
         }}
       }};
 
@@ -144,13 +155,21 @@ def _live_report_shell(
           const doc = frame.contentDocument;
           const win = frame.contentWindow;
           const tabLists = [...doc.querySelectorAll('[role="tablist"]')];
-          viewState.tabs.forEach((label, index) => {{
-            if (!label || !tabLists[index]) return;
-            const button = [...tabLists[index].querySelectorAll(
+          const tabListsByKey = new Map(
+            tabLists.map((tabList, index) => [tabKey(tabList, index), tabList])
+          );
+          Object.entries(viewState.tabs || {{}}).forEach(([key, label]) => {{
+            const tabList = tabListsByKey.get(key);
+            if (!label || !tabList) return;
+            const button = [...tabList.querySelectorAll(
               '[data-bs-toggle="tab"]'
             )].find((candidate) => text(candidate) === label);
             if (button) button.click();
           }});
+          win.setTimeout(
+            () => win.dispatchEvent(new Event("resize")),
+            0
+          );
           window.setTimeout(
             () => win.scrollTo(viewState.scrollX, viewState.scrollY),
             100
@@ -301,7 +320,11 @@ def main(args):
         args.differential_results,
         samples.samples_df,
     )
-    gene_sets = load_gene_set_results(
+    fry_results = load_gene_set_results(
+        args.differential_results,
+        differential,
+    )
+    gsva_results = load_gsva_results(
         args.differential_results,
         differential,
     )
@@ -315,63 +338,72 @@ def main(args):
         "workflow",
     )
 
-    with report.add_section("Quality Control", "Quality Control"):  # type: ignore
-        tabs = Tabs()
-        with tabs.add_tab("Read flow"):
-            add_sample_read_fate_sankeys(samples.sample_results)
-        with tabs.add_tab("Metrics"):
-            DataTable.from_pandas(
-                create_nanoplot_metrics_table(samples.sample_results),
-                use_index=False,
-            )
-        with tabs.add_tab("Read length"):
-            add_sample_hists(
-                samples.sample_results,
-                x_column="lengths",
-                title="Read length histogram",
-                x_axis_label="Read length",
-                y_axis_label="Number of reads",
-            )
-        with tabs.add_tab("Read quality"):
-            add_sample_2d_kdes(
-                samples.sample_results,
-                x_column="lengths",
-                y_column="quals",
-                title="Read length vs Read quality",
-                x_axis_label="Read length",
-                y_axis_label="Read quality",
-            )
-        with tabs.add_tab("Mapping quality"):
-            add_sample_2d_kdes(
-                samples.sample_results,
-                x_column="lengths",
-                y_column="mapQ",
-                title="Read length vs Mapping quality",
-                x_axis_label="Read length",
-                y_axis_label="Mapping quality",
-            )
-        with tabs.add_tab("Samples"):
-            DataTable.from_pandas(samples.samples_df)
+    with report.add_section("Analysis", "Analysis"):  # type: ignore
+        primary_tabs = Tabs()
+        with primary_tabs.add_tab("Quality Control"):
+            qc_tabs = Tabs()
+            with qc_tabs.add_tab("Read flow"):
+                add_sample_read_fate_sankeys(samples.sample_results)
+            with qc_tabs.add_tab("Metrics"):
+                DataTable.from_pandas(
+                    create_nanoplot_metrics_table(samples.sample_results),
+                    use_index=False,
+                )
+            with qc_tabs.add_tab("Read length"):
+                add_sample_hists(
+                    samples.sample_results,
+                    x_column="lengths",
+                    title="Read length histogram",
+                    x_axis_label="Read length",
+                    y_axis_label="Number of reads",
+                )
+            with qc_tabs.add_tab("Read quality"):
+                add_sample_2d_kdes(
+                    samples.sample_results,
+                    x_column="lengths",
+                    y_column="quals",
+                    title="Read length vs Read quality",
+                    x_axis_label="Read length",
+                    y_axis_label="Read quality",
+                )
+            with qc_tabs.add_tab("Mapping quality"):
+                add_sample_2d_kdes(
+                    samples.sample_results,
+                    x_column="lengths",
+                    y_column="mapQ",
+                    title="Read length vs Mapping quality",
+                    x_axis_label="Read length",
+                    y_axis_label="Mapping quality",
+                )
+            with qc_tabs.add_tab("Samples"):
+                DataTable.from_pandas(samples.samples_df)
 
-    with report.add_section(  # type: ignore
-        "Differential Analysis",
-        "Differential Analysis",
-    ):
-        add_differential_analysis(
-            differential,
-            args.lfc_cutoff,
-            args.padj_cutoff,
-        )
+        with primary_tabs.add_tab("Differential Analysis"):
+            add_differential_analysis(
+                differential,
+                args.lfc_cutoff,
+                args.padj_cutoff,
+            )
 
-    with report.add_section(  # type: ignore
-        "Gene Set Enrichment",
-        "Gene Set Enrichment",
-    ):
-        add_gene_set_enrichment(
-            gene_sets,
-            differential.condition_colors,
-            args.padj_cutoff,
-        )
+        with primary_tabs.add_tab("Gene Set Enrichment"):
+            analysis_tabs = Tabs()
+            with analysis_tabs.add_tab("GSVA scores"):
+                add_gsva_scores(
+                    gsva_results,
+                    differential.condition_colors,
+                )
+            with analysis_tabs.add_tab("GSVA differential"):
+                add_gsva_differential(
+                    gsva_results,
+                    differential.condition_colors,
+                    args.padj_cutoff,
+                )
+            with analysis_tabs.add_tab("fry enrichment"):
+                add_gene_set_enrichment(
+                    fry_results,
+                    differential.condition_colors,
+                    args.padj_cutoff,
+                )
 
     write_report(  # type: ignore
         report,
@@ -410,8 +442,8 @@ def argparser():
         "--differential-results",
         required=True,
         help=(
-            "edgeR batch result directory containing feature counts, "
-            "contrast results, and fry outputs."
+            "Differential-expression batch directory containing edgeR, fry, "
+            "and GSVA outputs."
         ),
     )
     parser.add_argument(
