@@ -29,7 +29,20 @@ record LivePathEvent {
 def bam_ingress(BamIngressArgs ingress_args) {
     def samples: List<Sample> = get_samples(ingress_args)
     validate_samples(samples)
-    return mixed_analysis_ingress(samples, ingress_args.live_analysis)
+    return mixed_analysis_ingress(samples, ingress_args.live_analysis, samples.size())
+}
+
+/**
+ * Start ingress for only the samples that still require upstream processing.
+ * experiment_sample_count retains the complete sample-sheet size so restored
+ * quantifications can satisfy the remaining differential-analysis inputs.
+ */
+def bam_ingress(
+    List<Sample> samples,
+    BamIngressArgs ingress_args,
+    Integer experiment_sample_count
+) {
+    return mixed_analysis_ingress(samples, ingress_args.live_analysis, experiment_sample_count)
 }
 
 def get_samples(BamIngressArgs ingress_args) -> List<Sample> {
@@ -143,7 +156,11 @@ String sample_label(Sample sample) {
     return "${sample.group}/${sample.name}"
 }
 
-def mixed_analysis_ingress(List<Sample> samples, Boolean live_analysis) {
+def mixed_analysis_ingress(
+    List<Sample> samples,
+    Boolean live_analysis,
+    Integer experiment_sample_count
+) {
     List<Sample> live_samples = samples.findAll { Sample sample ->
         live_analysis && sample.is_live
     }
@@ -174,7 +191,7 @@ def mixed_analysis_ingress(List<Sample> samples, Boolean live_analysis) {
     SampleBatch startup_batch = record(
         batch_index: 0,
         chunks: existing_chunks,
-        experiment_sample_count: samples.size()
+        experiment_sample_count: experiment_sample_count
     )
     if (live_samples.empty) {
         log.info('No effective live samples remain; BAM ingress will emit startup batch 0 and close.')
@@ -222,7 +239,7 @@ def mixed_analysis_ingress(List<Sample> samples, Boolean live_analysis) {
             def batch: SampleBatch = record(
                 batch_index: event.batch_index,
                 chunks: chunks,
-                experiment_sample_count: samples.size()
+                experiment_sample_count: experiment_sample_count
             )
             log.info(
                 "Emitting synchronized live BAM batch ${batch.batch_index}: " +

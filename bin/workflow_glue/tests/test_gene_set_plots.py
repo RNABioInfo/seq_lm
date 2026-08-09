@@ -233,7 +233,7 @@ def test_gsva_plots_use_score_differences_and_adjusted_p_values(tmp_path):
 
 
 def test_gsva_raw_and_differential_heatmaps_render(tmp_path):
-    """Raw-score, distribution, and differential views contain data marks."""
+    """GSVA heatmaps retain metadata columns and selected gene-set rows."""
     differential, gsva = load_gsva_tree(tmp_path)
 
     raw_heatmap = gsp.create_score_heatmap(gsva, differential.condition_colors)
@@ -259,15 +259,54 @@ def test_gsva_raw_and_differential_heatmaps_render(tmp_path):
         model.factors
         for model in raw_heatmap._fig.select({"type": FactorRange})
     ]
+    assert ["control_1", "treated_1"] in factor_ranges
+    assert ["set_mixed", "set_down", "set_up"] in factor_ranges
     assert any(
         set(factors) == {"set_up", "set_down", "set_mixed"}
         for factors in factor_ranges
     )
     assert all("Shared label" not in factors for factors in factor_ranges)
+    differential_factor_ranges = [
+        model.factors
+        for model in differential_heatmap._fig.select({"type": FactorRange})
+    ]
+    assert ["control_1", "treated_1"] in differential_factor_ranges
+    assert ["set_up", "set_down"] in differential_factor_ranges
     for score_plot in (raw_heatmap, differential_heatmap, summary):
         mapper = next(iter(score_plot._fig.select({"type": LinearColorMapper})))
         assert mapper.palette[0] == RdBu11[0]
         assert mapper.palette[-1] == RdBu11[-1]
+
+
+def test_gsva_heatmaps_preserve_non_alphabetical_metadata_sample_order(tmp_path):
+    """Neither GSVA heatmap sorts or clusters metadata-defined columns."""
+    differential, gsva = load_gsva_tree(tmp_path)
+    sample_order = ["treated_1", "control_1"]
+    gsva.scores_long = pd.concat(
+        [
+            gsva.scores_long.loc[gsva.scores_long["gene_set"].eq(gene_set)]
+            .set_index("sample")
+            .loc[sample_order]
+            .reset_index()
+            for gene_set in gsva.gene_set_order
+        ],
+        ignore_index=True,
+    )
+
+    raw_heatmap = gsp.create_score_heatmap(gsva, differential.condition_colors)
+    differential_heatmap = gsp.create_limma_heatmap(
+        gsva,
+        gsva.contrasts[0],
+        differential.condition_colors,
+        0.05,
+    )
+
+    for heatmap in (raw_heatmap, differential_heatmap):
+        factor_ranges = [
+            model.factors
+            for model in heatmap._fig.select({"type": FactorRange})
+        ]
+        assert sample_order in factor_ranges
 
 
 @pytest.mark.parametrize(

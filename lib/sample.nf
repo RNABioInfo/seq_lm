@@ -75,6 +75,7 @@ record QuantifiedSample {
 
 record QuantifiedSampleBatch {
     batch_index: Integer
+    analysis_index: Integer
     samples: List<QuantifiedSample>
 }
 
@@ -86,6 +87,7 @@ record QuantifiedSampleUpdateBatch {
 
 record DifferentialExpressionResult {
     batch_index: Integer
+    analysis_index: Integer
     results: Path
 }
 

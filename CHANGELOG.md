@@ -1,8 +1,17 @@
 # Changelog
+
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## Unreleased
+
+- Persist final per-sample Oarfish and QC artifacts with a validated `FINAL`
+  manifest and restore them on later invocations without relying on `-resume`.
+- Continue differential snapshot numbering across invocations and publish both
+  immutable `batch_<N>` trees and the newest result under
+  `<out_dir>/differential_expression/latest`.
 
 ## [v4.1.0]
 ### Added
@@ -102,4 +111,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [v0.0.1]
 * First release.
-

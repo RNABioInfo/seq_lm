@@ -26,6 +26,37 @@ its `is_live` value are true. Consequently, `--live_analysis=false` processes
 every sample once and exits. Every final sample must have at least one BAM at
 startup, while live samples may begin empty.
 
+### Extending an experiment across workflow invocations
+
+Completed sample-level work is persisted below the directory supplied through
+`--out_dir`. After a sample's input stream closes normally (including a
+synchronized `STOP`), the workflow publishes its final Oarfish counts and raw
+QC inputs, then writes `FINAL` as the last file in the sample directory:
+
+```text
+<out_dir>/<group>/<alias>/
+  FINAL
+  quantification/final.quant
+  qc/nanoplot/chunk_<batch_index>.tsv.gz
+  qc/flagstat/chunk_<batch_index>.tsv
+```
+
+`FINAL` is a JSON manifest containing the sample identity, BAM paths, sizes and
+modification times, reference identities, upstream container versions, and
+checksums for the derived files. On a later invocation, a valid finalized
+sample is restored from `--out_dir` and does not enter BAM concatenation, QC,
+collation, or Oarfish. New sample-sheet rows are processed normally, after
+which edgeR, fry, GSVA, and the integrated report are rebuilt using both the
+restored and new quantifications. This restoration is independent of
+Nextflow's `-resume` cache.
+
+If any finalized BAM, reference identity, manifest field, or derived artifact
+has changed, the workflow stops rather than silently reuse stale results. To
+recompute a finalized sample, delete its complete
+`<out_dir>/<group>/<alias>/` directory (or delete the complete output
+directory) and launch the workflow again. A partial sample directory without
+`FINAL` is not trusted and is recomputed.
+
 For example:
 
 ```csv
@@ -78,11 +109,17 @@ Quantifications are published under:
 <ex_dir>/<group>/<alias>/quantification/
 ```
 
-Differential-expression checkpoints are published under:
+Differential-expression checkpoints are published exclusively under the
+CLI-selected output directory:
 
 ```text
 <ex_dir>/differential_expression/batch_<batch_index>/
+<ex_dir>/differential_expression/latest/
 ```
+
+Snapshot indices continue from the highest existing `batch_<N>` across
+separate invocations. Snapshots are immutable; `latest` is refreshed with the
+newest complete edgeR, fry, and GSVA result tree.
 
 Each checkpoint contains edgeR differential-expression results, fry gene-set
 tests, and GSVA sample-level scores and limma contrasts. The integrated report
@@ -243,8 +280,9 @@ GSVA scores summarize relative expression patterns within this dataset. They
 are not direct biochemical measurements of pathway activity and do not
 establish mechanism or causality. The HTML report displays a variance-ranked,
 row-standardized score heatmap, raw score distributions selected through a
-gene-set dropdown, and the coverage table. GSVA heatmap rows use average-linkage
-clustering without a dendrogram, with blue for low and red for high scores.
+gene-set dropdown, and the coverage table. GSVA heatmap rows retain their
+selection order, while sample columns retain the order defined by the metadata.
+Blue represents low and red represents high scores.
 Plots and the displayed coverage table use gene-set identifiers rather than
 descriptions. Its limma views include a
 multi-contrast effect/significance dot plot plus per-contrast volcano and

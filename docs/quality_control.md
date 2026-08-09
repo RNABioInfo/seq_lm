@@ -15,10 +15,13 @@ The workflow currently runs two tabular QC steps:
   alignment summary.
 
 The main workflow publishes an EPI2ME-displayable HTML analysis report after
-both the QC and edgeR outputs for a synchronized batch are complete. Raw
-NanoPlot, flagstat, and edgeR tables remain report inputs in Nextflow work
-directories. The stable HTML shell is the user-facing entry point; a small
-state file points it to the immutable snapshot for the newest complete batch.
+both the QC and edgeR outputs for a synchronized batch are complete. During
+live analysis, raw NanoPlot and flagstat tables remain report inputs in
+Nextflow work directories. When the stream completes, they are also persisted
+with the sample's `FINAL` checkpoint under `--out_dir` so later invocations can
+restore QC without rescanning BAMs. The stable HTML shell is the user-facing
+entry point; a small state file points it to the immutable snapshot for the
+newest complete batch.
 
 Expected published output layout:
 
@@ -46,8 +49,9 @@ tabs open. The report has three primary tabs:
 * **Gene Set Enrichment** separates raw GSVA scores, GSVA limma testing, and
   directional fry. GSVA includes score heatmaps, raw score distributions,
   coverage, a multi-contrast dot plot, and per-contrast volcano and heatmap
-  views. Heatmap rows are hierarchically clustered without showing a
-  dendrogram, and their scales map low values to blue and high values to red.
+  views. GSVA heatmap rows retain their selection order and sample columns
+  retain metadata order; their scales map low values to blue and high values
+  to red.
   GSVA views show gene-set identifiers rather than descriptions. fry retains
   the gene-set dropdown used for barcode plots. Concise
   identifiers appear in long dropdowns, while barcode views expose complete

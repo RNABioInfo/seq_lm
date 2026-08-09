@@ -24,7 +24,6 @@ import pandas as pd
 
 from .differential_plots import (
     _empty_plot,
-    cluster_heatmap_rows,
     ContrastResult,
     DifferentialResult,
     NONSIGNIFICANT_COLOR,
@@ -268,9 +267,12 @@ def load_gsva_results(
 
 
 def _score_matrix(data: GSVAResult) -> pd.DataFrame:
-    return data.scores_long.pivot(index="gene_set", columns="sample", values="score").loc[
-        data.gene_set_order
-    ]
+    sample_order = data.scores_long["sample"].drop_duplicates().tolist()
+    return data.scores_long.pivot(
+        index="gene_set",
+        columns="sample",
+        values="score",
+    ).loc[data.gene_set_order, sample_order]
 
 
 def _display_labels(data: GSVAResult) -> dict[str, str]:
@@ -292,8 +294,6 @@ def create_score_heatmap(
     means = matrix.mean(axis=1)
     standard_deviations = matrix.std(axis=1).replace(0, np.nan)
     z_scores = matrix.sub(means, axis=0).div(standard_deviations, axis=0).fillna(0)
-    selected = cluster_heatmap_rows(z_scores)
-    z_scores = z_scores.loc[selected]
     labels = _display_labels(data)
     melted = (
         z_scores.rename_axis("gene_set")
@@ -587,18 +587,15 @@ def create_limma_heatmap(
         )
     matrix = _score_matrix(data)
     metadata = data.scores_long.drop_duplicates("sample").set_index("sample")
-    sample_order = []
-    for group in (
+    contrast_groups = {
         analysis.contrast.reference_group,
         analysis.contrast.target_group,
-    ):
-        sample_order.extend(metadata.index[metadata["group"].eq(group)].tolist())
+    }
+    sample_order = metadata.index[metadata["group"].isin(contrast_groups)].tolist()
     matrix = matrix.loc[selected, sample_order]
     z_scores = matrix.sub(matrix.mean(axis=1), axis=0).div(
         matrix.std(axis=1).replace(0, np.nan), axis=0
     ).fillna(0)
-    selected = cluster_heatmap_rows(z_scores)
-    z_scores = z_scores.loc[selected]
     labels = _display_labels(data)
     melted = (
         z_scores.rename_axis("gene_set")

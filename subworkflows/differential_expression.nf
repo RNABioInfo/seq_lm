@@ -39,6 +39,8 @@ workflow differential_expression {
     take:
         merged_bams: Channel<ChunkBAM>
         batch_sizes: Channel<SampleBatchSize>
+        restored_quantifications: List<QuantifiedSample>
+        first_analysis_index: Integer
         genome: Path
         annotation: Path
         gene_sets: Path
@@ -191,7 +193,10 @@ workflow differential_expression {
             nonempty_quantified_sample_updates_ch.mix(empty_quantified_sample_updates_ch)
         )
 
-        Map<String, QuantifiedSample> latest_quantifications = [:]
+        Map<String, QuantifiedSample> latest_quantifications = restored_quantifications.collectEntries { QuantifiedSample quantified_sample ->
+            [(sample_key(quantified_sample.sample)): quantified_sample]
+        }
+        Integer next_analysis_index = first_analysis_index
         quantified_sample_batches_ch = ordered_quantified_sample_updates_ch
             .flatMap { QuantifiedSampleUpdateBatch update_batch ->
                 update_batch.samples.each { QuantifiedSample quantified_sample ->
@@ -208,11 +213,13 @@ workflow differential_expression {
 
                 QuantifiedSampleBatch quant_batch = record(
                     batch_index: update_batch.batch_index,
+                    analysis_index: next_analysis_index,
                     samples: latest_quantifications.values().toList().toSorted { left, right ->
                         "${left.sample.group}/${left.sample.name}" <=>
                             "${right.sample.group}/${right.sample.name}"
                     }
                 )
+                next_analysis_index += 1
                 return [quant_batch]
             }
 
@@ -396,11 +403,12 @@ process run_differential_expression_edgeR {
     output:
         record(
             batch_index: quant_batch.batch_index,
-            results: file(differential_expression_results_dir(quant_batch.batch_index))
+            analysis_index: quant_batch.analysis_index,
+            results: file(differential_expression_results_dir(quant_batch.analysis_index))
         )
 
     script:
-        String results_dir = differential_expression_results_dir(quant_batch.batch_index)
+        String results_dir = differential_expression_results_dir(quant_batch.analysis_index)
         String manifest_rows = quant_batch.samples.withIndex().collect { QuantifiedSample sample, Integer index ->
             [
                 de_manifest_field(sample.sample.name),
@@ -443,11 +451,12 @@ process run_gene_set_variation_analysis {
     output:
         record(
             batch_index: differential_result.batch_index,
-            results: file(differential_expression_results_dir(differential_result.batch_index))
+            analysis_index: differential_result.analysis_index,
+            results: file(differential_expression_results_dir(differential_result.analysis_index))
         )
 
     script:
-        String results_dir = differential_expression_results_dir(differential_result.batch_index)
+        String results_dir = differential_expression_results_dir(differential_result.analysis_index)
         """
         mkdir ${results_dir}
         cp -R edgeR_results/. ${results_dir}/

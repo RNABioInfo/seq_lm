@@ -150,3 +150,42 @@ process output {
         '''
         '''
 }
+
+/**
+ * Publish complete differential-analysis trees under the user-selected output
+ * root. The immutable global batch is retained and `latest` is refreshed in
+ * serialized analysis order.
+ */
+process publish_differential_results {
+    label 'seq_lm'
+    cpus 1
+    maxForks 1
+    fair true
+
+    publishDir(
+        "${params.out_dir}/differential_expression",
+        mode: 'copy',
+        overwrite: false,
+        saveAs: { _fname -> "batch_${analysis_index}" }
+    )
+    publishDir(
+        "${params.out_dir}/differential_expression",
+        mode: 'copy',
+        overwrite: true,
+        saveAs: { _fname -> 'latest' }
+    )
+
+    input:
+        tuple(local_batch_index: Integer, analysis_index: Integer, results: Path)
+
+    output:
+        record(
+            batch_index: local_batch_index,
+            analysis_index: analysis_index,
+            results: file(results.name)
+        )
+
+    script:
+        '''
+        '''
+}
