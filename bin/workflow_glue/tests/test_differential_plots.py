@@ -7,7 +7,13 @@ import pytest
 pytest.importorskip("ezcharts")
 pd = pytest.importorskip("pandas")
 
-from bokeh.models import ColumnDataSource, Label, Span  # noqa: E402
+from bokeh.models import (  # noqa: E402
+    ColumnDataSource,
+    Label,
+    LinearColorMapper,
+    Span,
+)
+from bokeh.palettes import RdBu11  # noqa: E402
 
 from workflow_glue.qc_report_types import differential_plots as dp  # noqa: E402
 
@@ -235,6 +241,28 @@ def test_heatmap_contains_only_compared_conditions(tmp_path):
 
     assert samples == {"control_1", "control_2", "treated_1", "treated_2"}
     assert not any(sample.startswith("rescue") for sample in samples)
+
+    mapper = next(iter(heatmap._fig.select({"type": LinearColorMapper})))
+    assert mapper.palette[0] == RdBu11[0]
+    assert mapper.palette[-1] == RdBu11[-1]
+
+
+def test_heatmap_row_clustering_groups_similar_profiles():
+    """Clustering places similarly high and low row profiles together."""
+    matrix = pd.DataFrame(
+        {
+            "sample_1": [2.0, 1.8, -2.0, -1.8],
+            "sample_2": [1.0, 0.9, -1.0, -0.9],
+            "sample_3": [-2.0, -1.8, 2.0, 1.8],
+        },
+        index=["high_a", "high_b", "low_a", "low_b"],
+    )
+
+    order = dp.cluster_heatmap_rows(matrix)
+
+    positions = {feature: index for index, feature in enumerate(order)}
+    assert abs(positions["high_a"] - positions["high_b"]) == 1
+    assert abs(positions["low_a"] - positions["low_b"]) == 1
 
 
 def test_heatmap_placeholder_when_no_gene_is_significant(tmp_path):

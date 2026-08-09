@@ -21,6 +21,7 @@ from ezcharts.layout.snippets import Tabs
 from ezcharts.plots import BokehPlot
 import numpy as np
 import pandas as pd
+from scipy.cluster.hierarchy import leaves_list, linkage
 from sklearn.decomposition import PCA
 
 
@@ -623,6 +624,19 @@ def select_heatmap_genes(
     return pd.concat([down, up], ignore_index=True)
 
 
+def cluster_heatmap_rows(matrix: pd.DataFrame) -> list[str]:
+    """Order rows by average-linkage clustering without drawing a tree."""
+    if len(matrix.index) < 2:
+        return matrix.index.tolist()
+    hierarchy = linkage(
+        matrix.to_numpy(dtype=float),
+        method="average",
+        metric="euclidean",
+        optimal_ordering=True,
+    )
+    return matrix.index.take(leaves_list(hierarchy)).tolist()
+
+
 def create_heatmap_plot(
     data: DifferentialResult,
     contrast: ContrastResult,
@@ -661,6 +675,8 @@ def create_heatmap_plot(
     row_means = log_counts.mean(axis=1)
     row_std = log_counts.std(axis=1).replace(0, np.nan)
     z_scores = log_counts.sub(row_means, axis=0).div(row_std, axis=0).fillna(0)
+    feature_ids = cluster_heatmap_rows(z_scores)
+    z_scores = z_scores.loc[feature_ids]
     melted = (
         z_scores.rename_axis("feature_id")
         .reset_index()
@@ -670,7 +686,7 @@ def create_heatmap_plot(
 
     z_limit = max(float(melted["z_score"].abs().max()), 1.0)
     mapper = LinearColorMapper(
-        palette=RdBu11[::-1],
+        palette=RdBu11,
         low=-z_limit,
         high=z_limit,
     )

@@ -102,8 +102,11 @@ subtabs separate:
 * a volcano plot of `logFC` versus `-log10(FDR)`;
 * a heatmap containing up to 20 significant genes in each direction.
 
-The heatmap ranks genes by effect size after significance filtering, shows only
-the two compared conditions, and displays row z-scores of `log2(CPM + 1)`.
+The heatmap selects genes by effect size after significance filtering, shows
+only the two compared conditions, and displays row z-scores of `log2(CPM + 1)`.
+Rows are ordered by average-linkage hierarchical clustering of those displayed
+profiles; the report does not draw a dendrogram. Blue represents low and red
+represents high row-standardized expression.
 Condition colors are shared by the PCA, significant-gene directions, and the
 heatmap sample annotation. Heatmap cell colors encode expression z-scores
 rather than condition.
@@ -240,11 +243,16 @@ GSVA scores summarize relative expression patterns within this dataset. They
 are not direct biochemical measurements of pathway activity and do not
 establish mechanism or causality. The HTML report displays a variance-ranked,
 row-standardized score heatmap, raw score distributions selected through a
-gene-set dropdown, and the coverage table. Its limma views include a
+gene-set dropdown, and the coverage table. GSVA heatmap rows use average-linkage
+clustering without a dendrogram, with blue for low and red for high scores.
+Plots and the displayed coverage table use gene-set identifiers rather than
+descriptions. Its limma views include a
 multi-contrast effect/significance dot plot plus per-contrast volcano and
 significant-score heatmap subtabs. Volcano x-axes are labeled as target-minus-
 control **GSVA score differences**, not log fold changes; BH-adjusted p-values
-control the report significance threshold.
+control the report significance threshold. The across-contrast score-difference
+scale follows the same convention: negative/low values are blue and
+positive/high values are red.
 
 The workflow uses `rnabioinfo/seq_lm_gsva:v1.1.0`. Build and publish that image
 before deploying this workflow version:

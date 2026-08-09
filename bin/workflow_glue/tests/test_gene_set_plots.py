@@ -8,7 +8,16 @@ import pytest
 pytest.importorskip("ezcharts")
 pd = pytest.importorskip("pandas")
 
-from bokeh.models import ColumnDataSource, Div, Label, Select, Span  # noqa: E402
+from bokeh.models import (  # noqa: E402
+    ColumnDataSource,
+    Div,
+    FactorRange,
+    Label,
+    LinearColorMapper,
+    Select,
+    Span,
+)
+from bokeh.palettes import RdBu11  # noqa: E402
 
 from workflow_glue.qc_report_types import differential_plots as dp  # noqa: E402
 from workflow_glue.qc_report_types import gene_set_plots as gp  # noqa: E402
@@ -244,11 +253,21 @@ def test_gsva_raw_and_differential_heatmaps_render(tmp_path):
     assert raw_heatmap.report_height > 0
     assert len(distribution._fig.renderers) > 0
     assert differential_heatmap.report_height > 0
-    assert summary._fig.y_range.factors == [
-        "Mixed response",
-        "Shared label [set_down]",
-        "Shared label [set_up]",
+    assert summary._fig.y_range.factors == ["set_mixed", "set_down", "set_up"]
+    assert distribution._fig.title.text == "Raw GSVA scores — set_up"
+    factor_ranges = [
+        model.factors
+        for model in raw_heatmap._fig.select({"type": FactorRange})
     ]
+    assert any(
+        set(factors) == {"set_up", "set_down", "set_mixed"}
+        for factors in factor_ranges
+    )
+    assert all("Shared label" not in factors for factors in factor_ranges)
+    for score_plot in (raw_heatmap, differential_heatmap, summary):
+        mapper = next(iter(score_plot._fig.select({"type": LinearColorMapper})))
+        assert mapper.palette[0] == RdBu11[0]
+        assert mapper.palette[-1] == RdBu11[-1]
 
 
 @pytest.mark.parametrize(

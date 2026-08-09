@@ -24,6 +24,7 @@ import pandas as pd
 
 from .differential_plots import (
     _empty_plot,
+    cluster_heatmap_rows,
     ContrastResult,
     DifferentialResult,
     NONSIGNIFICANT_COLOR,
@@ -239,17 +240,7 @@ def _read_limma(
             raise ValueError(f"{path} n_genes does not match the GSVA score table.")
     results["n_genes"] = results["n_genes"].astype(int)
     results["description"] = results["description"].fillna("").astype(str)
-    results["display_label"] = results["description"].where(
-        results["description"].str.strip().ne(""),
-        results["gene_set"],
-    )
-    duplicate_labels = results["display_label"].duplicated(keep=False)
-    results.loc[duplicate_labels, "display_label"] = (
-        results.loc[duplicate_labels, "display_label"]
-        + " ["
-        + results.loc[duplicate_labels, "gene_set"]
-        + "]"
-    )
+    results["display_label"] = results["gene_set"]
     return results
 
 
@@ -283,14 +274,7 @@ def _score_matrix(data: GSVAResult) -> pd.DataFrame:
 
 
 def _display_labels(data: GSVAResult) -> dict[str, str]:
-    metadata = data.scores_long.drop_duplicates("gene_set").set_index("gene_set")
-    labels = metadata["description"].where(
-        metadata["description"].str.strip().ne(""),
-        metadata.index.to_series(),
-    )
-    duplicates = labels.duplicated(keep=False)
-    labels.loc[duplicates] = labels.loc[duplicates] + " [" + labels.index[duplicates] + "]"
-    return labels.to_dict()
+    return {gene_set: gene_set for gene_set in data.gene_set_order}
 
 
 def create_score_heatmap(
@@ -308,6 +292,8 @@ def create_score_heatmap(
     means = matrix.mean(axis=1)
     standard_deviations = matrix.std(axis=1).replace(0, np.nan)
     z_scores = matrix.sub(means, axis=0).div(standard_deviations, axis=0).fillna(0)
+    selected = cluster_heatmap_rows(z_scores)
+    z_scores = z_scores.loc[selected]
     labels = _display_labels(data)
     melted = (
         z_scores.rename_axis("gene_set")
@@ -318,7 +304,7 @@ def create_score_heatmap(
     metadata = data.scores_long.drop_duplicates("sample").set_index("sample")
     sample_order = matrix.columns.tolist()
     limit = max(float(melted["z_score"].abs().max()), 1.0)
-    mapper = LinearColorMapper(palette=RdBu11[::-1], low=-limit, high=limit)
+    mapper = LinearColorMapper(palette=RdBu11, low=-limit, high=limit)
     suffix = f" (top {len(selected)} by variance)" if len(data.gene_set_order) > len(selected) else ""
     heatmap = BokehPlot(
         title=f"GSVA scores across samples{suffix}",
@@ -541,7 +527,6 @@ def create_limma_volcano(
             renderers=[points],
             tooltips=[
                 ("Gene set", "@gene_set"),
-                ("Description", "@description"),
                 ("N genes", "@n_genes"),
                 ("Score difference", "@effect_size{0.000}"),
                 ("Adjusted p-value", "@adjusted_p_value{0.000e}"),
@@ -612,6 +597,8 @@ def create_limma_heatmap(
     z_scores = matrix.sub(matrix.mean(axis=1), axis=0).div(
         matrix.std(axis=1).replace(0, np.nan), axis=0
     ).fillna(0)
+    selected = cluster_heatmap_rows(z_scores)
+    z_scores = z_scores.loc[selected]
     labels = _display_labels(data)
     melted = (
         z_scores.rename_axis("gene_set")
@@ -620,7 +607,7 @@ def create_limma_heatmap(
     )
     melted["display_label"] = melted["gene_set"].map(labels)
     limit = max(float(melted["z_score"].abs().max()), 1.0)
-    mapper = LinearColorMapper(palette=RdBu11[::-1], low=-limit, high=limit)
+    mapper = LinearColorMapper(palette=RdBu11, low=-limit, high=limit)
     heatmap = BokehPlot(
         title=f"Differential GSVA scores — {analysis.label}",
         x_range=sample_order,
@@ -699,7 +686,7 @@ def create_multi_contrast_dot_plot(
     prepared["point_size"] = 7 + 11 * significance.clip(upper=20) / 20
     prepared["significance_label"] = significance
     limit = max(float(prepared["effect_size"].abs().max()), 0.1)
-    mapper = LinearColorMapper(palette=RdBu11[::-1], low=-limit, high=limit)
+    mapper = LinearColorMapper(palette=RdBu11, low=-limit, high=limit)
     plot_height = max(460, 24 * len(order) + 160)
     plot = BokehPlot(
         title=(
@@ -766,7 +753,10 @@ def add_gsva_scores(
                         height="500px",
                     )
     with tabs.add_tab("Coverage"):
-        DataTable.from_pandas(data.coverage, use_index=False)
+        DataTable.from_pandas(
+            data.coverage.drop(columns="description"),
+            use_index=False,
+        )
 
 
 def add_gsva_differential(

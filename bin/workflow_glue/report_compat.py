@@ -91,7 +91,7 @@ _BRAND_STYLES = f"""
         margin-right: 0 !important;
         padding: 0.75rem 1rem !important;
       }}
-      .seq-lm-primary-tablist > .nav-item > .nav-link.active {{
+      #pills-tab.seq-lm-primary-tablist > .nav-item > .nav-link.active {{
         background: {_BRAND_COLOR};
         border-color: {_BRAND_COLOR};
         color: #fff !important;

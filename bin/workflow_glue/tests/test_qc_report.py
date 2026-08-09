@@ -368,6 +368,10 @@ def test_qc_report_writes_html(tmp_path):
     assert "time_point_1/treatment_1" in html
     assert "dropdown-menu" in html
     assert "seq-lm-primary-tablist" in html
+    assert (
+        "#pills-tab.seq-lm-primary-tablist > .nav-item > .nav-link.active"
+        in html
+    )
     assert "shown.bs.tab" in html
     assert "resize_layout" in html
     assert "getInstanceByDom" in html

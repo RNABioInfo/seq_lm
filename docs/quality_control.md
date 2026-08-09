@@ -46,7 +46,10 @@ tabs open. The report has three primary tabs:
 * **Gene Set Enrichment** separates raw GSVA scores, GSVA limma testing, and
   directional fry. GSVA includes score heatmaps, raw score distributions,
   coverage, a multi-contrast dot plot, and per-contrast volcano and heatmap
-  views. fry retains the gene-set dropdown used for barcode plots. Concise
+  views. Heatmap rows are hierarchically clustered without showing a
+  dendrogram, and their scales map low values to blue and high values to red.
+  GSVA views show gene-set identifiers rather than descriptions. fry retains
+  the gene-set dropdown used for barcode plots. Concise
   identifiers appear in long dropdowns, while barcode views expose complete
   labels and statistics in **Gene-set details**.
 
