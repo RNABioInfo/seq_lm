@@ -141,11 +141,13 @@ _REPORT_NAVIGATION_SCRIPT = r"""
           const tabLists = [...document.querySelectorAll('[role="tablist"]')];
           tabLists.forEach((tabList) => {
             const labels = directTabButtons(tabList).map(text);
-            const isPrimary = [
+            const primaryLabels = new Set([
               "Quality Control",
               "Differential Analysis",
               "Gene Set Enrichment"
-            ].every((label) => labels.includes(label));
+            ]);
+            const isPrimary = labels.includes("Quality Control") &&
+              labels.every((label) => primaryLabels.has(label));
             tabList.classList.toggle("seq-lm-primary-tablist", isPrimary);
             tabList.classList.toggle("seq-lm-subtablist", !isPrimary);
 

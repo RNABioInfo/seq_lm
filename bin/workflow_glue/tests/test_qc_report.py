@@ -307,6 +307,7 @@ def test_qc_report_writes_html(tmp_path):
             "2",
             "--differential-results",
             str(differential_results),
+            "--gene-set-enrichment",
             "--refresh-seconds",
             "0",
         ]
@@ -375,6 +376,73 @@ def test_qc_report_writes_html(tmp_path):
     assert "shown.bs.tab" in html
     assert "resize_layout" in html
     assert "getInstanceByDom" in html
+
+    differential_only_report = tmp_path / "qc_report_differential_only.html"
+    differential_only_args = qc_report.argparser().parse_args(
+        [
+            str(differential_only_report),
+            "--samples",
+            str(samples),
+            "--versions",
+            str(versions),
+            "--params",
+            str(params),
+            "--differential-results",
+            str(differential_results),
+            "--refresh-seconds",
+            "0",
+        ]
+    )
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.chdir(tmp_path)
+        qc_report.main(differential_only_args)
+    differential_only_html = differential_only_report.read_text()
+    assert ">Differential Analysis<" in differential_only_html
+    assert ">Gene Set Enrichment<" not in differential_only_html
+
+    qc_only_report = tmp_path / "qc_report_qc_only.html"
+    qc_only_args = qc_report.argparser().parse_args(
+        [
+            str(qc_only_report),
+            "--samples",
+            str(samples),
+            "--versions",
+            str(versions),
+            "--params",
+            str(params),
+            "--refresh-seconds",
+            "0",
+        ]
+    )
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.chdir(tmp_path)
+        qc_report.main(qc_only_args)
+    qc_only_html = qc_only_report.read_text()
+    assert ">Quality Control<" in qc_only_html
+    assert ">Differential Analysis<" not in qc_only_html
+    assert ">Gene Set Enrichment<" not in qc_only_html
+
+
+def test_gene_set_report_requires_differential_results():
+    """Gene-set tabs cannot be requested without differential results."""
+    args = qc_report.argparser().parse_args(
+        [
+            "report.html",
+            "--samples",
+            "samples.tsv",
+            "--versions",
+            "versions",
+            "--params",
+            "params.json",
+            "--gene-set-enrichment",
+        ]
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="--gene-set-enrichment requires --differential-results",
+    ):
+        qc_report.main(args)
 
 
 def test_create_read_fate_sankey_html_returns_embeddable_fragment():

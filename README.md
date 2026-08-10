@@ -54,6 +54,9 @@ The primary outputs of the workflow include:
 See [Quality Control Workflow](docs/quality_control.md) for the live QC report.
 See [Differential Expression Workflow](docs/differential_expression.md) for
 cumulative BAM quantification and per-batch edgeR, fry, and GSVA refreshes.
+Differential expression and gene-set enrichment can be disabled independently;
+gene-set enrichment requires differential expression. QC-only runs do not
+require reference files, and differential-only runs do not require a GMT file.
 
 
 

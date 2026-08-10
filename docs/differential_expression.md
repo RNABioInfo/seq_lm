@@ -1,5 +1,20 @@
 # Differential Expression Workflow
 
+Differential expression and gene-set enrichment are independently selectable:
+
+* `--differential_expression` enables cumulative Oarfish quantification and
+  edgeR analysis. It requires `--reference_genome` and
+  `--reference_annotation`.
+* `--gene_set_enrichment` enables fry and GSVA after edgeR. It requires both
+  `--differential_expression` and `--gene_sets`.
+
+Both options default to `true`, preserving the complete analysis workflow.
+Set both to `false` for quality control only. Set
+`--gene_set_enrichment=false` while leaving differential expression enabled
+for quantification and edgeR without gene-set analysis. Reference inputs are
+optional for a quality-control-only run, and the GMT input is optional whenever
+gene-set enrichment is disabled.
+
 The differential-expression workflow refreshes after every synchronized live
 BAM batch. It uses the same chunk stream as quality control, but quantification
 is cumulative rather than chunk-local:
@@ -12,7 +27,7 @@ is cumulative rather than chunk-local:
    batch are assembled into a temporary cumulative BAM with block-level
    `samtools cat`. Final samples are processed only at startup.
 4. Oarfish 0.10 quantifies the cumulative genome alignments against
-   `--reference_annotation`, using `--ex_reference_genome` for soft-clip
+   `--reference_annotation`, using `--reference_genome` for soft-clip
    rescue.
 5. The latest quantification is retained for every sample. Each synchronized
    live batch replaces the live-sample entries, reuses final-sample entries,

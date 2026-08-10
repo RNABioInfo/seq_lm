@@ -313,21 +313,30 @@ def main(args):
         raise ValueError("--lfc-cutoff must be nonnegative.")
     if not 0 < args.padj_cutoff <= 1:
         raise ValueError("--padj-cutoff must be greater than 0 and at most 1.")
+    if args.gene_set_enrichment and args.differential_results is None:
+        raise ValueError(
+            "--gene-set-enrichment requires --differential-results."
+        )
 
     logger = get_named_logger("SeqLMReport")
     samples = load_qc_samples(args.samples)
-    differential = load_differential_results(
-        args.differential_results,
-        samples.samples_df,
-    )
-    fry_results = load_gene_set_results(
-        args.differential_results,
-        differential,
-    )
-    gsva_results = load_gsva_results(
-        args.differential_results,
-        differential,
-    )
+    differential = None
+    fry_results = None
+    gsva_results = None
+    if args.differential_results is not None:
+        differential = load_differential_results(
+            args.differential_results,
+            samples.samples_df,
+        )
+        if args.gene_set_enrichment:
+            fry_results = load_gene_set_results(
+                args.differential_results,
+                differential,
+            )
+            gsva_results = load_gsva_results(
+                args.differential_results,
+                differential,
+            )
 
     report = labs_report(
         labs,
@@ -378,32 +387,34 @@ def main(args):
             with qc_tabs.add_tab("Samples"):
                 DataTable.from_pandas(samples.samples_df)
 
-        with primary_tabs.add_tab("Differential Analysis"):
-            add_differential_analysis(
-                differential,
-                args.lfc_cutoff,
-                args.padj_cutoff,
-            )
+        if differential is not None:
+            with primary_tabs.add_tab("Differential Analysis"):
+                add_differential_analysis(
+                    differential,
+                    args.lfc_cutoff,
+                    args.padj_cutoff,
+                )
 
-        with primary_tabs.add_tab("Gene Set Enrichment"):
-            analysis_tabs = Tabs()
-            with analysis_tabs.add_tab("GSVA scores"):
-                add_gsva_scores(
-                    gsva_results,
-                    differential.condition_colors,
-                )
-            with analysis_tabs.add_tab("GSVA differential"):
-                add_gsva_differential(
-                    gsva_results,
-                    differential.condition_colors,
-                    args.padj_cutoff,
-                )
-            with analysis_tabs.add_tab("fry enrichment"):
-                add_gene_set_enrichment(
-                    fry_results,
-                    differential.condition_colors,
-                    args.padj_cutoff,
-                )
+            if args.gene_set_enrichment:
+                with primary_tabs.add_tab("Gene Set Enrichment"):
+                    analysis_tabs = Tabs()
+                    with analysis_tabs.add_tab("GSVA scores"):
+                        add_gsva_scores(
+                            gsva_results,
+                            differential.condition_colors,
+                        )
+                    with analysis_tabs.add_tab("GSVA differential"):
+                        add_gsva_differential(
+                            gsva_results,
+                            differential.condition_colors,
+                            args.padj_cutoff,
+                        )
+                    with analysis_tabs.add_tab("fry enrichment"):
+                        add_gene_set_enrichment(
+                            fry_results,
+                            differential.condition_colors,
+                            args.padj_cutoff,
+                        )
 
     write_report(  # type: ignore
         report,
@@ -440,11 +451,15 @@ def argparser():
     )
     parser.add_argument(
         "--differential-results",
-        required=True,
         help=(
             "Differential-expression batch directory containing edgeR, fry, "
             "and GSVA outputs."
         ),
+    )
+    parser.add_argument(
+        "--gene-set-enrichment",
+        action="store_true",
+        help="Include fry and GSVA gene-set results in the report.",
     )
     parser.add_argument(
         "--lfc-cutoff",

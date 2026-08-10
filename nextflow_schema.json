@@ -32,6 +32,20 @@
           "fa_icon": "fas fa-stream",
           "description": "Process samples according to the order values in the sample sheet.",
           "help_text": "When enabled, every sample-sheet row must provide an order value."
+        },
+        "differential_expression": {
+          "type": "boolean",
+          "default": true,
+          "fa_icon": "fas fa-chart-line",
+          "description": "Quantify transcripts and run differential-expression analysis.",
+          "help_text": "Disable this option to run quality control only. Reference genome and annotation inputs are required only when this option is enabled."
+        },
+        "gene_set_enrichment": {
+          "type": "boolean",
+          "default": true,
+          "fa_icon": "fas fa-project-diagram",
+          "description": "Run fry and GSVA gene-set enrichment after differential expression.",
+          "help_text": "This option requires differential_expression. The gene_sets input is required only when this option is enabled."
         }
       },
       "required": [
@@ -63,12 +77,7 @@
           "description": "Gene Matrix Transposed (GMT) file used for edgeR fry and GSVA gene-set analysis.",
           "help_text": "GMT members may match count-table feature identifiers directly or identifiers in the supplied GTF/GFF annotation."
         }
-      },
-      "required": [
-        "reference_genome",
-        "reference_annotation",
-        "gene_sets"
-      ]
+      }
     },
     "differential_analysis_options": {
       "title": "Differential Analysis Options",
@@ -222,6 +231,46 @@
     },
     {
       "$ref": "#/definitions/advanced_options"
+    },
+    {
+      "if": {
+        "properties": {
+          "differential_expression": {
+            "const": true
+          }
+        },
+        "required": [
+          "differential_expression"
+        ]
+      },
+      "then": {
+        "required": [
+          "reference_genome",
+          "reference_annotation"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "gene_set_enrichment": {
+            "const": true
+          }
+        },
+        "required": [
+          "gene_set_enrichment"
+        ]
+      },
+      "then": {
+        "required": [
+          "gene_sets"
+        ],
+        "properties": {
+          "differential_expression": {
+            "const": true
+          }
+        }
+      }
     }
   ],
   "docs": {

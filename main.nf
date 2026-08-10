@@ -111,10 +111,10 @@ process prepare_chunk_bam {
         )
 
     script:
-        String chunk_bam = chunk_bam_name(input_group.batch_index, input_group.sample)
-        String chunk_bam_arg = shell_quote(chunk_bam)
-        String bam_args = input_group.bams.collect { Path bam -> shell_quote(bam.toString()) }.join(' ')
-        String prepare_chunk = input_group.bams.size() == 1 ? """
+        def chunk_bam: String = chunk_bam_name(input_group.batch_index, input_group.sample)
+        def chunk_bam_arg: String = shell_quote(chunk_bam)
+        def bam_args: String = input_group.bams.collect { Path bam -> shell_quote(bam.toString()) }.join(' ')
+        def prepare_chunk: String = input_group.bams.size() == 1 ? """
             ln -s -- ${bam_args} ${chunk_bam_arg}
         """ : """
             : > bams.txt
@@ -164,7 +164,7 @@ process qc_report_input_tree {
         )
 
     script:
-        String copy_commands = qc_report_copy_commands(
+        def copy_commands: String = qc_report_copy_commands(
             qc_report_inputs.report_inputs_list,
             nanoplot_inputs,
             flagstat_inputs
@@ -204,10 +204,13 @@ process qc_report {
         report_files = files('qc_report*', arity: '3')
 
     script:
-        String rows = qc_report_inputs.rows
-        String quoted_rows = shell_quote(rows)
-        String params_json = new groovy.json.JsonBuilder(params).toPrettyString()
-        String quoted_params_json = shell_quote(params_json)
+        def rows: String = qc_report_inputs.rows
+        def quoted_rows: String = shell_quote(rows)
+        def params_json: String = new groovy.json.JsonBuilder(params).toPrettyString()
+        def quoted_params_json: String = shell_quote(params_json)
+        def differential_args: String = params.differential_expression ? \
+            '--differential-results differential_results' : ''
+        def gene_set_args: String = params.gene_set_enrichment ? '--gene-set-enrichment' : ''
         """
         printf 'name\\tgroup\\tchunks_seen\\tlatest_batch_index\\tqc_dir\\n' > report_samples.tsv
         printf '%s\\n' ${quoted_rows} >> report_samples.tsv
@@ -224,7 +227,8 @@ process qc_report {
             --versions versions \
             --params params.json \
             --latest-batch ${qc_report_inputs.latest_batch_index} \
-            --differential-results differential_results \
+            ${differential_args} \
+            ${gene_set_args} \
             --lfc-cutoff ${params.de_lfc_cutoff} \
             --padj-cutoff ${params.de_padj_cutoff}
         """
@@ -241,6 +245,8 @@ workflow sample_pipeline {
         reference_genome: Path
         reference_annotation: Path
         gene_sets: Path
+        differential_expression_enabled: Boolean
+        gene_set_enrichment_enabled: Boolean
     main:
         /*
          * `bam_ingress` emits synchronized sample batches. The pipeline spreads
@@ -273,33 +279,36 @@ workflow sample_pipeline {
 
         merged_chunk_bam_ch = prepare_chunk_bam(sample_chunk_bam_group_ch)
         qc_result_ch = quality_control(merged_chunk_bam_ch)
-        differential_expression(
-            merged_chunk_bam_ch,
-            sample_batch_size_ch,
-            restored_quantifications,
-            first_analysis_index,
-            reference_genome,
-            reference_annotation,
-            gene_sets
-        )
-        quantified_samples_ch = differential_expression.out.quantifications
-        differential_results_ch = differential_expression.out.results
+        if (differential_expression_enabled) {
+            differential_expression(
+                merged_chunk_bam_ch,
+                sample_batch_size_ch,
+                restored_quantifications,
+                first_analysis_index,
+                reference_genome,
+                reference_annotation,
+                gene_sets,
+                gene_set_enrichment_enabled
+            )
+            quantified_samples_ch = differential_expression.out.quantifications
+            differential_results_ch = differential_expression.out.results
 
-        quantification_output_ch = quantified_samples_ch
-            .map { quantified_sample ->
-                tuple(
-                    quantified_sample.counts,
-                    "${safe_name(quantified_sample.sample.group)}/${safe_name(quantified_sample.sample.name)}/quantification"
-                )
-            }
-        output(quantification_output_ch)
-        published_differential_results_ch = publish_differential_results(
-            differential_results_ch.map { result ->
-                tuple(result.batch_index, result.analysis_index, result.results)
-            }
-        )
+            quantification_output_ch = quantified_samples_ch
+                .map { quantified_sample ->
+                    tuple(
+                        quantified_sample.counts,
+                        "${safe_name(quantified_sample.sample.group)}/${safe_name(quantified_sample.sample.name)}/quantification"
+                    )
+                }
+            output(quantification_output_ch)
+            published_differential_results_ch = publish_differential_results(
+                differential_results_ch.map { result ->
+                    tuple(result.batch_index, result.analysis_index, result.results)
+                }
+            )
+        }
 
-        if (fresh_sample_count > 0) {
+        if (differential_expression_enabled && fresh_sample_count > 0) {
             checkpoint_quantifications_ch = quantified_samples_ch
                 .collect()
                 .map { collected_quantifications ->
@@ -326,18 +335,18 @@ workflow sample_pipeline {
             )
         }
 
-        Map<Integer, List<ChunkQCResult>> pending_qc_batches = [:]
+        def pending_qc_batches: Map<Integer, List<ChunkQCResult>>  = [:]
         nonempty_qc_report_chunk_result_batches_ch = qc_result_ch
             .join(sample_batch_size_ch, by: 'batch_index')
             .map { joined ->
-                ChunkQCResult result = record(
+                def result: ChunkQCResult = record(
                     batch_index: joined.batch_index,
                     sample: joined.sample,
                     bam: joined.bam,
                     nanoplot_data: joined.nanoplot_data,
                     flagstat: joined.flagstat
                 )
-                List<ChunkQCResult> chunk_results = pending_qc_batches.computeIfAbsent(
+                def chunk_results: List<ChunkQCResult> = pending_qc_batches.computeIfAbsent(
                     joined.batch_index
                 ) { [] }
                 chunk_results.add(result)
@@ -368,10 +377,10 @@ workflow sample_pipeline {
             nonempty_qc_report_chunk_result_batches_ch
                 .mix(empty_qc_report_chunk_result_batches_ch)
         )
-        Map<String, List<ChunkQCResult>> qc_report_state = [:]
+        def qc_report_state: Map<String, List<ChunkQCResult>> = [:]
         restored_qc_results.each { ChunkQCResult qc_result ->
-            String key = sample_checkpoint_key(qc_result.sample)
-            List<ChunkQCResult> sample_results = qc_report_state.containsKey(key) ? qc_report_state[key] : []
+            def key: String = sample_checkpoint_key(qc_result.sample)
+            def sample_results: List<ChunkQCResult> = qc_report_state.containsKey(key) ? qc_report_state[key] : []
             qc_report_state[key] = (sample_results + [qc_result]).toSorted { left, right ->
                 left.batch_index <=> right.batch_index
             }
@@ -390,7 +399,7 @@ workflow sample_pipeline {
                 )]
             }
         qc_report_metadata_ch = qc_report_inputs_ch.map { Map report_inputs ->
-                Map report_metadata = [
+                def report_metadata: Map = [
                     latest_batch_index: report_inputs.latest_batch_index,
                     report_inputs_list: report_inputs.report_inputs_list,
                     rows: report_inputs.rows
@@ -409,15 +418,23 @@ workflow sample_pipeline {
             qc_report_flagstat_inputs_ch
         )
 
-        qc_report_ready_ch = join_report_batches(
-            published_differential_results_ch,
-            qc_report_input_tree_ch
-        )
-        qc_report(
-            qc_report_ready_ch.map { result -> result.qc_report_inputs },
-            qc_report_ready_ch.map { result -> result.qc_results },
-            qc_report_ready_ch.map { result -> result.differential_results }
-        )
+        if (differential_expression_enabled) {
+            qc_report_ready_ch = join_report_batches(
+                published_differential_results_ch,
+                qc_report_input_tree_ch
+            )
+            qc_report(
+                qc_report_ready_ch.map { result -> result.qc_report_inputs },
+                qc_report_ready_ch.map { result -> result.qc_results },
+                qc_report_ready_ch.map { result -> result.differential_results }
+            )
+        } else {
+            qc_report(
+                qc_report_input_tree_ch.map { result -> result.qc_report_inputs },
+                qc_report_input_tree_ch.map { result -> result.qc_results },
+                optional_file()
+            )
+        }
 }
 
 Map prepare_run(String experiment_dir, Integer _run_number, Integer replicate_count) {
@@ -480,16 +497,25 @@ workflow {
     // sequencingArgs = get_sequencing_arguments(runDir)
     // startSequencing(sequencingArgs, keyFile, certificateFile, metadataFile)
 
-    if (!params.reference_genome) {
-        error('Differential expression requires --ex_reference_genome.')
+    if (params.gene_set_enrichment && !params.differential_expression) {
+        error('--gene_set_enrichment requires --differential_expression.')
     }
-    if (!params.reference_annotation) {
+    if (params.differential_expression && !params.reference_genome) {
+        error('Differential expression requires --reference_genome.')
+    }
+    if (params.differential_expression && !params.reference_annotation) {
         error('Differential expression requires --reference_annotation.')
     }
+    if (params.gene_set_enrichment && !params.gene_sets) {
+        error('Gene-set enrichment requires --gene_sets.')
+    }
 
-    reference_genome = file(params.reference_genome, checkIfExists: true)
-    reference_annotation = file(params.reference_annotation, checkIfExists: true)
-    gene_sets = file(params.gene_sets, checkIfExists: true)
+    reference_genome = params.reference_genome ? \
+        file(params.reference_genome, checkIfExists: true) : optional_file()
+    reference_annotation = params.reference_annotation ? \
+        file(params.reference_annotation, checkIfExists: true) : optional_file()
+    gene_sets = params.gene_set_enrichment ? \
+        file(params.gene_sets, checkIfExists: true) : optional_file()
     output_root = file(params.out_dir).toAbsolutePath().normalize()
 
     ingress_args = record(
@@ -499,17 +525,18 @@ workflow {
     )
     all_samples = get_samples(ingress_args)
     validate_samples(all_samples)
-    checkpoint_state = discover_sample_checkpoints(
+    checkpoint_state = params.differential_expression ? discover_sample_checkpoints(
         all_samples,
         output_root,
         reference_genome,
         reference_annotation
-    )
+    ) : [restored: [], active: all_samples]
     restored_quantifications = checkpoint_state.restored*.quantification
     restored_qc_results = checkpoint_state.restored.collectMany { restored ->
         restored.qc_results
     }
-    first_analysis_index = next_analysis_snapshot_index(output_root)
+    first_analysis_index = params.differential_expression ? \
+        next_analysis_snapshot_index(output_root) : 0
 
     // Finalized samples are restored from the CLI output directory and never
     // enter BAM preparation, QC, collation, or Oarfish. Ingress watches only
@@ -528,7 +555,9 @@ workflow {
         first_analysis_index,
         reference_genome,
         reference_annotation,
-        gene_sets
+        gene_sets,
+        params.differential_expression,
+        params.gene_set_enrichment
     )
 
     onComplete:

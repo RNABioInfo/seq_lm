@@ -23,22 +23,27 @@ workflow quality_control {
         nanoplot_qc_ch = nanoplot_qc(merged_bams)
         flagstat_qc_ch = samtools_flagstat_qc(merged_bams)
         qc_results_ch = nanoplot_qc_ch
-            .map { NanoPlotQCResult result ->
-                tuple(qc_result_key(result), result)
-            }
-            .join(
-                flagstat_qc_ch.map { FlagstatQCResult result ->
-                    tuple(qc_result_key(result), result)
-                },
-                by: 0
-            )
-            .map { _key, NanoPlotQCResult nanoplot_result, FlagstatQCResult flagstat_result ->
+            .map { result ->
                 record(
-                    batch_index: nanoplot_result.batch_index,
-                    sample: nanoplot_result.sample,
-                    bam: nanoplot_result.bam,
-                    nanoplot_data: nanoplot_result.nanoplot_data,
-                    flagstat: flagstat_result.flagstat
+                    qc_key: qc_result_key(result),
+                    nanoplot_result: result
+                )
+            }
+            .join(flagstat_qc_ch.map { result ->
+                    record(
+                        qc_key: qc_result_key(result),
+                        flagstat_result: result
+                    )
+                },
+                by: 'qc_key'
+            )
+            .map { joined ->
+                record(
+                    batch_index: joined.nanoplot_result.batch_index,
+                    sample: joined.nanoplot_result.sample,
+                    bam: joined.nanoplot_result.bam,
+                    nanoplot_data: joined.nanoplot_result.nanoplot_data,
+                    flagstat: joined.flagstat_result.flagstat
                 )
             }
 
@@ -72,7 +77,7 @@ process nanoplot_qc {
         )
 
     script:
-        String output_dir = nanoplot_output_dir(merged_bam)
+        def output_dir: String = nanoplot_output_dir(merged_bam)
         """
         bam-qc-table \
             --threads ${task.cpus} \
@@ -102,7 +107,7 @@ process samtools_flagstat_qc {
         )
 
     script:
-        String flagstat = flagstat_file_name(merged_bam.batch_index, merged_bam.sample.name)
+        def flagstat: String = flagstat_file_name(merged_bam.batch_index, merged_bam.sample.name)
         """
         samtools flagstat -@ ${task.cpus - 1} -O tsv ${merged_bam.bam} > ${flagstat}
         """

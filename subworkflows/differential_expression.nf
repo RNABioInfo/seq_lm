@@ -23,6 +23,7 @@ include {
     differential_expression_results_dir;
     oarfish_counts_file_name;
     oarfish_out_name;
+    optional_file;
     shell_quote
 } from '../modules/generic_helpers.nf'
 
@@ -44,12 +45,13 @@ workflow differential_expression {
         genome: Path
         annotation: Path
         gene_sets: Path
+        gene_set_enrichment: Boolean
 
     main:
         collated_bams = collate_chunk_bam(merged_bams)
-        Map<Integer, Map> pending_merged_bam_batches = [:]
+        def pending_merged_bam_batches: Map<Integer, Map> = [:]
         nonempty_merged_bam_batches_ch = collated_bams
-            .map { CollatedChunkBAM merged_bam ->
+            .map { merged_bam ->
                 record(
                     batch_index: merged_bam.batch_index,
                     merged_bam: merged_bam
@@ -57,7 +59,7 @@ workflow differential_expression {
             }
             .join(batch_sizes, by: 'batch_index')
             .map { joined ->
-                Map pending_batch = pending_merged_bam_batches[joined.batch_index]
+                def pending_batch: Map = pending_merged_bam_batches[joined.batch_index]
                 if (pending_batch == null) {
                     pending_batch = [
                         expected_count: joined.active_sample_count,
@@ -95,8 +97,8 @@ workflow differential_expression {
             .filter { batch -> batch != null }
 
         empty_merged_bam_batches_ch = batch_sizes
-            .filter { SampleBatchSize batch_size -> batch_size.active_sample_count == 0 }
-            .map { SampleBatchSize batch_size ->
+            .filter { batch_size -> batch_size.active_sample_count == 0 }
+            .map { batch_size ->
                 record(
                     batch_index: batch_size.batch_index,
                     bams: [],
@@ -108,12 +110,12 @@ workflow differential_expression {
             nonempty_merged_bam_batches_ch.mix(empty_merged_bam_batches_ch)
         )
 
-        Map<String, List<CollatedChunkBAM>> cumulative_bam_state = [:]
-        cumulative_snapshots_ch = merged_bam_batches_ch.map { CollatedChunkBAMBatch batch ->
+        def cumulative_bam_state: Map<String, List<CollatedChunkBAM>> = [:]
+        cumulative_snapshots_ch = merged_bam_batches_ch.map { batch ->
             accumulate_cumulative_bam_state(cumulative_bam_state, batch)
         }
 
-        snapshot_sizes_ch = cumulative_snapshots_ch.map { CumulativeCollatedBAMSnapshot snapshot ->
+        snapshot_sizes_ch = cumulative_snapshots_ch.map { snapshot ->
                 record(
                     batch_index: snapshot.batch_index,
                     active_sample_count: snapshot.sample_bams.size(),
@@ -121,7 +123,7 @@ workflow differential_expression {
                 )
             }
 
-        Channel<CumulativeCollatedBAMGroup> cumulative_sample_bams_ch = cumulative_snapshots_ch.flatMap { CumulativeCollatedBAMSnapshot snapshot ->
+        def cumulative_sample_bams_ch: Channel<CumulativeCollatedBAMGroup> = cumulative_snapshots_ch.flatMap { snapshot ->
             snapshot.sample_bams
         }
         quantified_samples_ch = oarfish_quant(
@@ -130,16 +132,16 @@ workflow differential_expression {
             annotation
         )
 
-        Map<Integer, Map> pending_quantified_sample_batches = [:]
+        def pending_quantified_sample_batches: Map<Integer, Map> = [:]
         nonempty_quantified_sample_updates_ch = quantified_samples_ch
             .join(snapshot_sizes_ch, by: 'batch_index')
             .map { joined ->
-                QuantifiedSample quantified_sample = record(
+                def quantified_sample = record(
                     batch_index: joined.batch_index,
                     sample: joined.sample,
                     counts: joined.counts
                 )
-                Map pending_batch = pending_quantified_sample_batches[joined.batch_index]
+                def pending_batch: Map = pending_quantified_sample_batches[joined.batch_index]
                 if (pending_batch == null) {
                     pending_batch = [
                         expected_count: joined.active_sample_count,
@@ -180,8 +182,8 @@ workflow differential_expression {
             .filter { batch -> batch != null }
 
         empty_quantified_sample_updates_ch = snapshot_sizes_ch
-            .filter { SampleBatchSize batch_size -> batch_size.active_sample_count == 0 }
-            .map { SampleBatchSize batch_size ->
+            .filter { batch_size -> batch_size.active_sample_count == 0 }
+            .map { batch_size ->
                 record(
                     batch_index: batch_size.batch_index,
                     samples: [],
@@ -193,13 +195,13 @@ workflow differential_expression {
             nonempty_quantified_sample_updates_ch.mix(empty_quantified_sample_updates_ch)
         )
 
-        Map<String, QuantifiedSample> latest_quantifications = restored_quantifications.collectEntries { QuantifiedSample quantified_sample ->
+        def latest_quantifications: Map<String, QuantifiedSample> = restored_quantifications.collectEntries { quantified_sample ->
             [(sample_key(quantified_sample.sample)): quantified_sample]
         }
-        Integer next_analysis_index = first_analysis_index
+        def next_analysis_index: Integer = first_analysis_index
         quantified_sample_batches_ch = ordered_quantified_sample_updates_ch
-            .flatMap { QuantifiedSampleUpdateBatch update_batch ->
-                update_batch.samples.each { QuantifiedSample quantified_sample ->
+            .flatMap { update_batch ->
+                update_batch.samples.each { quantified_sample ->
                     latest_quantifications[sample_key(quantified_sample.sample)] = quantified_sample
                 }
                 if (latest_quantifications.size() < update_batch.experiment_sample_count) {
@@ -211,7 +213,7 @@ workflow differential_expression {
                     return []
                 }
 
-                QuantifiedSampleBatch quant_batch = record(
+                def quant_batch = record(
                     batch_index: update_batch.batch_index,
                     analysis_index: next_analysis_index,
                     samples: latest_quantifications.values().toList().toSorted { left, right ->
@@ -223,28 +225,32 @@ workflow differential_expression {
                 return [quant_batch]
             }
 
-        differential_results_ch = run_differential_expression_edgeR(
+        edgeR_results_ch = run_differential_expression_edgeR(
             quantified_sample_batches_ch,
             gene_sets,
             annotation
         )
-        gsva_results_ch = run_gene_set_variation_analysis(differential_results_ch)
+        if (gene_set_enrichment) {
+            analysis_results_ch = run_gene_set_variation_analysis(edgeR_results_ch)
+        } else {
+            analysis_results_ch = edgeR_results_ch
+        }
 
     emit:
         quantifications = quantified_samples_ch
-        results = gsva_results_ch
+        results = analysis_results_ch
 }
 
 /**
  * Fold one synchronized batch into the cumulative per-sample BAM state.
  */
-CumulativeCollatedBAMSnapshot accumulate_cumulative_bam_state(
-    Map<String, List<CollatedChunkBAM>> state,
-    CollatedChunkBAMBatch batch
+def accumulate_cumulative_bam_state(
+    state: Map<String, List<CollatedChunkBAM>>,
+    batch
 ) {
-    batch.bams.each { CollatedChunkBAM merged_bam ->
-        String sample_key = "${merged_bam.sample.group}\t${merged_bam.sample.name}"
-        List<CollatedChunkBAM> previous_bams = state.containsKey(sample_key) ? state[sample_key] : []
+    batch.bams.each { merged_bam ->
+        def sample_key: String = "${merged_bam.sample.group}\t${merged_bam.sample.name}"
+        def previous_bams: List<CollatedChunkBAM> = state.containsKey(sample_key) ? state[sample_key] : []
         state[sample_key] = (previous_bams.findAll { previous_bam ->
             previous_bam.batch_index != merged_bam.batch_index
         } + [merged_bam]).toSorted { left, right ->
@@ -252,10 +258,10 @@ CumulativeCollatedBAMSnapshot accumulate_cumulative_bam_state(
         }
     }
 
-    List<CumulativeCollatedBAMGroup> sample_bams = batch.bams
-        .collect { CollatedChunkBAM updated_bam ->
-            List<CollatedChunkBAM> bams = state[sample_key(updated_bam.sample)]
-            CollatedChunkBAM latest_bam = bams[-1]
+    def sample_bams: List<CumulativeCollatedBAMGroup> = batch.bams
+        .collect { updated_bam ->
+            def bams: List<CollatedChunkBAM> = state[sample_key(updated_bam.sample)]
+            def latest_bam = bams[-1]
             record(
                 batch_index: batch.batch_index,
                 sample: latest_bam.sample,
@@ -299,7 +305,7 @@ process collate_chunk_bam {
         )
 
     script:
-        String collated_bam = collated_chunk_bam_name(chunk_bam.batch_index, chunk_bam.sample)
+        def collated_bam: String = collated_chunk_bam_name(chunk_bam.batch_index, chunk_bam.sample)
         """
         samtools view -u -x ts ${chunk_bam.bam} |
             samtools collate \
@@ -333,9 +339,9 @@ process assemble_cumulative_collated_bam {
         )
 
     script:
-        String cumulative_bam = cumulative_collated_bam_name(input_group)
-        String cumulative_bam_arg = shell_quote(cumulative_bam)
-        String bam_args = input_group.bams*.bam.collect { bam -> shell_quote(bam.toString()) }.join(' ')
+        def cumulative_bam: String = cumulative_collated_bam_name(input_group)
+        def cumulative_bam_arg: String = shell_quote(cumulative_bam)
+        def bam_args: String = input_group.bams*.bam.collect { bam -> shell_quote(bam.toString()) }.join(' ')
 
         if (input_group.bams.size() == 1) {
             return """
@@ -370,7 +376,7 @@ process oarfish_quant {
         )
 
     script:
-        String output_prefix = oarfish_out_name(merged_bam.batch_index, merged_bam.sample.name)
+        def output_prefix: String = oarfish_out_name(merged_bam.batch_index, merged_bam.sample.name)
         """
         oarfish \
             -j ${task.cpus} \
@@ -408,15 +414,16 @@ process run_differential_expression_edgeR {
         )
 
     script:
-        String results_dir = differential_expression_results_dir(quant_batch.analysis_index)
-        String manifest_rows = quant_batch.samples.withIndex().collect { QuantifiedSample sample, Integer index ->
+        def results_dir: String = differential_expression_results_dir(quant_batch.analysis_index)
+        def gene_set_args: String = gene_sets.name == optional_file().name ? '' : "--gene_sets ${gene_sets}"
+        def manifest_rows: String = quant_batch.samples.withIndex().collect { sample, Integer index ->
             [
                 de_manifest_field(sample.sample.name),
                 de_manifest_field(sample.sample.group),
                 "quant/input${index + 1}.quant"
             ].join('\t')
         }.join('\n')
-        String quoted_manifest_rows = shell_quote(manifest_rows)
+        def quoted_manifest_rows: String = shell_quote(manifest_rows)
         """
         printf 'name\\tgroup\\tcount_file\\n' > quant_manifest.tsv
         printf '%s\\n' ${quoted_manifest_rows} >> quant_manifest.tsv
@@ -426,7 +433,7 @@ process run_differential_expression_edgeR {
         edgeR-analysis \
             --quant_manifest quant_manifest.tsv \
             --output_dir ${results_dir} \
-            --gene_sets ${gene_sets} \
+            ${gene_set_args} \
             --annotation ${annotation} \
             --lfc ${params.de_lfc_cutoff}
         """
@@ -456,7 +463,7 @@ process run_gene_set_variation_analysis {
         )
 
     script:
-        String results_dir = differential_expression_results_dir(differential_result.analysis_index)
+        def results_dir: String = differential_expression_results_dir(differential_result.analysis_index)
         """
         mkdir ${results_dir}
         cp -R edgeR_results/. ${results_dir}/
@@ -469,6 +476,6 @@ process run_gene_set_variation_analysis {
         """
 }
 
-String de_manifest_field(Object value) {
+String de_manifest_field(value: Object) {
     return "${value}".replaceAll(/[\t\r\n]+/, ' ')
 }
