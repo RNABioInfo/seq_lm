@@ -257,26 +257,37 @@ process write_sample_checkpoints {
         files('checkpoint_output/*/*', arity: '1..*')
 
     script:
-        Map<String, List> quantifications_by_sample = quantifications.groupBy { quantified_sample ->
-            sample_checkpoint_key(quantified_sample.sample)
+        List indexed_quantifications = quantifications.toList().withIndex().collect { quantified_sample, index ->
+            [value: quantified_sample, input_index: index + 1]
         }
-        Map<String, List> qc_by_sample = qc_results.groupBy { qc_result ->
-            sample_checkpoint_key(qc_result.sample)
+        List indexed_qc_results = qc_results.toList().withIndex().collect { qc_result, index ->
+            [value: qc_result, input_index: index + 1]
+        }
+        Map<String, List> quantifications_by_sample = indexed_quantifications.groupBy { indexed_quantification ->
+            sample_checkpoint_key(indexed_quantification.value.sample)
+        }
+        Map<String, List> qc_by_sample = indexed_qc_results.groupBy { indexed_qc_result ->
+            sample_checkpoint_key(indexed_qc_result.value.sample)
         }
         List<String> commands = []
         quantifications_by_sample.each { String key, List sample_quantifications ->
-            def final_quantification = sample_quantifications.max { result -> result.batch_index }
+            def final_quantification = sample_quantifications.max { indexed_result ->
+                indexed_result.value.batch_index
+            }
             List sample_qc = qc_by_sample.containsKey(key) ? qc_by_sample[key] : []
             if (sample_qc.empty) {
                 error("Cannot finalize sample '${key}': QC outputs are missing.")
             }
-            Sample sample = final_quantification.sample
+            Sample sample = final_quantification.value.sample
             String sample_dir = "checkpoint_output/${safe_name(sample.group)}/${safe_name(sample.name)}"
-            Integer quant_index = quantifications.indexOf(final_quantification) + 1
+            Integer quant_index = final_quantification.input_index
             commands.add("mkdir -p ${sample_dir}/quantification ${sample_dir}/qc/nanoplot ${sample_dir}/qc/flagstat")
-            List sorted_qc = sample_qc.toSorted { left, right -> left.batch_index <=> right.batch_index }
-            List qc_manifest = sorted_qc.collect { qc ->
-                Integer qc_index = qc_results.indexOf(qc) + 1
+            List sorted_qc = sample_qc.toSorted { left, right ->
+                left.value.batch_index <=> right.value.batch_index
+            }
+            List qc_manifest = sorted_qc.collect { indexed_qc ->
+                def qc = indexed_qc.value
+                Integer qc_index = indexed_qc.input_index
                 String nanoplot_path = "qc/nanoplot/chunk_${qc.batch_index}.tsv.gz"
                 String flagstat_path = "qc/flagstat/chunk_${qc.batch_index}.tsv"
                 commands.add(
@@ -306,7 +317,7 @@ process write_sample_checkpoints {
         """
         ${commands.join('\n')}
 
-        python - <<'PY'
+        python3 - <<'PY'
 import hashlib
 import json
 import pathlib

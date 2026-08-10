@@ -300,9 +300,25 @@ workflow sample_pipeline {
         )
 
         if (fresh_sample_count > 0) {
+            checkpoint_quantifications_ch = quantified_samples_ch
+                .collect()
+                .map { collected_quantifications ->
+                    collected_quantifications.toList().toSorted { left, right ->
+                        sample_checkpoint_key(left.sample) <=> sample_checkpoint_key(right.sample) ?:
+                            left.batch_index <=> right.batch_index
+                    }
+                }
+            checkpoint_qc_results_ch = qc_result_ch
+                .collect()
+                .map { collected_qc_results ->
+                    collected_qc_results.toList().toSorted { left, right ->
+                        sample_checkpoint_key(left.sample) <=> sample_checkpoint_key(right.sample) ?:
+                            left.batch_index <=> right.batch_index
+                    }
+                }
             write_sample_checkpoints(
-                quantified_samples_ch.collect(),
-                qc_result_ch.collect(),
+                checkpoint_quantifications_ch,
+                checkpoint_qc_results_ch,
                 [
                     genome: file_identity(reference_genome),
                     annotation: file_identity(reference_annotation)
