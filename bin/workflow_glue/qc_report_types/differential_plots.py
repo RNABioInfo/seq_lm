@@ -27,6 +27,7 @@ from sklearn.decomposition import PCA
 
 FEATURE_COUNTS_FILE = "feature_counts.tsv"
 BCV_DATA_FILE = "edgeR_bcv_data.tsv"
+MDS_DATA_FILE = "edgeR_mds_data.tsv"
 EDGE_R_RESULTS_FILE = "edgeR_results.tsv"
 CONTRAST_DIRECTORY = re.compile(r"^group_(.+)_vs_(.+)$")
 REQUIRED_RESULT_COLUMNS = ("feature_id", "logFC", "logCPM", "PValue", "FDR")
@@ -39,6 +40,17 @@ REQUIRED_BCV_COLUMNS = (
     "trended_bcv",
     "common_dispersion",
     "common_bcv",
+)
+REQUIRED_MDS_COLUMNS = (
+    "sample",
+    "group",
+    "dimension_1",
+    "dimension_2",
+    "dimension_1_variance",
+    "dimension_2_variance",
+    "axis_label",
+    "top_features",
+    "gene_selection",
 )
 LABEL_COLUMNS = ("gene", "gene_id", "locus_tag", "feature_id")
 NONSIGNIFICANT_COLOR = "#B8B8B8"
@@ -84,6 +96,7 @@ class DifferentialResult:
 
     feature_counts: pd.DataFrame
     bcv_data: pd.DataFrame
+    mds_data: pd.DataFrame
     sample_metadata: pd.DataFrame
     contrasts: list[ContrastResult]
     condition_colors: dict[str, str]
@@ -334,6 +347,79 @@ def _read_bcv_data(results_dir: Path, feature_ids: list[str]) -> pd.DataFrame:
     return bcv_data.set_index("feature_id").loc[feature_ids].reset_index()
 
 
+def _read_mds_data(
+    results_dir: Path,
+    sample_metadata: pd.DataFrame,
+) -> pd.DataFrame:
+    """Read and validate edgeR leading-logFC MDS coordinates."""
+    mds_path = results_dir / MDS_DATA_FILE
+    if not mds_path.is_file():
+        raise ValueError(f"Missing edgeR MDS data table: {mds_path}")
+
+    mds_data = pd.read_csv(mds_path, sep="\t")
+    missing = [column for column in REQUIRED_MDS_COLUMNS if column not in mds_data]
+    if missing:
+        raise ValueError(f"{mds_path} is missing columns: " + ", ".join(missing))
+
+    mds_data = mds_data[list(REQUIRED_MDS_COLUMNS)].copy()
+    text_columns = ("sample", "group", "axis_label", "gene_selection")
+    if mds_data[list(text_columns)].isna().any().any():
+        raise ValueError(f"{mds_path} contains missing MDS metadata.")
+    for column in text_columns:
+        mds_data[column] = mds_data[column].astype(str)
+    if (
+        mds_data["sample"].str.strip().eq("").any()
+        or mds_data["sample"].duplicated().any()
+    ):
+        raise ValueError(f"{mds_path} contains empty or duplicate sample values.")
+    if any(mds_data[column].str.strip().eq("").any() for column in text_columns[1:]):
+        raise ValueError(f"{mds_path} contains empty MDS metadata.")
+
+    sample_names = sample_metadata.index.tolist()
+    if set(mds_data["sample"]) != set(sample_names):
+        raise ValueError(
+            f"{mds_path} and sample metadata contain different sample values."
+        )
+    mds_data = mds_data.set_index("sample").loc[sample_names].reset_index()
+    expected_groups = sample_metadata.loc[sample_names, "group"].tolist()
+    if mds_data["group"].tolist() != expected_groups:
+        raise ValueError(f"{mds_path} groups do not match sample metadata.")
+
+    numeric_columns = (
+        "dimension_1",
+        "dimension_2",
+        "dimension_1_variance",
+        "dimension_2_variance",
+        "top_features",
+    )
+    mds_data[list(numeric_columns)] = mds_data[list(numeric_columns)].apply(
+        pd.to_numeric,
+        errors="coerce",
+    )
+    if mds_data[list(numeric_columns)].isna().any().any():
+        raise ValueError(f"{mds_path} contains missing or non-numeric values.")
+    if not np.isfinite(mds_data[list(numeric_columns)].to_numpy(dtype=float)).all():
+        raise ValueError(f"{mds_path} contains infinite values.")
+    for column in ("dimension_1_variance", "dimension_2_variance"):
+        if mds_data[column].lt(0).any() or mds_data[column].gt(1).any():
+            raise ValueError(f"{mds_path} contains variance outside [0, 1].")
+    if mds_data["top_features"].lt(1).any():
+        raise ValueError(f"{mds_path} contains an invalid top_features value.")
+
+    shared_columns = (
+        "dimension_1_variance",
+        "dimension_2_variance",
+        "axis_label",
+        "top_features",
+        "gene_selection",
+    )
+    if any(mds_data[column].nunique() != 1 for column in shared_columns):
+        raise ValueError(f"{mds_path} contains inconsistent MDS metadata.")
+    if mds_data["gene_selection"].iloc[0] != "pairwise":
+        raise ValueError(f"{mds_path} is not an edgeR pairwise MDS export.")
+    return mds_data
+
+
 def load_differential_results(
     results_dir: str | Path,
     samples_df: pd.DataFrame,
@@ -353,10 +439,12 @@ def load_differential_results(
         metadata.index.tolist(),
     )
     bcv_data = _read_bcv_data(results_dir, feature_counts.index.tolist())
+    mds_data = _read_mds_data(results_dir, metadata)
 
     return DifferentialResult(
         feature_counts=feature_counts,
         bcv_data=bcv_data,
+        mds_data=mds_data,
         sample_metadata=metadata,
         contrasts=contrasts,
         condition_colors=condition_palette(groups),
@@ -496,6 +584,52 @@ def create_pca_plot(data: DifferentialResult) -> BokehPlot:
             line_color="#333333",
             line_alpha=0.45,
             legend_label=group,
+        )
+    plot._fig.legend.title = "Condition"
+    plot._fig.legend.location = "top_right"
+    return plot
+
+
+def create_mds_plot(data: DifferentialResult) -> BokehPlot:
+    """Create edgeR's leading-logFC multidimensional scaling plot."""
+    mds_data = data.mds_data.copy()
+    axis_label = mds_data["axis_label"].iloc[0]
+    variance_1 = float(mds_data["dimension_1_variance"].iloc[0]) * 100
+    variance_2 = float(mds_data["dimension_2_variance"].iloc[0]) * 100
+    plot = BokehPlot(
+        title="edgeR MDS of leading logFC",
+        x_axis_label=f"{axis_label} 1 ({variance_1:.1f}%)",
+        y_axis_label=f"{axis_label} 2 ({variance_2:.1f}%)",
+        height=420,
+        sizing_mode="stretch_width",
+        tools="pan,wheel_zoom,box_zoom,save,reset",
+    )
+    for group in data.condition_colors:
+        group_data = mds_data.loc[mds_data["group"] == group].copy()
+        if group_data.empty:
+            continue
+        source = ColumnDataSource(group_data)
+        points = plot._fig.scatter(
+            "dimension_1",
+            "dimension_2",
+            source=source,
+            size=14,
+            fill_color=data.condition_colors[group],
+            fill_alpha=0.85,
+            line_color="#333333",
+            line_alpha=0.45,
+            legend_label=group,
+        )
+        plot._fig.add_tools(
+            HoverTool(
+                renderers=[points],
+                tooltips=[
+                    ("Sample", "@sample"),
+                    ("Condition", "@group"),
+                    ("Dimension 1", "@dimension_1{0.000}"),
+                    ("Dimension 2", "@dimension_2{0.000}"),
+                ],
+            )
         )
     plot._fig.legend.title = "Condition"
     plot._fig.legend.location = "top_right"
@@ -887,6 +1021,7 @@ def add_differential_analysis(
     tabs = Tabs()
     with tabs.add_tab("Overview"):
         EZChart(create_pca_plot(data), "epi2melabs", height="460px")
+        EZChart(create_mds_plot(data), "epi2melabs", height="460px")
         EZChart(create_bcv_plot(data), "epi2melabs", height="460px")
 
     with tabs.add_tab("Contrasts"):

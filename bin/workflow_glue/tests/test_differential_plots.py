@@ -75,6 +75,22 @@ def write_edge_r_tree(
         }
     ).to_csv(path / "edgeR_bcv_data.tsv", sep="\t", index=False)
 
+    pd.DataFrame(
+        {
+            "sample": samples,
+            "group": metadata["Group"].tolist(),
+            "dimension_1": [2.0, 1.0, -1.0, -2.0]
+            + ([-0.5, 0.5] if include_second_target else []),
+            "dimension_2": [0.5, -0.5, 0.75, -0.75]
+            + ([1.0, -1.0] if include_second_target else []),
+            "dimension_1_variance": [0.6] * len(samples),
+            "dimension_2_variance": [0.25] * len(samples),
+            "axis_label": ["Leading logFC dim"] * len(samples),
+            "top_features": [4] * len(samples),
+            "gene_selection": ["pairwise"] * len(samples),
+        }
+    ).to_csv(path / "edgeR_mds_data.tsv", sep="\t", index=False)
+
     results = pd.DataFrame(
         {
             "feature_id": feature_ids,
@@ -127,6 +143,7 @@ def test_load_differential_results_aligns_by_feature_id(tmp_path):
     ]
     assert data.feature_counts.columns.tolist() == metadata["Name"].tolist()
     assert data.bcv_data["feature_id"].tolist() == data.feature_counts.index.tolist()
+    assert data.mds_data["sample"].tolist() == metadata["Name"].tolist()
     assert data.contrasts[0].label == "treated vs control"
 
 
@@ -248,8 +265,25 @@ def test_bcv_plot_uses_exported_tagwise_trended_and_common_values(tmp_path):
     )
 
 
-def test_overview_adds_bcv_plot_with_pca(tmp_path, monkeypatch):
-    """The differential Overview tab emits both global diagnostic plots."""
+def test_mds_plot_uses_exported_edge_r_coordinates(tmp_path):
+    """MDS overview plot preserves edgeR coordinates and axis metadata."""
+    metadata = write_edge_r_tree(tmp_path)
+    data = dp.load_differential_results(tmp_path, metadata)
+    plot = dp.create_mds_plot(data)
+
+    assert plot._fig.title.text == "edgeR MDS of leading logFC"
+    assert plot._fig.xaxis.axis_label == "Leading logFC dim 1 (60.0%)"
+    assert plot._fig.yaxis.axis_label == "Leading logFC dim 2 (25.0%)"
+    samples = {
+        sample
+        for source in plot._fig.select({"type": ColumnDataSource})
+        for sample in source.data.get("sample", [])
+    }
+    assert samples == {"control_1", "control_2", "treated_1", "treated_2"}
+
+
+def test_overview_orders_pca_mds_and_bcv(tmp_path, monkeypatch):
+    """The Overview tab places MDS between the PCA and BCV diagnostics."""
     metadata = write_edge_r_tree(tmp_path)
     data = dp.load_differential_results(tmp_path, metadata)
     rendered_titles = []
@@ -262,8 +296,9 @@ def test_overview_adds_bcv_plot_with_pca(tmp_path, monkeypatch):
     monkeypatch.setattr(dp, "EZChart", record_chart)
     dp.add_differential_analysis(data, lfc_cutoff=1, padj_cutoff=0.05)
 
-    assert rendered_titles[:2] == [
+    assert rendered_titles[:3] == [
         "PCA of log2(CPM + 1)",
+        "edgeR MDS of leading logFC",
         "edgeR biological coefficient of variation (BCV)",
     ]
 

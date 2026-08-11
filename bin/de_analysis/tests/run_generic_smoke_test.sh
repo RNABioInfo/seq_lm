@@ -103,6 +103,7 @@ awk -F '\t' '
 test -s "${test_dir}/results/gene_set_resolution.tsv"
 test -s "${test_dir}/results/sample_metadata.tsv"
 test -s "${test_dir}/results/edgeR_bcv_data.tsv"
+test -s "${test_dir}/results/edgeR_mds_data.tsv"
 awk -F '\t' '
     NR == 1 && $0 != "feature_id\taverage_log_cpm\ttagwise_dispersion\ttagwise_bcv\ttrended_dispersion\ttrended_bcv\tcommon_dispersion\tcommon_bcv" {
         print "Unexpected BCV export columns" > "/dev/stderr"
@@ -119,6 +120,22 @@ awk -F '\t' '
         }
     }
 ' "${test_dir}/results/edgeR_bcv_data.tsv"
+awk -F '\t' '
+    NR == 1 && $0 != "sample\tgroup\tdimension_1\tdimension_2\tdimension_1_variance\tdimension_2_variance\taxis_label\ttop_features\tgene_selection" {
+        print "Unexpected MDS export columns" > "/dev/stderr"
+        exit 1
+    }
+    NR > 1 && (NF != 9 || $1 == "" || $2 == "" || $8 < 1 || $9 != "pairwise") {
+        print "Invalid MDS export row" > "/dev/stderr"
+        exit 1
+    }
+    END {
+        if (NR != 7) {
+            print "MDS export does not contain all six samples" > "/dev/stderr"
+            exit 1
+        }
+    }
+' "${test_dir}/results/edgeR_mds_data.tsv"
 test -s "${test_dir}/results/group_challenge_vs_baseline/fry_results.tsv"
 test -s "${test_dir}/results/group_challenge_vs_baseline/edgeR_results.tsv"
 test -s "${test_dir}/results/group_challenge_vs_baseline/fry_signed_significance.png"
@@ -139,6 +156,7 @@ awk -F '\t' '
 ' "${test_dir}/direct_results/gene_set_coverage.tsv"
 test -s "${test_dir}/direct_results/sample_metadata.tsv"
 test -s "${test_dir}/direct_results/edgeR_bcv_data.tsv"
+test -s "${test_dir}/direct_results/edgeR_mds_data.tsv"
 test -s "${test_dir}/direct_results/group_challenge_vs_baseline/fry_results.tsv"
 
 printf 'Generic edgeR/GMT smoke test passed.\n'

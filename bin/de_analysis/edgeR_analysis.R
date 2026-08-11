@@ -795,6 +795,24 @@ dge_list = DGEList(counts = counts, group = sample_groups)
 keep = filterByExpr(dge_list)
 dge_list = dge_list[keep, , keep.lib.sizes = FALSE]
 dge_list = normLibSizes(dge_list)
+
+mds = plotMDS(dge_list, top = 500L, plot = FALSE)
+mds_data = tibble(
+    sample = colnames(dge_list),
+    group = as.character(sample_groups),
+    dimension_1 = mds$x,
+    dimension_2 = mds$y,
+    dimension_1_variance = mds$var.explained[[mds$dim.plot[[1L]]]],
+    dimension_2_variance = mds$var.explained[[mds$dim.plot[[2L]]]],
+    axis_label = mds$axislabel,
+    top_features = mds$top,
+    gene_selection = mds$gene.selection
+)
+write_tsv(
+    mds_data,
+    file.path(output_dir, "edgeR_mds_data.tsv")
+)
+
 design = model.matrix(~0 + sample_groups)
 colnames(design) = levels(sample_groups)
 dge_list = estimateDisp(dge_list, design, robust = TRUE)

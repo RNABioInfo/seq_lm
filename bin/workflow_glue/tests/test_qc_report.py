@@ -121,6 +121,12 @@ def write_differential_results(path):
         "gene_3\t5\t0.04\t0.2\t0.0625\t0.25\t0.09\t0.3\n"
         "gene_4\t6\t0.01\t0.1\t0.04\t0.2\t0.09\t0.3\n"
     )
+    (path / "edgeR_mds_data.tsv").write_text(
+        "sample\tgroup\tdimension_1\tdimension_2\tdimension_1_variance\t"
+        "dimension_2_variance\taxis_label\ttop_features\tgene_selection\n"
+        "control_1\tcontrol\t-1\t0.5\t0.7\t0.2\tLeading logFC dim\t4\tpairwise\n"
+        "treatment_1\ttime_point_1\t1\t-0.5\t0.7\t0.2\tLeading logFC dim\t4\tpairwise\n"
+    )
     contrast = path / "group_time_point_1_vs_control"
     contrast.mkdir()
     (contrast / "edgeR_results.tsv").write_text(
@@ -349,6 +355,7 @@ def test_qc_report_writes_html(tmp_path):
     assert "'type': 'sankey'" in html
     assert "Read length vs Read quality" in html
     assert "PCA of log2(CPM + 1)" in html
+    assert "edgeR MDS of leading logFC" in html
     assert "edgeR biological coefficient of variation (BCV)" in html
     assert "logFC vs logCPM" in html
     assert "Volcano plot" in html

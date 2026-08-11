@@ -147,10 +147,12 @@ better-powered checkpoints.
 The stable `qc_report.html` artifact exposes **Quality Control**, **Differential
 Analysis**, and **Gene Set Enrichment** as primary tabs once matching QC and
 differential outputs exist for a batch. Within Differential Analysis, the
-Overview tab contains a PCA using `log2(CPM + 1)` for all samples and an edgeR
-biological coefficient of variation (BCV) plot. The plot uses the exported
-`edgeR_bcv_data.tsv` table: tagwise BCVs are shown as feature-level points,
-with trended and common BCVs overlaid. Contrast and plot-type subtabs separate:
+Overview tab contains a PCA using `log2(CPM + 1)` for all samples, an edgeR
+leading-logFC MDS plot, and a biological coefficient of variation (BCV) plot.
+The MDS plot uses coordinates and axis metadata exported in
+`edgeR_mds_data.tsv`; the BCV plot uses `edgeR_bcv_data.tsv`, showing tagwise
+BCVs as feature-level points with trended and common BCVs overlaid. Contrast
+and plot-type subtabs separate:
 
 * an edgeR `logFC` versus `logCPM` plot;
 * a volcano plot of `logFC` versus `-log10(FDR)`;
@@ -230,15 +232,15 @@ Gene-level differential-expression results use `glmTreat`; its minimum effect
 size defaults to one log2 fold and can be changed with `--lfc`.
 
 At the analysis level, the command writes `feature_counts.tsv`,
-`sample_metadata.tsv`, and `edgeR_bcv_data.tsv`. The BCV table contains average
-log CPM plus tagwise, trended, and common dispersion and BCV values for every
-retained feature. For each contrast the command writes `edgeR_results.tsv`,
-`fry_results.tsv`, and `fry_signed_significance.png`. The plot preserves
-arbitrary GMT set names and shows the top 30 sets by directional FDR by
-default; change this with `--plot_top_n`. The first column of
-`edgeR_results.tsv` is the generic
-count-table `feature_id`; annotation identifiers are added as columns when an
-annotation is supplied.
+`sample_metadata.tsv`, `edgeR_mds_data.tsv`, and `edgeR_bcv_data.tsv`. The MDS
+table contains the sample coordinates and edgeR axis metadata; the BCV table
+contains average log CPM plus tagwise, trended, and common dispersion and BCV
+values for every retained feature. For each contrast the command writes
+`edgeR_results.tsv`, `fry_results.tsv`, and `fry_signed_significance.png`. The
+plot preserves arbitrary GMT set names and shows the top 30 sets by directional
+FDR by default; change this with `--plot_top_n`. The first column of
+`edgeR_results.tsv` is the generic count-table `feature_id`; annotation
+identifiers are added as columns when an annotation is supplied.
 
 At analysis level, `gene_set_resolution.tsv` records every GMT member, its
 resolved count-table feature ID, and the matching route. The
