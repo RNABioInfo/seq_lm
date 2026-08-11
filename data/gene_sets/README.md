@@ -65,6 +65,7 @@ reference label with `--control_group`. Results include:
 
 - `gene_set_resolution.tsv`, the member-by-member identifier mapping;
 - `gene_set_coverage.tsv`, written once for the analysis;
+- `edgeR_bcv_data.tsv`, the feature-level values behind the overview BCV plot;
 - `group_<target>_vs_<control>/edgeR_results.tsv`;
 - `group_<target>_vs_<control>/fry_results.tsv`;
 - `group_<target>_vs_<control>/fry_signed_significance.png`.

@@ -798,6 +798,22 @@ dge_list = normLibSizes(dge_list)
 design = model.matrix(~0 + sample_groups)
 colnames(design) = levels(sample_groups)
 dge_list = estimateDisp(dge_list, design, robust = TRUE)
+
+bcv_data = tibble(
+    feature_id = rownames(dge_list),
+    average_log_cpm = dge_list$AveLogCPM,
+    tagwise_dispersion = dge_list$tagwise.dispersion,
+    tagwise_bcv = sqrt(dge_list$tagwise.dispersion),
+    trended_dispersion = dge_list$trended.dispersion,
+    trended_bcv = sqrt(dge_list$trended.dispersion),
+    common_dispersion = dge_list$common.dispersion,
+    common_bcv = sqrt(dge_list$common.dispersion)
+)
+write_tsv(
+    bcv_data,
+    file.path(output_dir, "edgeR_bcv_data.tsv")
+)
+
 fit = glmQLFit(dge_list, design, robust = TRUE)
 
 norm_feature_counts = as.data.frame(cpm(dge_list)) %>%

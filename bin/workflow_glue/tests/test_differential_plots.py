@@ -62,6 +62,19 @@ def write_edge_r_tree(
             sep="\t",
         )
 
+    pd.DataFrame(
+        {
+            "feature_id": feature_ids,
+            "average_log_cpm": [2.0, 3.0, 4.0, 5.0],
+            "tagwise_dispersion": [0.16, 0.09, 0.04, 0.01],
+            "tagwise_bcv": [0.4, 0.3, 0.2, 0.1],
+            "trended_dispersion": [0.1225, 0.09, 0.0625, 0.04],
+            "trended_bcv": [0.35, 0.3, 0.25, 0.2],
+            "common_dispersion": [0.09] * 4,
+            "common_bcv": [0.3] * 4,
+        }
+    ).to_csv(path / "edgeR_bcv_data.tsv", sep="\t", index=False)
+
     results = pd.DataFrame(
         {
             "feature_id": feature_ids,
@@ -113,6 +126,7 @@ def test_load_differential_results_aligns_by_feature_id(tmp_path):
         "feature_d",
     ]
     assert data.feature_counts.columns.tolist() == metadata["Name"].tolist()
+    assert data.bcv_data["feature_id"].tolist() == data.feature_counts.index.tolist()
     assert data.contrasts[0].label == "treated vs control"
 
 
@@ -211,6 +225,47 @@ def test_pca_uses_log_cpm_and_reports_explained_variance(tmp_path):
         for group in source.data.get("group", [])
     }
     assert groups == {"control", "treated"}
+
+
+def test_bcv_plot_uses_exported_tagwise_trended_and_common_values(tmp_path):
+    """BCV overview plot exposes all three edgeR dispersion summaries."""
+    metadata = write_edge_r_tree(tmp_path)
+    data = dp.load_differential_results(tmp_path, metadata)
+    plot = dp.create_bcv_plot(data)
+
+    assert plot._fig.title.text == "edgeR biological coefficient of variation (BCV)"
+    assert plot._fig.xaxis.axis_label == "Average log CPM"
+    assert plot._fig.yaxis.axis_label == "Biological coefficient of variation"
+    assert [item.label["value"] for item in plot._fig.legend[0].items] == [
+        "Tagwise",
+        "Trended",
+        "Common",
+    ]
+    sources = list(plot._fig.select({"type": ColumnDataSource}))
+    assert any(
+        list(source.data.get("tagwise_bcv", [])) == [0.4, 0.3, 0.2, 0.1]
+        for source in sources
+    )
+
+
+def test_overview_adds_bcv_plot_with_pca(tmp_path, monkeypatch):
+    """The differential Overview tab emits both global diagnostic plots."""
+    metadata = write_edge_r_tree(tmp_path)
+    data = dp.load_differential_results(tmp_path, metadata)
+    rendered_titles = []
+
+    def record_chart(plot, *_args, **_kwargs):
+        title = getattr(plot._fig, "title", None)
+        if title is not None:
+            rendered_titles.append(title.text)
+
+    monkeypatch.setattr(dp, "EZChart", record_chart)
+    dp.add_differential_analysis(data, lfc_cutoff=1, padj_cutoff=0.05)
+
+    assert rendered_titles[:2] == [
+        "PCA of log2(CPM + 1)",
+        "edgeR biological coefficient of variation (BCV)",
+    ]
 
 
 def test_ma_and_volcano_include_cutoff_spans(tmp_path):

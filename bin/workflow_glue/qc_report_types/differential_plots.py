@@ -26,9 +26,20 @@ from sklearn.decomposition import PCA
 
 
 FEATURE_COUNTS_FILE = "feature_counts.tsv"
+BCV_DATA_FILE = "edgeR_bcv_data.tsv"
 EDGE_R_RESULTS_FILE = "edgeR_results.tsv"
 CONTRAST_DIRECTORY = re.compile(r"^group_(.+)_vs_(.+)$")
 REQUIRED_RESULT_COLUMNS = ("feature_id", "logFC", "logCPM", "PValue", "FDR")
+REQUIRED_BCV_COLUMNS = (
+    "feature_id",
+    "average_log_cpm",
+    "tagwise_dispersion",
+    "tagwise_bcv",
+    "trended_dispersion",
+    "trended_bcv",
+    "common_dispersion",
+    "common_bcv",
+)
 LABEL_COLUMNS = ("gene", "gene_id", "locus_tag", "feature_id")
 NONSIGNIFICANT_COLOR = "#B8B8B8"
 CONDITION_PALETTE = (
@@ -72,6 +83,7 @@ class DifferentialResult:
     """Validated inputs needed by all differential report plots."""
 
     feature_counts: pd.DataFrame
+    bcv_data: pd.DataFrame
     sample_metadata: pd.DataFrame
     contrasts: list[ContrastResult]
     condition_colors: dict[str, str]
@@ -279,6 +291,49 @@ def _align_feature_counts(
     return feature_counts
 
 
+def _read_bcv_data(results_dir: Path, feature_ids: list[str]) -> pd.DataFrame:
+    """Read and validate the values underlying edgeR's BCV plot."""
+    bcv_path = results_dir / BCV_DATA_FILE
+    if not bcv_path.is_file():
+        raise ValueError(f"Missing edgeR BCV data table: {bcv_path}")
+
+    bcv_data = pd.read_csv(bcv_path, sep="\t")
+    missing = [column for column in REQUIRED_BCV_COLUMNS if column not in bcv_data]
+    if missing:
+        raise ValueError(f"{bcv_path} is missing columns: " + ", ".join(missing))
+
+    bcv_data = bcv_data[list(REQUIRED_BCV_COLUMNS)].copy()
+    bcv_data["feature_id"] = bcv_data["feature_id"].astype(str)
+    if (
+        bcv_data["feature_id"].eq("").any()
+        or bcv_data["feature_id"].duplicated().any()
+    ):
+        raise ValueError(
+            f"{bcv_path} contains empty or duplicate feature_id values."
+        )
+    if set(bcv_data["feature_id"]) != set(feature_ids):
+        raise ValueError(
+            f"{bcv_path} and feature_counts.tsv contain different feature_id values."
+        )
+
+    numeric_columns = list(REQUIRED_BCV_COLUMNS[1:])
+    bcv_data[numeric_columns] = bcv_data[numeric_columns].apply(
+        pd.to_numeric,
+        errors="coerce",
+    )
+    if bcv_data[numeric_columns].isna().any().any():
+        raise ValueError(f"{bcv_path} contains missing or non-numeric values.")
+    if not np.isfinite(bcv_data[numeric_columns].to_numpy(dtype=float)).all():
+        raise ValueError(f"{bcv_path} contains infinite values.")
+    dispersion_columns = [
+        column for column in numeric_columns if column != "average_log_cpm"
+    ]
+    if (bcv_data[dispersion_columns] < 0).any().any():
+        raise ValueError(f"{bcv_path} contains negative dispersion or BCV values.")
+
+    return bcv_data.set_index("feature_id").loc[feature_ids].reset_index()
+
+
 def load_differential_results(
     results_dir: str | Path,
     samples_df: pd.DataFrame,
@@ -297,9 +352,11 @@ def load_differential_results(
         contrasts,
         metadata.index.tolist(),
     )
+    bcv_data = _read_bcv_data(results_dir, feature_counts.index.tolist())
 
     return DifferentialResult(
         feature_counts=feature_counts,
+        bcv_data=bcv_data,
         sample_metadata=metadata,
         contrasts=contrasts,
         condition_colors=condition_palette(groups),
@@ -442,6 +499,62 @@ def create_pca_plot(data: DifferentialResult) -> BokehPlot:
         )
     plot._fig.legend.title = "Condition"
     plot._fig.legend.location = "top_right"
+    return plot
+
+
+def create_bcv_plot(data: DifferentialResult) -> BokehPlot:
+    """Create the edgeR biological coefficient of variation plot."""
+    bcv_data = data.bcv_data.sort_values("average_log_cpm", kind="stable")
+    source = ColumnDataSource(bcv_data)
+    plot = BokehPlot(
+        title="edgeR biological coefficient of variation (BCV)",
+        x_axis_label="Average log CPM",
+        y_axis_label="Biological coefficient of variation",
+        height=420,
+        sizing_mode="stretch_width",
+        tools="pan,wheel_zoom,box_zoom,save,reset",
+    )
+    points = plot._fig.scatter(
+        "average_log_cpm",
+        "tagwise_bcv",
+        source=source,
+        size=5,
+        fill_color="#333333",
+        fill_alpha=0.45,
+        line_color=None,
+        legend_label="Tagwise",
+    )
+    plot._fig.line(
+        "average_log_cpm",
+        "trended_bcv",
+        source=source,
+        line_color="#0072B2",
+        line_width=2.5,
+        legend_label="Trended",
+    )
+    common_bcv = float(bcv_data["common_bcv"].iloc[0])
+    x_limits = bcv_data["average_log_cpm"].agg(["min", "max"])
+    plot._fig.line(
+        [float(x_limits["min"]), float(x_limits["max"])],
+        [common_bcv, common_bcv],
+        line_color="#D55E00",
+        line_width=2,
+        line_dash="dashed",
+        legend_label="Common",
+    )
+    plot._fig.add_tools(
+        HoverTool(
+            renderers=[points],
+            tooltips=[
+                ("Feature", "@feature_id"),
+                ("Average log CPM", "@average_log_cpm{0.000}"),
+                ("Tagwise BCV", "@tagwise_bcv{0.000}"),
+                ("Tagwise dispersion", "@tagwise_dispersion{0.000}"),
+            ],
+        )
+    )
+    plot._fig.legend.location = "top_right"
+    plot._fig.legend.click_policy = "hide"
     return plot
 
 
@@ -774,6 +887,7 @@ def add_differential_analysis(
     tabs = Tabs()
     with tabs.add_tab("Overview"):
         EZChart(create_pca_plot(data), "epi2melabs", height="460px")
+        EZChart(create_bcv_plot(data), "epi2melabs", height="460px")
 
     with tabs.add_tab("Contrasts"):
         contrast_tabs = Tabs()

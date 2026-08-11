@@ -102,6 +102,23 @@ awk -F '\t' '
 
 test -s "${test_dir}/results/gene_set_resolution.tsv"
 test -s "${test_dir}/results/sample_metadata.tsv"
+test -s "${test_dir}/results/edgeR_bcv_data.tsv"
+awk -F '\t' '
+    NR == 1 && $0 != "feature_id\taverage_log_cpm\ttagwise_dispersion\ttagwise_bcv\ttrended_dispersion\ttrended_bcv\tcommon_dispersion\tcommon_bcv" {
+        print "Unexpected BCV export columns" > "/dev/stderr"
+        exit 1
+    }
+    NR > 1 && (NF != 8 || $1 == "" || $3 < 0 || $4 < 0 || $5 < 0 || $6 < 0 || $7 < 0 || $8 < 0) {
+        print "Invalid BCV export row" > "/dev/stderr"
+        exit 1
+    }
+    END {
+        if (NR < 2) {
+            print "BCV export contains no retained features" > "/dev/stderr"
+            exit 1
+        }
+    }
+' "${test_dir}/results/edgeR_bcv_data.tsv"
 test -s "${test_dir}/results/group_challenge_vs_baseline/fry_results.tsv"
 test -s "${test_dir}/results/group_challenge_vs_baseline/edgeR_results.tsv"
 test -s "${test_dir}/results/group_challenge_vs_baseline/fry_signed_significance.png"
@@ -121,6 +138,7 @@ awk -F '\t' '
     }
 ' "${test_dir}/direct_results/gene_set_coverage.tsv"
 test -s "${test_dir}/direct_results/sample_metadata.tsv"
+test -s "${test_dir}/direct_results/edgeR_bcv_data.tsv"
 test -s "${test_dir}/direct_results/group_challenge_vs_baseline/fry_results.tsv"
 
 printf 'Generic edgeR/GMT smoke test passed.\n'
