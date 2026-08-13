@@ -63,7 +63,7 @@ String qc_result_key(result) {
 process nanoplot_qc {
     label 'seq_lm_qc'
     container 'rnabioinfo/seq_lm_quality_control:v1.0.0'
-    cpus 1
+    cpus 4
 
     input:
         merged_bam: ChunkBAM
@@ -79,10 +79,10 @@ process nanoplot_qc {
     script:
         def output_dir: String = nanoplot_output_dir(merged_bam)
         """
-        bam-qc-table \
-            --threads ${task.cpus} \
-            --bam ${merged_bam.bam} \
-            --output ${output_dir}/NanoPlot-data.tsv.gz
+        seq_lm_qc \
+            --t ${task.cpus} \
+            --b ${merged_bam.bam} \
+            --o ${output_dir}/NanoPlot-data.tsv.gz
         """
 }
 
