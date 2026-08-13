@@ -26,7 +26,7 @@ record LivePathEvent {
  * BAMs that already exist under each sample directory. Later items contain the
  * live subset and are emitted only after every live sample produces one BAM.
  */
-def bam_ingress(ingress_args: BamIngressArgs) {
+def bam_ingress(ingress_args) {
     def samples: List<Sample> = get_samples(ingress_args)
     validate_samples(samples)
     return mixed_analysis_ingress(samples, ingress_args.live_analysis, samples.size())
@@ -37,11 +37,11 @@ def bam_ingress(ingress_args: BamIngressArgs) {
  * experiment_sample_count retains the complete sample-sheet size so restored
  * quantifications can satisfy the remaining differential-analysis inputs.
  */
-def bam_ingress(samples: List<Sample>, ingress_args: BamIngressArgs, experiment_sample_count: Integer) {
+def bam_ingress(samples: List<Sample>, ingress_args, experiment_sample_count: Integer) {
     return mixed_analysis_ingress(samples, ingress_args.live_analysis, experiment_sample_count)
 }
 
-def get_samples(ingress_args: BamIngressArgs) -> List<Sample> {
+def get_samples(ingress_args) -> List<Sample> {
     if (ingress_args.sample_sheet_path == null) {
         error("BAM ingress requires sample_sheet_path.")
     }
@@ -55,7 +55,7 @@ def get_samples(ingress_args: BamIngressArgs) -> List<Sample> {
     return parse_sample_sheet(ingress_args)
 }
 
-def parse_sample_sheet(ingress_args: BamIngressArgs) -> List<Sample> {
+def parse_sample_sheet(ingress_args) -> List<Sample> {
     def required_fields: Set<String> = ["alias", "group", "bam_dir"].toSet()
 
     return ingress_args.sample_sheet_path
@@ -143,11 +143,11 @@ def parse_is_live(value: Object, alias: Object) -> Boolean {
     )
 }
 
-def sample_key(sample: Sample) -> String {
+def sample_key(sample) -> String {
     return "${sample.group}\t${sample.name}"
 }
 
-def sample_label(sample: Sample) -> String {
+def sample_label(sample) -> String {
     return "${sample.group}/${sample.name}"
 }
 
@@ -240,7 +240,7 @@ def mixed_analysis_ingress(samples: List<Sample>, live_analysis: Boolean, experi
     return channel.of(startup_batch).concat(live_batches_ch)
 }
 
-def make_live_analysis_ingress_channel(sample: Sample, sample_index: Integer, initial_bams: List<Path>, stopped_samples: Set<String>, stopped_sample_count: java.util.concurrent.atomic.AtomicInteger, stopped_batch_counts: Map<String,Integer>, live_sample_count: Integer) {
+def make_live_analysis_ingress_channel(sample, sample_index: Integer, initial_bams: List<Path>, stopped_samples: Set<String>, stopped_sample_count: java.util.concurrent.atomic.AtomicInteger, stopped_batch_counts: Map<String,Integer>, live_sample_count: Integer) {
     def existing_stop_files: List<Path> = get_stop_files_in_dir(sample.bam_dir)
     def batch_index: Integer = 0
     def accepted_bam_paths: Set<String> = new LinkedHashSet<String>()
@@ -346,11 +346,11 @@ def make_live_analysis_ingress_channel(sample: Sample, sample_index: Integer, in
         }
 }
 
-def make_live_path_event(source: String, path: Path) -> LivePathEvent {
+def make_live_path_event(source: String, path: Path) {
     return record(source: source, path: path)
 }
 
-def log_sample_stop(sample: Sample, stop_path: Path, source: String, batch_count: Integer, stopped_samples: Set<String>, stopped_sample_count: java.util.concurrent.atomic.AtomicInteger, stopped_batch_counts: Map<String,Integer>, live_sample_count: Integer) {
+def log_sample_stop(sample, stop_path: Path, source: String, batch_count: Integer, stopped_samples: Set<String>, stopped_sample_count: java.util.concurrent.atomic.AtomicInteger, stopped_batch_counts: Map<String,Integer>, live_sample_count: Integer) {
     if (!stopped_samples.add(sample_key(sample))) {
         log.warn(
             "Duplicate STOP event for already stopped sample '${sample_label(sample)}': " + "source=${source}, path=${stop_path}."
@@ -388,11 +388,11 @@ def is_bam_path(path: Path) -> Boolean {
     return path.name.endsWith('.bam')
 }
 
-def make_sample_chunk_event(batch_index: Integer, sample_index: Integer, chunk: SampleChunk) -> SampleChunkEvent {
+def make_sample_chunk_event(batch_index: Integer, sample_index: Integer, chunk) {
     return record(batch_index: batch_index, sample_index: sample_index, chunk: chunk)
 }
 
-def make_sample_chunk(sample: Sample, bam_paths: List<Path>) -> SampleChunk {
+def make_sample_chunk(sample, bam_paths: List<Path>) {
     return record(sample: sample, bam_paths: sort_bam_paths(bam_paths))
 }
 

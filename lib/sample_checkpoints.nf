@@ -15,11 +15,11 @@ def sample_checkpoint_tools() -> Map<String,String> {
     return [samtools: 'rnabioinfo/seq_lm_samtools:v1.0.0', quality_control: 'rnabioinfo/seq_lm_quality_control:v1.0.0', oarfish: 'rnabioinfo/seq_lm_oarfish:v1.0.0']
 }
 
-def sample_checkpoint_key(sample: Sample) -> String {
+def sample_checkpoint_key(sample) -> String {
     return "${sample.group}\t${sample.name}"
 }
 
-def sample_output_dir(output_root: Path, sample: Sample) -> Path {
+def sample_output_dir(output_root: Path, sample) -> Path {
     return output_root.resolve(safe_name(sample.group)).resolve(safe_name(sample.name))
 }
 
@@ -28,7 +28,7 @@ def file_identity(path: Path) -> Map {
     return [path: canonical.toString(), size: java.nio.file.Files.size(canonical), mtime_ms: java.nio.file.Files.getLastModifiedTime(canonical).toMillis()]
 }
 
-def sample_bam_inventory(sample: Sample) -> List<Map> {
+def sample_bam_inventory(sample) -> List<Map> {
     def bams: List<Path> = []
     java.nio.file.Files
         .walk(sample.bam_dir)
@@ -124,7 +124,7 @@ def discover_sample_checkpoints(samples: List<Sample>, output_root: Path, genome
     return [restored: restored, active: active]
 }
 
-def validate_checkpoint_manifest(manifest: Map, sample: Sample, sample_dir: Path, genome: Path, annotation: Path) {
+def validate_checkpoint_manifest(manifest: Map, sample, sample_dir: Path, genome: Path, annotation: Path) {
     def problems: List<String> = []
     if (manifest.schema_version != sample_checkpoint_schema()) {
         problems.add("unsupported schema_version '${manifest.schema_version}'")
@@ -189,20 +189,20 @@ def validate_checkpoint_artifact(sample_dir: Path, artifact: Map, label: String,
     }
 }
 
-def checkpoint_error(sample: Sample, sample_dir: Path, reason: String) {
+def checkpoint_error(sample, sample_dir: Path, reason: String) {
     error(
         "Finalized sample checkpoint '${sample.group}/${sample.name}' is invalid: ${reason}. " + "Delete ${sample_dir} (or the complete output directory) and rerun to recompute it."
     )
 }
 
-def checkpoint_static_manifest(sample: Sample, genome: Path, annotation: Path) -> Map {
+def checkpoint_static_manifest(sample, genome: Path, annotation: Path) -> Map {
     return checkpoint_static_manifest(
         sample,
         [genome: file_identity(genome), annotation: file_identity(annotation)],
     )
 }
 
-def checkpoint_static_manifest(sample: Sample, reference_identity: Map) -> Map {
+def checkpoint_static_manifest(sample, reference_identity: Map) -> Map {
     return [schema_version: sample_checkpoint_schema(), sample: [name: sample.name, group: sample.group], bams: sample_bam_inventory(sample), reference: reference_identity, tools: sample_checkpoint_tools()]
 }
 

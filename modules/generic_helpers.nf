@@ -21,19 +21,19 @@ def shell_quote(value: String) -> String {
     return "'" + value.replace("'", "'\"'\"'") + "'"
 }
 
-def chunk_bam_name(batch_index: Integer, sample: Sample) -> String {
+def chunk_bam_name(batch_index: Integer, sample) -> String {
     return "${safe_name(sample.name)}_${batch_index}.chunk.bam"
 }
 
-def collated_chunk_bam_name(batch_index: Integer, sample: Sample) -> String {
+def collated_chunk_bam_name(batch_index: Integer, sample) -> String {
     return "${safe_name(sample.name)}_${batch_index}.chunk.collated.bam"
 }
 
-def cumulative_collated_bam_name(input_group: CumulativeCollatedBAMGroup) -> String {
+def cumulative_collated_bam_name(input_group) -> String {
     return "${safe_name(input_group.sample.name)}_${input_group.batch_index}.cumulative.collated.bam"
 }
 
-def nanoplot_output_dir(merged_bam: ChunkBAM) -> String {
+def nanoplot_output_dir(merged_bam) -> String {
     return "${safe_name(merged_bam.sample.name)}_${merged_bam.batch_index}.nanoplot"
 }
 
