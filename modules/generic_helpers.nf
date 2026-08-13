@@ -1,72 +1,72 @@
 nextflow.enable.types = true
 
 include {
-    ChunkBAM;
-    CumulativeCollatedBAMGroup;
+    ChunkBAM ;
+    CumulativeCollatedBAMGroup ;
     Sample
 } from '../lib/sample.nf'
 
-Path optional_file() {
-    return file("$projectDir/data/OPTIONAL_FILE")
+def optional_file() -> Path {
+    return file("${projectDir}/data/OPTIONAL_FILE")
 }
 
-String safe_name(String value) {
+def safe_name(value: String) -> String {
     return value.replaceAll(/[^A-Za-z0-9._-]/, '_')
 }
 
 /**
  * Quote arbitrary text as one POSIX shell argument for process scripts.
  */
-String shell_quote(String value) {
+def shell_quote(value: String) -> String {
     return "'" + value.replace("'", "'\"'\"'") + "'"
 }
 
-String chunk_bam_name(Integer batch_index, Sample sample) {
+def chunk_bam_name(batch_index: Integer, sample: Sample) -> String {
     return "${safe_name(sample.name)}_${batch_index}.chunk.bam"
 }
 
-String collated_chunk_bam_name(Integer batch_index, Sample sample) {
+def collated_chunk_bam_name(batch_index: Integer, sample: Sample) -> String {
     return "${safe_name(sample.name)}_${batch_index}.chunk.collated.bam"
 }
 
-String cumulative_collated_bam_name(CumulativeCollatedBAMGroup input_group) {
+def cumulative_collated_bam_name(input_group: CumulativeCollatedBAMGroup) -> String {
     return "${safe_name(input_group.sample.name)}_${input_group.batch_index}.cumulative.collated.bam"
 }
 
-String nanoplot_output_dir(ChunkBAM merged_bam) {
+def nanoplot_output_dir(merged_bam: ChunkBAM) -> String {
     return "${safe_name(merged_bam.sample.name)}_${merged_bam.batch_index}.nanoplot"
 }
 
-String flagstat_file_name(Integer batch_index, String sample_name) {
+def flagstat_file_name(batch_index: Integer, sample_name: String) -> String {
     return "${safe_name(sample_name)}_${batch_index}.flagstat.tsv"
 }
 
-String oarfish_out_name(Integer batch_index, String sample_name) {
+def oarfish_out_name(batch_index: Integer, sample_name: String) -> String {
     return "${safe_name(sample_name)}_${batch_index}"
 }
 
-String oarfish_counts_file_name(Integer batch_index, String sample_name) {
+def oarfish_counts_file_name(batch_index: Integer, sample_name: String) -> String {
     return "${oarfish_out_name(batch_index, sample_name)}.quant"
 }
 
-String differential_expression_results_dir(Integer batch_index) {
+def differential_expression_results_dir(batch_index: Integer) -> String {
     return "batch_${batch_index}"
 }
 
-String get_sample_path(Map meta) {
+def get_sample_path(meta: Map) -> String {
     return "${meta['runName']}/${meta['replicateName']}"
 }
 
-Path get_seq_summary_file(Path bam_file) {
-    Path summary_file = file("${bam_file.parent}/seq_summary.txt")
+def get_seq_summary_file(bam_file: Path) -> Path {
+    def summary_file: Path = file("${bam_file.parent}/seq_summary.txt")
     if (summary_file.exists()) {
         return summary_file
     }
     return optional_file()
 }
 
-Map get_sequencing_arguments(Path _run_dir) {
-    Map args = [:]
+def get_sequencing_arguments(_run_dir: Path) -> Map {
+    def args: Map = [:]
     args['experiment_id'] = params.ex_name
     args['run_id'] = params.ex_run_number
     args['kit'] = params.ex_kit
@@ -77,55 +77,65 @@ Map get_sequencing_arguments(Path _run_dir) {
     return args
 }
 
-def validate_experiment_dir(String experiment_path, int run_number) {
+def validate_experiment_dir(experiment_path: Path, run_number: Integer) {
     def experiment_dir = new File(experiment_path)
     if (!experiment_dir.exists()) {
         experiment_dir.mkdirs()
-    } else if (!experiment_dir.isDirectory()) {
+    }
+    else if (!experiment_dir.isDirectory()) {
         throw new RuntimeException("Experiment directory ${experiment_path} is not a directory.")
-    } else if (!experiment_dir.canWrite()) {
+    }
+    else if (!experiment_dir.canWrite()) {
         throw new RuntimeException("Experiment directory ${experiment_path} is not writable.")
-    } else if (!experiment_dir.canRead()) {
+    }
+    else if (!experiment_dir.canRead()) {
         throw new RuntimeException("Experiment directory ${experiment_path} is not readable.")
     }
 
-    String config_file_name = "experiment.config"
-    File config_file = new File(experiment_path, config_file_name)
-    boolean config_file_exists = config_file.exists()
-    if (!config_file_exists && run_number > 1 ) {
+    def config_file_name: String = "experiment.config"
+    def config_file = new File(experiment_path, config_file_name)
+    def config_file_exists = config_file.exists()
+    if (!config_file_exists && run_number > 1) {
         throw new RuntimeException("Experiment directory ${experiment_path} does not contain a configuration file.")
-    } else if ( config_file_exists && run_number == 1 ) {
+    }
+    else if (config_file_exists && run_number == 1) {
         throw new RuntimeException("Experiment directory ${experiment_path} already contains a configuration file.")
     }
 }
 
-Boolean is_empty(path) {
-    java.nio.file.Files.newDirectoryStream(path).withCloseable { directory ->
-        !directory.iterator().hasNext()
-    }
+def is_empty(path) -> Boolean {
+    java.nio.file.Files
+        .newDirectoryStream(path)
+        .withCloseable { directory ->
+            !directory.iterator().hasNext()
+        }
 }
 
 process get_versions {
     label 'preproc'
     cpus 1
+
     output:
-        file('versions.txt')
+    file('versions.txt')
+
     script:
-        """
-        python -c "import pysam; print(f'pysam,{pysam.__version__}')" >> versions.txt
-        """
+    """
+    python -c "import pysam; print(f'pysam,{pysam.__version__}')" >> versions.txt
+    """
 }
 
 process get_params {
     label 'seq_lm'
     cpus 1
+
     output:
-        file('params.json')
+    file('params.json')
+
     script:
-        def paramsJSON = new groovy.json.JsonBuilder(params).toPrettyString()
+    def paramsJSON = new groovy.json.JsonBuilder(params).toPrettyString()
     """
     # Output nextflow params object to JSON
-    echo '$paramsJSON' > params.json
+    echo '${paramsJSON}' > params.json
     """
 }
 
@@ -137,17 +147,16 @@ process output {
     // publish inputs to output directory
     debug true
     label 'seq_lm'
-    publishDir(
-        params.out_dir,
-        mode: 'copy',
-        saveAs: { dirname ? "$dirname/$fname" : fname }
-    )
+    publishDir params.out_dir, mode: 'copy', saveAs: { dirname ? "${dirname}/${fname}" : fname }
+
     input:
-        tuple(fname: Path, dirname: String?)
+    tuple(fname: Path, dirname: String?)
+
     output:
-        file(fname.name)
+    file(fname.name)
+
     script:
-        '''
+    '''
         '''
 }
 
@@ -162,30 +171,20 @@ process publish_differential_results {
     maxForks 1
     fair true
 
-    publishDir(
-        "${params.out_dir}/differential_expression",
-        mode: 'copy',
-        overwrite: false,
-        saveAs: { _fname -> "batch_${analysis_index}" }
-    )
-    publishDir(
-        "${params.out_dir}/differential_expression",
-        mode: 'copy',
-        overwrite: true,
-        saveAs: { _fname -> 'latest' }
-    )
+    publishDir "${params.out_dir}/differential_expression", mode: 'copy', overwrite: false, saveAs: { _fname -> "batch_${analysis_index}" }
+    publishDir "${params.out_dir}/differential_expression", mode: 'copy', overwrite: true, saveAs: { _fname -> 'latest' }
 
     input:
-        tuple(local_batch_index: Integer, analysis_index: Integer, results: Path)
+    tuple(local_batch_index: Integer, analysis_index: Integer, results: Path)
 
     output:
-        record(
-            batch_index: local_batch_index,
-            analysis_index: analysis_index,
-            results: file(results.name)
-        )
+    record(
+        batch_index: local_batch_index,
+        analysis_index: analysis_index,
+        results: file(results.name),
+    )
 
     script:
-        '''
+    '''
         '''
 }

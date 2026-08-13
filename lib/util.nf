@@ -9,48 +9,48 @@ nextflow.enable.types = true
  */
 workflow order_batches {
     take:
-        batches: Channel
+    batches: Channel
 
     main:
-        Map<Integer, Object> pending_batches = [:]
-        Integer next_batch_index = 0
-        ordered_batches_ch = batches.flatMap { batch ->
-            if (pending_batches.containsKey(batch.batch_index)) {
-                error("Received duplicate completed batch index ${batch.batch_index}.")
-            }
-            pending_batches[batch.batch_index] = batch
-
-            List<Integer> ready_indices = pending_batches
-                .keySet()
-                .toSorted()
-                .withIndex()
-                .findAll { entry -> entry[0] == next_batch_index + entry[1] }
-                .collect { entry -> entry[0] as Integer }
-            List ready_batches = ready_indices.collect { Integer batch_index ->
-                pending_batches.remove(batch_index)
-            }
-            next_batch_index += ready_indices.size()
-            return ready_batches
+    def pending_batches: Map<Integer,Object> = [:]
+    def next_batch_index: Integer = 0
+    ordered_batches_ch = batches.flatMap { batch ->
+        if (pending_batches.containsKey(batch.batch_index)) {
+            error("Received duplicate completed batch index ${batch.batch_index}.")
         }
+        pending_batches[batch.batch_index] = batch
+
+        def ready_indices: List<Integer> = pending_batches
+            .keySet()
+            .toSorted()
+            .withIndex()
+            .findAll { entry -> entry[0] == next_batch_index + entry[1] }
+            .collect { entry -> entry[0] as Integer }
+        def ready_batches: List = ready_indices.collect { batch_index: Integer ->
+            pending_batches.remove(batch_index)
+        }
+        next_batch_index += ready_indices.size()
+        return ready_batches
+    }
 
     emit:
-        ordered_batches_ch
+    ordered_batches_ch
 }
 
-String get_sample_path(Map meta) {
+def get_sample_path(meta: Map) -> String {
     return "${meta['runName']}/${meta['replicateName']}"
 }
 
-Path get_seq_summary_file(Path bam_file) {
-    Path summary_file = file("${bam_file.parent}/seq_summary.txt")
+def get_seq_summary_file(bam_file: Path) -> Path {
+    def summary_file: Path = file("${bam_file.parent}/seq_summary.txt")
     if (summary_file.exists()) {
         return summary_file
     }
-    return file("$projectDir/data/OPTIONAL_FILE")
+    return file("${projectDir}/data/OPTIONAL_FILE")
 }
 
-Map get_sequencing_arguments(Path _run_dir) {
-    Map args = [:]
+def get_sequencing_arguments(_run_dir: Path) -> Map {
+    def args: Map = [:]
     args['experiment_id'] = params.ex_name
     args['run_id'] = params.ex_run_number
     args['kit'] = params.ex_kit

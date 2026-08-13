@@ -1,12 +1,12 @@
 nextflow.enable.types = true
 
 include {
-    ChunkBAM;
-    ChunkQCResult;
-    FlagstatQCResult;
+    ChunkBAM ;
+    ChunkQCResult ;
+    FlagstatQCResult ;
     NanoPlotQCResult
 } from '../lib/sample.nf'
-include { flagstat_file_name; nanoplot_output_dir } from '../modules/generic_helpers.nf'
+include { flagstat_file_name ; nanoplot_output_dir } from '../modules/generic_helpers.nf'
 
 /**
  * Run chunk-level QC for each merged sample chunk.
@@ -17,41 +17,42 @@ include { flagstat_file_name; nanoplot_output_dir } from '../modules/generic_hel
  */
 workflow quality_control {
     take:
-        merged_bams: Channel<ChunkBAM>
+    merged_bams: Channel<ChunkBAM>
 
     main:
-        nanoplot_qc_ch = nanoplot_qc(merged_bams)
-        flagstat_qc_ch = samtools_flagstat_qc(merged_bams)
-        qc_results_ch = nanoplot_qc_ch
-            .map { result ->
+    nanoplot_qc_ch = nanoplot_qc(merged_bams)
+    flagstat_qc_ch = samtools_flagstat_qc(merged_bams)
+    qc_results_ch = nanoplot_qc_ch
+        .map { result ->
+            record(
+                qc_key: qc_result_key(result),
+                nanoplot_result: result,
+            )
+        }
+        .join(
+            flagstat_qc_ch.map { result ->
                 record(
                     qc_key: qc_result_key(result),
-                    nanoplot_result: result
+                    flagstat_result: result,
                 )
-            }
-            .join(flagstat_qc_ch.map { result ->
-                    record(
-                        qc_key: qc_result_key(result),
-                        flagstat_result: result
-                    )
-                },
-                by: 'qc_key'
+            },
+            by: 'qc_key'
+        )
+        .map { joined ->
+            record(
+                batch_index: joined.nanoplot_result.batch_index,
+                sample: joined.nanoplot_result.sample,
+                bam: joined.nanoplot_result.bam,
+                nanoplot_data: joined.nanoplot_result.nanoplot_data,
+                flagstat: joined.flagstat_result.flagstat,
             )
-            .map { joined ->
-                record(
-                    batch_index: joined.nanoplot_result.batch_index,
-                    sample: joined.nanoplot_result.sample,
-                    bam: joined.nanoplot_result.bam,
-                    nanoplot_data: joined.nanoplot_result.nanoplot_data,
-                    flagstat: joined.flagstat_result.flagstat
-                )
-            }
+        }
 
     emit:
-        qc_results_ch
+    qc_results_ch
 }
 
-String qc_result_key(result) {
+def qc_result_key(result) -> String {
     return "${result.batch_index}\t${result.sample.group}\t${result.sample.name}"
 }
 
@@ -66,25 +67,25 @@ process nanoplot_qc {
     cpus 4
 
     input:
-        merged_bam: ChunkBAM
+    merged_bam: ChunkBAM
 
     output:
-        record(
-            batch_index: merged_bam.batch_index,
-            sample: merged_bam.sample,
-            bam: merged_bam.bam,
-            nanoplot_data: file("${nanoplot_output_dir(merged_bam)}/NanoPlot-data.tsv.gz")
-        )
+    record(
+        batch_index: merged_bam.batch_index,
+        sample: merged_bam.sample,
+        bam: merged_bam.bam,
+        nanoplot_data: file("${nanoplot_output_dir(merged_bam)}/NanoPlot-data.tsv.gz"),
+    )
 
     script:
-        def output_dir: String = nanoplot_output_dir(merged_bam)
-        """
-        mkdir -p ${output_dir}
-        seq_lm_qc \
-            -t ${task.cpus} \
-            -b ${merged_bam.bam} \
-            -o ${output_dir}/NanoPlot-data.tsv.gz
-        """
+    def output_dir: String = nanoplot_output_dir(merged_bam)
+    """
+    mkdir -p ${output_dir}
+    seq_lm_qc \
+        -t ${task.cpus} \
+        -b ${merged_bam.bam} \
+        -o ${output_dir}/NanoPlot-data.tsv.gz
+    """
 }
 
 /**
@@ -97,19 +98,19 @@ process samtools_flagstat_qc {
     cpus 2
 
     input:
-        merged_bam: ChunkBAM
+    merged_bam: ChunkBAM
 
     output:
-        record(
-            batch_index: merged_bam.batch_index,
-            sample: merged_bam.sample,
-            bam: merged_bam.bam,
-            flagstat: file(flagstat_file_name(merged_bam.batch_index, merged_bam.sample.name))
-        )
+    record(
+        batch_index: merged_bam.batch_index,
+        sample: merged_bam.sample,
+        bam: merged_bam.bam,
+        flagstat: file(flagstat_file_name(merged_bam.batch_index, merged_bam.sample.name)),
+    )
 
     script:
-        def flagstat: String = flagstat_file_name(merged_bam.batch_index, merged_bam.sample.name)
-        """
+    def flagstat: String = flagstat_file_name(merged_bam.batch_index, merged_bam.sample.name)
+    """
         samtools flagstat -@ ${task.cpus - 1} -O tsv ${merged_bam.bam} > ${flagstat}
         """
 }

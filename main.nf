@@ -2,25 +2,25 @@
 
 nextflow.enable.types = true
 
-include { bam_ingress; get_samples; validate_samples } from './lib/bam_ingress.nf'
+include { bam_ingress ; get_samples ; validate_samples } from './lib/bam_ingress.nf'
 include {
-    ChunkQCResult;
-    Sample;
-    SampleBatchSize;
+    ChunkQCResult ;
+    Sample ;
+    SampleBatchSize ;
     SampleChunkBAMGroup
 } from './lib/sample.nf'
 include {
-    chunk_bam_name;
-    optional_file;
-    shell_quote;
-    safe_name;
-    output;
+    chunk_bam_name ;
+    optional_file ;
+    shell_quote ;
+    safe_name ;
+    output ;
     publish_differential_results
 } from './modules/generic_helpers.nf'
 include {
-    qc_report_copy_commands;
-    qc_report_root_dir;
-    accumulate_qc_report_chunk_state;
+    qc_report_copy_commands ;
+    qc_report_root_dir ;
+    accumulate_qc_report_chunk_state ;
     qc_report_inputs_from_state
 } from './modules/qc_report_helpers.nf'
 include { join_report_batches } from './modules/report_batches.nf'
@@ -28,10 +28,10 @@ include { quality_control } from './subworkflows/quality_control.nf'
 include { differential_expression } from './subworkflows/differential_expression.nf'
 include { order_batches } from './lib/util.nf'
 include {
-    discover_sample_checkpoints;
-    file_identity;
-    next_analysis_snapshot_index;
-    sample_checkpoint_key;
+    discover_sample_checkpoints ;
+    file_identity ;
+    next_analysis_snapshot_index ;
+    sample_checkpoint_key ;
     write_sample_checkpoints
 } from './lib/sample_checkpoints.nf'
 
@@ -39,54 +39,59 @@ include {
 process write_config {
     label 'seq_lm'
     cpus 1
+
     exec:
-        log.info 'Writing config file...'
+    log.info('Writing config file...')
 
-        // Writing experiment config file should only happen at the first run of the experiment
-        def configOut = new File("${params.out_dir}/experiment.config")
+    // Writing experiment config file should only happen at the first run of the experiment
+    def configOut = new File("${params.out_dir}/experiment.config")
 
-        configOut.withWriter { w ->
-            w << 'params {\n'
-            params.each { k, v ->
-                if (k.startsWith('ex')) {
-                    if (k == 'ex_run_number') {
-                        v = v + 1
-                    }
-                    def line = ''
-                    if (v instanceof String) {
-                        line = "\t${k} = \"${v}\"\n"
-                    } else {
-                        line = "\t${k} = ${v}\n"
-                    }
-                    w << line
+    configOut.withWriter { w ->
+        w << 'params {\n'
+        params.each { k, v ->
+            if (k.startsWith('ex')) {
+                if (k == 'ex_run_number') {
+                    v = v + 1
                 }
+                def line = ''
+                if (v instanceof String) {
+                    line = "\t${k} = \"${v}\"\n"
+                }
+                else {
+                    line = "\t${k} = ${v}\n"
+                }
+                w << line
             }
-            w << '}\n'
         }
+        w << '}\n'
+    }
 }
 
 process make_report {
     label 'seq_lm'
+
     input:
-        metadata: Map
-        per_read_stats: Path
-        versions: Path
-        params_json: Path
+    metadata: Map
+    per_read_stats: Path
+    versions: Path
+    params_json: Path
+
     stage:
-        stageAs versions, 'versions/*'
-        stageAs params_json, 'params.json'
+    stageAs versions, 'versions/*'
+    stageAs params_json, 'params.json'
+
     output:
-        file('wf-template-*.html')
+    file('wf-template-*.html')
+
     script:
-        String report_name = 'wf-template-report.html'
-        String metadataJSON = new groovy.json.JsonBuilder(metadata).toPrettyString()
-        String stats_args = \
-            (per_read_stats.name == optional_file().name) ? '' : "--stats $per_read_stats"
-        """
+    def report_name: String = 'wf-template-report.html'
+    def metadataJSON: String = new groovy.json.JsonBuilder(metadata).toPrettyString()
+    def stats_args: String = (per_read_stats.name == optional_file().name) ? '' : "--stats ${per_read_stats}"
+    """
         echo '${metadataJSON}' > metadata.json
-        workflow-glue report $report_name \
+        workflow-glue report ${report_name} \
             --versions versions \
-            $stats_args \
+            ${stats_args} \
             --params params.json \
             --metadata metadata.json
         """
@@ -98,25 +103,27 @@ process prepare_chunk_bam {
     cpus 1
 
     input:
-        input_group: SampleChunkBAMGroup
+    input_group: SampleChunkBAMGroup
 
     stage:
-        stageAs input_group.bams, 'bam?'
+    stageAs input_group.bams, 'bam?'
 
     output:
-        record(
-            batch_index: input_group.batch_index,
-            sample: input_group.sample,
-            bam: file(chunk_bam_name(input_group.batch_index, input_group.sample))
-        )
+    record(
+        batch_index: input_group.batch_index,
+        sample: input_group.sample,
+        bam: file(chunk_bam_name(input_group.batch_index, input_group.sample)),
+    )
 
     script:
-        def chunk_bam: String = chunk_bam_name(input_group.batch_index, input_group.sample)
-        def chunk_bam_arg: String = shell_quote(chunk_bam)
-        def bam_args: String = input_group.bams.collect { Path bam -> shell_quote(bam.toString()) }.join(' ')
-        def prepare_chunk: String = input_group.bams.size() == 1 ? """
+    def chunk_bam: String = chunk_bam_name(input_group.batch_index, input_group.sample)
+    def chunk_bam_arg: String = shell_quote(chunk_bam)
+    def bam_args: String = input_group.bams.collect { bam: Path -> shell_quote(bam.toString()) }.join(' ')
+    def prepare_chunk: String = input_group.bams.size() == 1
+        ? """
             ln -s -- ${bam_args} ${chunk_bam_arg}
-        """ : """
+        """
+        : """
             : > bams.txt
             printf '%s\\n' ${bam_args} > bams.txt
 
@@ -137,7 +144,7 @@ process prepare_chunk_bam {
 
             samtools cat -o ${chunk_bam_arg} -b bams.txt
         """
-        """
+    """
         ${prepare_chunk}
         """
 }
@@ -149,27 +156,27 @@ process qc_report_input_tree {
     maxForks 1
 
     input:
-        qc_report_inputs: Map
-        nanoplot_inputs: List<Path>
-        flagstat_inputs: List<Path>
+    qc_report_inputs: Map
+    nanoplot_inputs: List<Path>
+    flagstat_inputs: List<Path>
 
     stage:
-        stageAs nanoplot_inputs, 'qc_report_sources/nanoplot/input?/NanoPlot-data.tsv.gz'
-        stageAs flagstat_inputs, 'qc_report_sources/flagstat/input?/*'
+    stageAs nanoplot_inputs, 'qc_report_sources/nanoplot/input?/NanoPlot-data.tsv.gz'
+    stageAs flagstat_inputs, 'qc_report_sources/flagstat/input?/*'
 
     output:
-        record(
-            qc_report_inputs: qc_report_inputs,
-            qc_results: file(qc_report_root_dir())
-        )
+    record(
+        qc_report_inputs: qc_report_inputs,
+        qc_results: file(qc_report_root_dir()),
+    )
 
     script:
-        def copy_commands: String = qc_report_copy_commands(
-            qc_report_inputs.report_inputs_list,
-            nanoplot_inputs,
-            flagstat_inputs
-        )
-        """
+    def copy_commands: String = qc_report_copy_commands(
+        qc_report_inputs.report_inputs_list,
+        nanoplot_inputs,
+        flagstat_inputs,
+    )
+    """
         ${copy_commands}
         """
 }
@@ -184,34 +191,30 @@ process qc_report {
     cpus 1
     maxForks 1
 
-    publishDir(
-        params.out_dir,
-        mode: 'copy',
-        pattern: 'qc_report*',
-        overwrite: true
-    )
+    publishDir params.out_dir, mode: 'copy', pattern: 'qc_report*', overwrite: true
 
     input:
-        qc_report_inputs: Map
-        qc_results: Path
-        differential_results: Path
+    qc_report_inputs: Map
+    qc_results: Path
+    differential_results: Path
 
     stage:
-        stageAs qc_results, 'qc_results'
-        stageAs differential_results, 'differential_results'
+    stageAs qc_results, 'qc_results'
+    stageAs differential_results, 'differential_results'
 
     output:
-        report_files = files('qc_report*', arity: '3')
+    report_files = files('qc_report*', arity: '3')
 
     script:
-        def rows: String = qc_report_inputs.rows
-        def quoted_rows: String = shell_quote(rows)
-        def params_json: String = new groovy.json.JsonBuilder(params).toPrettyString()
-        def quoted_params_json: String = shell_quote(params_json)
-        def differential_args: String = params.differential_expression ? \
-            '--differential-results differential_results' : ''
-        def gene_set_args: String = params.gene_set_enrichment ? '--gene-set-enrichment' : ''
-        """
+    def rows: String = qc_report_inputs.rows
+    def quoted_rows: String = shell_quote(rows)
+    def params_json: String = new groovy.json.JsonBuilder(params).toPrettyString()
+    def quoted_params_json: String = shell_quote(params_json)
+    def differential_args: String = params.differential_expression
+        ? '--differential-results differential_results'
+        : ''
+    def gene_set_args: String = params.gene_set_enrichment ? '--gene-set-enrichment' : ''
+    """
         printf 'name\\tgroup\\tchunks_seen\\tlatest_batch_index\\tqc_dir\\n' > report_samples.tsv
         printf '%s\\n' ${quoted_rows} >> report_samples.tsv
 
@@ -237,207 +240,201 @@ process qc_report {
 // workflow module
 workflow sample_pipeline {
     take:
-        sample_batches: Channel
-        restored_quantifications: List
-        restored_qc_results: List
-        fresh_sample_count: Integer
-        first_analysis_index: Integer
-        reference_genome: Path
-        reference_annotation: Path
-        gene_sets: Path
-        differential_expression_enabled: Boolean
-        gene_set_enrichment_enabled: Boolean
+    sample_batches: Channel
+    restored_quantifications: List
+    restored_qc_results: List
+    fresh_sample_count: Integer
+    first_analysis_index: Integer
+    reference_genome: Path
+    reference_annotation: Path
+    gene_sets: Path
+    differential_expression_enabled: Boolean
+    gene_set_enrichment_enabled: Boolean
+
     main:
-        /*
+    /*
          * `bam_ingress` emits synchronized sample batches. The pipeline spreads
          * each non-empty batch into one record per sample chunk, prepares a
          * sequential BAM for QC, and then refreshes the live QC report after
          * each complete batch. Keep this flow in channel operators; only use
          * Groovy helpers for naming and report-state formatting.
          */
-        sample_batch_size_ch = sample_batches
-            .map { batch ->
+    sample_batch_size_ch = sample_batches.map { batch ->
+        record(
+            batch_index: batch.batch_index,
+            active_sample_count: batch.chunks.count { chunk -> !chunk.bam_paths.isEmpty() },
+            experiment_sample_count: batch.experiment_sample_count,
+        )
+    }
+
+    sample_chunk_bam_group_ch = sample_batches.flatMap { batch ->
+        batch.chunks
+            .findAll { chunk -> !chunk.bam_paths.isEmpty() }
+            .collect { chunk ->
                 record(
                     batch_index: batch.batch_index,
-                    active_sample_count: batch.chunks.count { chunk -> !chunk.bam_paths.isEmpty() },
-                    experiment_sample_count: batch.experiment_sample_count
+                    sample: chunk.sample,
+                    bams: chunk.bam_paths,
                 )
             }
+    }
 
-        sample_chunk_bam_group_ch = sample_batches
-            .flatMap { batch ->
-                batch.chunks
-                    .findAll { chunk -> !chunk.bam_paths.isEmpty() }
-                    .collect { chunk ->
-                        record(
-                            batch_index: batch.batch_index,
-                            sample: chunk.sample,
-                            bams: chunk.bam_paths
-                        )
-                    }
-            }
-
-        merged_chunk_bam_ch = prepare_chunk_bam(sample_chunk_bam_group_ch)
-        qc_result_ch = quality_control(merged_chunk_bam_ch)
-        if (differential_expression_enabled) {
-            differential_expression(
-                merged_chunk_bam_ch,
-                sample_batch_size_ch,
-                restored_quantifications,
-                first_analysis_index,
-                reference_genome,
-                reference_annotation,
-                gene_sets,
-                gene_set_enrichment_enabled
-            )
-            quantified_samples_ch = differential_expression.out.quantifications
-            differential_results_ch = differential_expression.out.results
-
-            quantification_output_ch = quantified_samples_ch
-                .map { quantified_sample ->
-                    tuple(
-                        quantified_sample.counts,
-                        "${safe_name(quantified_sample.sample.group)}/${safe_name(quantified_sample.sample.name)}/quantification"
-                    )
-                }
-            output(quantification_output_ch)
-            published_differential_results_ch = publish_differential_results(
-                differential_results_ch.map { result ->
-                    tuple(result.batch_index, result.analysis_index, result.results)
-                }
-            )
-        }
-
-        if (differential_expression_enabled && fresh_sample_count > 0) {
-            checkpoint_quantifications_ch = quantified_samples_ch
-                .collect()
-                .map { collected_quantifications ->
-                    collected_quantifications.toList().toSorted { left, right ->
-                        sample_checkpoint_key(left.sample) <=> sample_checkpoint_key(right.sample) ?:
-                            left.batch_index <=> right.batch_index
-                    }
-                }
-            checkpoint_qc_results_ch = qc_result_ch
-                .collect()
-                .map { collected_qc_results ->
-                    collected_qc_results.toList().toSorted { left, right ->
-                        sample_checkpoint_key(left.sample) <=> sample_checkpoint_key(right.sample) ?:
-                            left.batch_index <=> right.batch_index
-                    }
-                }
-            write_sample_checkpoints(
-                checkpoint_quantifications_ch,
-                checkpoint_qc_results_ch,
-                [
-                    genome: file_identity(reference_genome),
-                    annotation: file_identity(reference_annotation)
-                ]
-            )
-        }
-
-        def pending_qc_batches: Map<Integer, List<ChunkQCResult>>  = [:]
-        nonempty_qc_report_chunk_result_batches_ch = qc_result_ch
-            .join(sample_batch_size_ch, by: 'batch_index')
-            .map { joined ->
-                def result: ChunkQCResult = record(
-                    batch_index: joined.batch_index,
-                    sample: joined.sample,
-                    bam: joined.bam,
-                    nanoplot_data: joined.nanoplot_data,
-                    flagstat: joined.flagstat
-                )
-                def chunk_results: List<ChunkQCResult> = pending_qc_batches.computeIfAbsent(
-                    joined.batch_index
-                ) { [] }
-                chunk_results.add(result)
-                if (chunk_results.size() < joined.active_sample_count) {
-                    return null
-                }
-                if (chunk_results.size() > joined.active_sample_count) {
-                    error(
-                        "QC batch ${joined.batch_index} received more than " +
-                        "${joined.active_sample_count} result(s)."
-                    )
-                }
-                pending_qc_batches.remove(joined.batch_index)
-                return record(
-                    batch_index: joined.batch_index,
-                    chunk_results: chunk_results
-                )
-            }
-            .filter { batch -> batch != null }
-
-        empty_qc_report_chunk_result_batches_ch = sample_batch_size_ch
-            .filter { SampleBatchSize batch_size -> batch_size.active_sample_count == 0 }
-            .map { SampleBatchSize batch_size ->
-                record(batch_index: batch_size.batch_index, chunk_results: [])
-            }
-
-        qc_report_chunk_result_batches_ch = order_batches(
-            nonempty_qc_report_chunk_result_batches_ch
-                .mix(empty_qc_report_chunk_result_batches_ch)
+    merged_chunk_bam_ch = prepare_chunk_bam(sample_chunk_bam_group_ch)
+    qc_result_ch = quality_control(merged_chunk_bam_ch)
+    if (differential_expression_enabled) {
+        differential_expression(
+            merged_chunk_bam_ch,
+            sample_batch_size_ch,
+            restored_quantifications,
+            first_analysis_index,
+            reference_genome,
+            reference_annotation,
+            gene_sets,
+            gene_set_enrichment_enabled,
         )
-        def qc_report_state: Map<String, List<ChunkQCResult>> = [:]
-        restored_qc_results.each { ChunkQCResult qc_result ->
-            def key: String = sample_checkpoint_key(qc_result.sample)
-            def sample_results: List<ChunkQCResult> = qc_report_state.containsKey(key) ? qc_report_state[key] : []
-            qc_report_state[key] = (sample_results + [qc_result]).toSorted { left, right ->
-                left.batch_index <=> right.batch_index
-            }
+        quantified_samples_ch = differential_expression.out.quantifications
+        differential_results_ch = differential_expression.out.results
+
+        quantification_output_ch = quantified_samples_ch.map { quantified_sample ->
+            tuple(
+                quantified_sample.counts,
+                "${safe_name(quantified_sample.sample.group)}/${safe_name(quantified_sample.sample.name)}/quantification",
+            )
         }
-        qc_report_inputs_ch = qc_report_chunk_result_batches_ch.flatMap { batch ->
-                if (batch.chunk_results.empty) {
-                    return qc_report_state.empty ? [] : [qc_report_inputs_from_state(
-                        batch.batch_index,
-                        qc_report_state
-                    )]
-                }
-                return [accumulate_qc_report_chunk_state(
-                    qc_report_state,
+        output(quantification_output_ch)
+        published_differential_results_ch = publish_differential_results(
+            differential_results_ch.map { result ->
+                tuple(result.batch_index, result.analysis_index, result.results)
+            }
+        )
+    }
+
+    if (differential_expression_enabled && fresh_sample_count > 0) {
+        checkpoint_quantifications_ch = quantified_samples_ch
+            .collect()
+            .map { collected_quantifications ->
+                collected_quantifications
+                    .toList()
+                    .toSorted { left, right ->
+                        sample_checkpoint_key(left.sample) <=> sample_checkpoint_key(right.sample) ?: left.batch_index <=> right.batch_index
+                    }
+            }
+        checkpoint_qc_results_ch = qc_result_ch
+            .collect()
+            .map { collected_qc_results ->
+                collected_qc_results
+                    .toList()
+                    .toSorted { left, right ->
+                        sample_checkpoint_key(left.sample) <=> sample_checkpoint_key(right.sample) ?: left.batch_index <=> right.batch_index
+                    }
+            }
+        write_sample_checkpoints(
+            checkpoint_quantifications_ch,
+            checkpoint_qc_results_ch,
+            [genome: file_identity(reference_genome), annotation: file_identity(reference_annotation)],
+        )
+    }
+
+    def pending_qc_batches: Map<Integer, List<ChunkQCResult>> = [:]
+    nonempty_qc_report_chunk_result_batches_ch = qc_result_ch
+        .join(sample_batch_size_ch, by: 'batch_index')
+        .map { joined ->
+            def result: ChunkQCResult = record(
+                batch_index: joined.batch_index,
+                sample: joined.sample,
+                bam: joined.bam,
+                nanoplot_data: joined.nanoplot_data,
+                flagstat: joined.flagstat,
+            )
+            def chunk_results: List<ChunkQCResult> = pending_qc_batches.computeIfAbsent(
+                joined.batch_index
+            ) { [] }
+            chunk_results.add(result)
+            if (chunk_results.size() < joined.active_sample_count) {
+                return null
+            }
+            if (chunk_results.size() > joined.active_sample_count) {
+                error(
+                    "QC batch ${joined.batch_index} received more than " + "${joined.active_sample_count} result(s)."
+                )
+            }
+            pending_qc_batches.remove(joined.batch_index)
+            return record(
+                batch_index: joined.batch_index,
+                chunk_results: chunk_results,
+            )
+        }
+        .filter { batch -> batch != null }
+
+    empty_qc_report_chunk_result_batches_ch = sample_batch_size_ch
+        .filter { batch_size -> batch_size.active_sample_count == 0 }
+        .map { batch_size ->
+            record(batch_index: batch_size.batch_index, chunk_results: [])
+        }
+
+    qc_report_chunk_result_batches_ch = order_batches(
+        nonempty_qc_report_chunk_result_batches_ch.mix(empty_qc_report_chunk_result_batches_ch)
+    )
+    def qc_report_state: Map<String, List<ChunkQCResult>> = [:]
+    restored_qc_results.each { qc_result ->
+        def key: String = sample_checkpoint_key(qc_result.sample)
+        def sample_results: List<ChunkQCResult> = qc_report_state.containsKey(key) ? qc_report_state[key] : []
+        qc_report_state[key] = (sample_results + [qc_result]).toSorted { left, right ->
+            left.batch_index <=> right.batch_index
+        }
+    }
+    qc_report_inputs_ch = qc_report_chunk_result_batches_ch.flatMap { batch ->
+        if (batch.chunk_results.empty) {
+            return qc_report_state.empty
+                ? []
+                : [qc_report_inputs_from_state(
                     batch.batch_index,
-                    batch.chunk_results
+                    qc_report_state,
                 )]
-            }
-        qc_report_metadata_ch = qc_report_inputs_ch.map { Map report_inputs ->
-                def report_metadata: Map = [
-                    latest_batch_index: report_inputs.latest_batch_index,
-                    report_inputs_list: report_inputs.report_inputs_list,
-                    rows: report_inputs.rows
-                ]
-                report_metadata
-            }
-        qc_report_nanoplot_inputs_ch = qc_report_inputs_ch.map { Map report_inputs ->
-            report_inputs.nanoplot_inputs
         }
-        qc_report_flagstat_inputs_ch = qc_report_inputs_ch.map { Map report_inputs ->
-            report_inputs.flagstat_inputs
-        }
-        qc_report_input_tree_ch = qc_report_input_tree(
-            qc_report_metadata_ch,
-            qc_report_nanoplot_inputs_ch,
-            qc_report_flagstat_inputs_ch
-        )
+        return [accumulate_qc_report_chunk_state(
+            qc_report_state,
+            batch.batch_index,
+            batch.chunk_results,
+        )]
+    }
+    qc_report_metadata_ch = qc_report_inputs_ch.map { report_inputs: Map ->
+        def report_metadata: Map = [latest_batch_index: report_inputs.latest_batch_index, report_inputs_list: report_inputs.report_inputs_list, rows: report_inputs.rows]
+        report_metadata
+    }
+    qc_report_nanoplot_inputs_ch = qc_report_inputs_ch.map { report_inputs: Map ->
+        report_inputs.nanoplot_inputs
+    }
+    qc_report_flagstat_inputs_ch = qc_report_inputs_ch.map { report_inputs: Map ->
+        report_inputs.flagstat_inputs
+    }
+    qc_report_input_tree_ch = qc_report_input_tree(
+        qc_report_metadata_ch,
+        qc_report_nanoplot_inputs_ch,
+        qc_report_flagstat_inputs_ch,
+    )
 
-        if (differential_expression_enabled) {
-            qc_report_ready_ch = join_report_batches(
-                published_differential_results_ch,
-                qc_report_input_tree_ch
-            )
-            qc_report(
-                qc_report_ready_ch.map { result -> result.qc_report_inputs },
-                qc_report_ready_ch.map { result -> result.qc_results },
-                qc_report_ready_ch.map { result -> result.differential_results }
-            )
-        } else {
-            qc_report(
-                qc_report_input_tree_ch.map { result -> result.qc_report_inputs },
-                qc_report_input_tree_ch.map { result -> result.qc_results },
-                optional_file()
-            )
-        }
+    if (differential_expression_enabled) {
+        qc_report_ready_ch = join_report_batches(
+            published_differential_results_ch,
+            qc_report_input_tree_ch,
+        )
+        qc_report(
+            qc_report_ready_ch.map { result -> result.qc_report_inputs },
+            qc_report_ready_ch.map { result -> result.qc_results },
+            qc_report_ready_ch.map { result -> result.differential_results },
+        )
+    }
+    else {
+        qc_report(
+            qc_report_input_tree_ch.map { result -> result.qc_report_inputs },
+            qc_report_input_tree_ch.map { result -> result.qc_results },
+            optional_file(),
+        )
+    }
 }
 
-Map prepare_run(String experiment_dir, Integer _run_number, Integer replicate_count) {
+def prepare_run(experiment_dir: String, _run_number: Integer, replicate_count: Integer) -> Map {
     def runName = "run_${params.ex_run_number}"
     def runDir = file("${params.out_dir}/${runName}")
 
@@ -510,33 +507,39 @@ workflow {
         error('Gene-set enrichment requires --gene_sets.')
     }
 
-    reference_genome = params.reference_genome ? \
-        file(params.reference_genome, checkIfExists: true) : optional_file()
-    reference_annotation = params.reference_annotation ? \
-        file(params.reference_annotation, checkIfExists: true) : optional_file()
-    gene_sets = params.gene_set_enrichment ? \
-        file(params.gene_sets, checkIfExists: true) : optional_file()
+    reference_genome = params.reference_genome
+        ? file(params.reference_genome, checkIfExists: true)
+        : optional_file()
+    reference_annotation = params.reference_annotation
+        ? file(params.reference_annotation, checkIfExists: true)
+        : optional_file()
+    gene_sets = params.gene_set_enrichment
+        ? file(params.gene_sets, checkIfExists: true)
+        : optional_file()
     output_root = file(params.out_dir).toAbsolutePath().normalize()
 
     ingress_args = record(
         live_analysis: params.live_analysis,
         timeline_analysis: params.timeline_analysis,
-        sample_sheet_path: params.sample_sheet ? file(params.sample_sheet) : null
+        sample_sheet_path: params.sample_sheet ? file(params.sample_sheet) : null,
     )
     all_samples = get_samples(ingress_args)
     validate_samples(all_samples)
-    checkpoint_state = params.differential_expression ? discover_sample_checkpoints(
-        all_samples,
-        output_root,
-        reference_genome,
-        reference_annotation
-    ) : [restored: [], active: all_samples]
+    checkpoint_state = params.differential_expression
+        ? discover_sample_checkpoints(
+            all_samples,
+            output_root,
+            reference_genome,
+            reference_annotation,
+        )
+        : [restored: [], active: all_samples]
     restored_quantifications = checkpoint_state.restored*.quantification
     restored_qc_results = checkpoint_state.restored.collectMany { restored ->
         restored.qc_results
     }
-    first_analysis_index = params.differential_expression ? \
-        next_analysis_snapshot_index(output_root) : 0
+    first_analysis_index = params.differential_expression
+        ? next_analysis_snapshot_index(output_root)
+        : 0
 
     // Finalized samples are restored from the CLI output directory and never
     // enter BAM preparation, QC, collation, or Oarfish. Ingress watches only
@@ -545,7 +548,7 @@ workflow {
     sample_batch_ch = bam_ingress(
         checkpoint_state.active,
         ingress_args,
-        all_samples.size()
+        all_samples.size(),
     )
     sample_pipeline(
         sample_batch_ch,
@@ -557,7 +560,7 @@ workflow {
         reference_annotation,
         gene_sets,
         params.differential_expression,
-        params.gene_set_enrichment
+        params.gene_set_enrichment,
     )
 
     onComplete:

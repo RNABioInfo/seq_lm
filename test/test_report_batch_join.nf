@@ -12,22 +12,16 @@ workflow {
      */
     differential_results_ch = channel.of(
         [batch_index: 2, results: file('edgeR_batch_2')],
-        [batch_index: 4, results: file('edgeR_batch_4')]
+        [batch_index: 4, results: file('edgeR_batch_4')],
     )
     qc_report_trees_ch = channel.of(
-        [
-            qc_report_inputs: [latest_batch_index: 4, rows: 'batch 4'],
-            qc_results: file('qc_batch_4')
-        ],
-        [
-            qc_report_inputs: [latest_batch_index: 2, rows: 'batch 2'],
-            qc_results: file('qc_batch_2')
-        ]
+        [qc_report_inputs: [latest_batch_index: 4, rows: 'batch 4'], qc_results: file('qc_batch_4')],
+        [qc_report_inputs: [latest_batch_index: 2, rows: 'batch 2'], qc_results: file('qc_batch_2')],
     )
 
     joined_ch = join_report_batches(
         differential_results_ch,
-        qc_report_trees_ch
+        qc_report_trees_ch,
     )
     joined_ch
         .map { report -> report.batch_index }

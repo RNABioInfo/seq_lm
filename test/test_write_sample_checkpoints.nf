@@ -2,20 +2,20 @@
 
 nextflow.enable.types = true
 
-include { ChunkQCResult; QuantifiedSample; Sample } from '../lib/sample.nf'
-include { file_identity; write_sample_checkpoints } from '../lib/sample_checkpoints.nf'
+include { ChunkQCResult ; QuantifiedSample ; Sample } from '../lib/sample.nf'
+include { file_identity ; write_sample_checkpoints } from '../lib/sample_checkpoints.nf'
 
 workflow {
-    Path root = java.nio.file.Files.createTempDirectory('seq-lm-checkpoint-writer-')
-    Path bam_dir = root.resolve('bams')
-    Path genome = root.resolve('genome.fa')
-    Path annotation = root.resolve('annotation.gtf')
-    Path old_quant = root.resolve('sample-old.quant')
-    Path quant = root.resolve('sample.quant')
-    Path old_nanoplot = root.resolve('nanoplot-old.tsv.gz')
-    Path nanoplot = root.resolve('nanoplot.tsv.gz')
-    Path old_flagstat = root.resolve('flagstat-old.tsv')
-    Path flagstat = root.resolve('flagstat.tsv')
+    def root: Path = java.nio.file.Files.createTempDirectory('seq-lm-checkpoint-writer-')
+    def bam_dir: Path = root.resolve('bams')
+    def genome: Path = root.resolve('genome.fa')
+    def annotation: Path = root.resolve('annotation.gtf')
+    def old_quant: Path = root.resolve('sample-old.quant')
+    def quant: Path = root.resolve('sample.quant')
+    def old_nanoplot: Path = root.resolve('nanoplot-old.tsv.gz')
+    def nanoplot: Path = root.resolve('nanoplot.tsv.gz')
+    def old_flagstat: Path = root.resolve('flagstat-old.tsv')
+    def flagstat: Path = root.resolve('flagstat.tsv')
     java.nio.file.Files.createDirectories(bam_dir)
     java.nio.file.Files.writeString(bam_dir.resolve('sample.bam'), 'bam')
     java.nio.file.Files.writeString(genome, '>ref\nACGT\n')
@@ -27,28 +27,28 @@ workflow {
     java.nio.file.Files.writeString(old_flagstat, 'flagstat-old')
     java.nio.file.Files.writeString(flagstat, 'flagstat')
 
-    Sample sample = record(
+    def sample: Sample = record(
         name: 'sample',
         group: 'control',
         order: null,
         bam_dir: bam_dir,
-        is_live: true
+        is_live: true,
     )
-    QuantifiedSample old_quantified = record(batch_index: 2, sample: sample, counts: old_quant)
-    QuantifiedSample quantified = record(batch_index: 3, sample: sample, counts: quant)
-    ChunkQCResult old_qc = record(
+    def old_quantified: QuantifiedSample = record(batch_index: 2, sample: sample, counts: old_quant)
+    def quantified: QuantifiedSample = record(batch_index: 3, sample: sample, counts: quant)
+    def old_qc: ChunkQCResult = record(
         batch_index: 2,
         sample: sample,
         bam: bam_dir.resolve('sample.bam'),
         nanoplot_data: old_nanoplot,
-        flagstat: old_flagstat
+        flagstat: old_flagstat,
     )
-    ChunkQCResult qc = record(
+    def qc: ChunkQCResult = record(
         batch_index: 3,
         sample: sample,
         bam: bam_dir.resolve('sample.bam'),
         nanoplot_data: nanoplot,
-        flagstat: flagstat
+        flagstat: flagstat,
     )
 
     written = write_sample_checkpoints(
@@ -58,17 +58,19 @@ workflow {
         channel.of(qc, old_qc).collect().map { collected ->
             collected.toList().toSorted { left, right -> left.batch_index <=> right.batch_index }
         },
-        channel.value([genome: file_identity(genome), annotation: file_identity(annotation)])
+        channel.value([genome: file_identity(genome), annotation: file_identity(annotation)]),
     )
-    written.map { outputs ->
-        Path sample_dir = outputs instanceof Collection ? outputs.iterator().next() : outputs
-        Path final_marker = sample_dir.resolve('FINAL')
-        assert java.nio.file.Files.isRegularFile(final_marker)
-        assert java.nio.file.Files.readString(sample_dir.resolve('quantification/final.quant')).contains('\t10\n')
-        assert java.nio.file.Files.readString(sample_dir.resolve('qc/nanoplot/chunk_2.tsv.gz')) == 'nanoplot-old'
-        assert java.nio.file.Files.isRegularFile(sample_dir.resolve('qc/nanoplot/chunk_3.tsv.gz'))
-        assert java.nio.file.Files.readString(sample_dir.resolve('qc/flagstat/chunk_2.tsv')) == 'flagstat-old'
-        assert java.nio.file.Files.isRegularFile(sample_dir.resolve('qc/flagstat/chunk_3.tsv'))
-        'sample checkpoint writer passed'
-    }.view()
+    written
+        .map { outputs ->
+            def sample_dir: Path = outputs instanceof Collection ? outputs.iterator().next() : outputs
+            def final_marker: Path = sample_dir.resolve('FINAL')
+            assert java.nio.file.Files.isRegularFile(final_marker)
+            assert java.nio.file.Files.readString(sample_dir.resolve('quantification/final.quant')).contains('\t10\n')
+            assert java.nio.file.Files.readString(sample_dir.resolve('qc/nanoplot/chunk_2.tsv.gz')) == 'nanoplot-old'
+            assert java.nio.file.Files.isRegularFile(sample_dir.resolve('qc/nanoplot/chunk_3.tsv.gz'))
+            assert java.nio.file.Files.readString(sample_dir.resolve('qc/flagstat/chunk_2.tsv')) == 'flagstat-old'
+            assert java.nio.file.Files.isRegularFile(sample_dir.resolve('qc/flagstat/chunk_3.tsv'))
+            'sample checkpoint writer passed'
+        }
+        .view()
 }

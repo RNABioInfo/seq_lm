@@ -1,27 +1,35 @@
-def validate_experiment_dir(String experiment_path, int run_number) {
+nextflow.enable.types = true
+
+def validate_experiment_dir(experiment_path: String, run_number: Integer) {
     def experiment_dir = new File(experiment_path)
     if (!experiment_dir.exists()) {
         experiment_dir.mkdirs()
-    } else if (!experiment_dir.isDirectory()) {
+    }
+    else if (!experiment_dir.isDirectory()) {
         throw new RuntimeException("Experiment directory ${experiment_path} is not a directory.")
-    } else if (!experiment_dir.canWrite()) {
+    }
+    else if (!experiment_dir.canWrite()) {
         throw new RuntimeException("Experiment directory ${experiment_path} is not writable.")
-    } else if (!experiment_dir.canRead()) {
+    }
+    else if (!experiment_dir.canRead()) {
         throw new RuntimeException("Experiment directory ${experiment_path} is not readable.")
     }
 
-    String config_file_name = "experiment.config"
-    File config_file = new File(experiment_path, config_file_name)
-    boolean config_file_exists = config_file.exists()
-    if (!config_file_exists && run_number > 1 ) {
+    def config_file_name: String = "experiment.config"
+    def config_file: File = new File(experiment_path, config_file_name)
+    def config_file_exists: Boolean = config_file.exists()
+    if (!config_file_exists && run_number > 1) {
         throw new RuntimeException("Experiment directory ${experiment_path} does not contain a configuration file.")
-    } else if ( config_file_exists && run_number == 1 ) {
+    }
+    else if (config_file_exists && run_number == 1) {
         throw new RuntimeException("Experiment directory ${experiment_path} already contains a configuration file.")
     }
 }
 
-Boolean is_empty(path) {
-    java.nio.file.Files.newDirectoryStream(path).withCloseable { directory ->
-        !directory.iterator().hasNext()
-    }
+def is_empty(path) -> Boolean {
+    java.nio.file.Files
+        .newDirectoryStream(path)
+        .withCloseable { directory ->
+            !directory.iterator().hasNext()
+        }
 }
