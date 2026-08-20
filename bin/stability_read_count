@@ -1,0 +1,99 @@
+#!/usr/bin/env python3
+
+"""Determine whether every DEA group has enough sufficiently deep samples."""
+
+import argparse as ap
+import csv
+import pathlib as pl
+import sys
+
+
+def analysis_is_stable(
+    metadata_path: pl.Path,
+    counts_dir: pl.Path,
+    min_read_count: int,
+    min_replicate_sample_count: int,
+) -> bool:
+    """Return whether each group has enough samples above the read threshold."""
+    with metadata_path.open(newline="") as metadata_handle:
+        metadata_reader = csv.DictReader(metadata_handle, delimiter="\t")
+        metadata_rows = list(metadata_reader)
+        metadata_columns = set(metadata_reader.fieldnames or [])
+
+    required_columns = {"count_file", "group", "name"}
+    missing_columns = required_columns.difference(metadata_columns)
+    if missing_columns:
+        raise ValueError(
+            "Metadata is missing required columns: "
+            + ", ".join(sorted(missing_columns))
+        )
+    if not metadata_rows:
+        return False
+
+    passing_replicates_by_group: dict[str, int] = {}
+    for metadata_row in metadata_rows:
+        counts_path = counts_dir / metadata_row["count_file"]
+        with counts_path.open(newline="") as counts_handle:
+            counts_reader = csv.DictReader(counts_handle, delimiter="\t")
+            count_columns = set(counts_reader.fieldnames or [])
+            missing_count_columns = {"num_reads"}.difference(count_columns)
+            if missing_count_columns:
+                raise ValueError(
+                    f"Count file {counts_path} is missing required columns: "
+                    + ", ".join(sorted(missing_count_columns))
+                )
+            total_reads = sum(float(row["num_reads"]) for row in counts_reader)
+
+        group = metadata_row["group"]
+        passing_replicates_by_group.setdefault(group, 0)
+        if total_reads >= min_read_count:
+            passing_replicates_by_group[group] += 1
+
+    return all(
+        replicate_count >= min_replicate_sample_count
+        for replicate_count in passing_replicates_by_group.values()
+    )
+
+
+def main() -> int:
+    argument_parser = ap.ArgumentParser(
+        description="Script for determining whether min requirements for DEA are fulfilled"
+    )
+    argument_parser.add_argument("--min_read_count", type=int, required=True)
+    argument_parser.add_argument(
+        "--min_replicate_sample_count", type=int, required=True
+    )
+    argument_parser.add_argument("--metadata", type=str, required=True)
+    argument_parser.add_argument("--counts_dir", type=str, required=True)
+
+    args = argument_parser.parse_args()
+
+    meta_path = pl.Path(args.metadata)
+    if not meta_path.is_file():
+        print("Did not find metadata file", file=sys.stderr)
+        return 1
+
+    counts_dir = pl.Path(args.counts_dir)
+    if not counts_dir.is_dir():
+        print("Did not find counts dir.", file=sys.stderr)
+        return 1
+
+    if args.min_read_count < 0 or args.min_replicate_sample_count < 1:
+        print(
+            "Thresholds must use a nonnegative read count and at least one replicate.",
+            file=sys.stderr,
+        )
+        return 1
+
+    is_stable = analysis_is_stable(
+        meta_path,
+        counts_dir,
+        args.min_read_count,
+        args.min_replicate_sample_count,
+    )
+    print(str(is_stable).lower())
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

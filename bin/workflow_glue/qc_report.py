@@ -273,11 +273,17 @@ def _live_report_shell(
 """
 
 
-def write_report(report, report_path, latest_batch, refresh_seconds):
+def write_report(
+    report,
+    report_path,
+    latest_batch,
+    refresh_seconds,
+    subtitle_notice=None,
+):
     """Write either a static report or a live shell with a versioned snapshot."""
     if refresh_seconds <= 0:
         report.write(report_path)
-        apply_report_branding(report_path)
+        apply_report_branding(report_path, subtitle_notice)
         return
 
     report_path, state_path, snapshot_path = _live_report_paths(
@@ -285,7 +291,7 @@ def write_report(report, report_path, latest_batch, refresh_seconds):
         latest_batch,
     )
     report.write(snapshot_path)
-    apply_report_branding(snapshot_path)
+    apply_report_branding(snapshot_path, subtitle_notice)
     report_path.write_text(
         _live_report_shell(
             state_path.name,
@@ -421,6 +427,11 @@ def main(args):
         args.report,
         args.latest_batch,
         args.refresh_seconds,
+        (
+            "For DEA, the required read depth is not yet satisfied."
+            if args.dea_read_depth_not_satisfied
+            else None
+        ),
     )
     logger.info(f"Analysis report written to {args.report}.")
 
@@ -460,6 +471,11 @@ def argparser():
         "--gene-set-enrichment",
         action="store_true",
         help="Include fry and GSVA gene-set results in the report.",
+    )
+    parser.add_argument(
+        "--dea-read-depth-not-satisfied",
+        action="store_true",
+        help="Show a subtitle notice and omit unavailable DEA result tabs.",
     )
     parser.add_argument(
         "--lfc-cutoff",

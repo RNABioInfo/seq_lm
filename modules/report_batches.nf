@@ -1,26 +1,23 @@
 nextflow.enable.types = true
 
 /**
- * Join sparse, ordered edgeR results to matching QC report inputs.
+ * Join ordered DEA readiness/results records to matching QC report inputs.
  *
- * edgeR may begin after batch 0 when live samples initially have no data, so
- * batch_index itself cannot drive the existing contiguous order_batches helper.
- * Assign a contiguous sequence to edgeR emissions, then restore that sequence
- * after the keyed join in case QC inputs arrive out of order.
+ * A readiness record exists for every batch considered for DEA, including
+ * batches that do not run edgeR. Its preassigned sequence preserves batch order
+ * even when a fast failed precondition overtakes an earlier edgeR execution.
  */
 workflow join_report_batches {
     take:
-    differential_results: Channel
+    differential_reports: Channel
     qc_report_trees: Channel
 
     main:
-    def next_report_sequence: Integer = 0
-    sequenced_differential_results_ch = differential_results.map { result ->
-        def report_sequence: Integer = next_report_sequence
-        next_report_sequence += 1
+    sequenced_differential_results_ch = differential_reports.map { result ->
         tuple(
             result.batch_index,
-            report_sequence,
+            result.report_sequence,
+            result.read_depth_satisfied,
             result.results,
         )
     }
@@ -36,12 +33,13 @@ workflow join_report_batches {
             },
             by: 0
         )
-        .map { batch_index: Integer, report_sequence: Integer, differential_results_path, report_inputs: Map, qc_results_path ->
+        .map { batch_index: Integer, report_sequence: Integer, read_depth_satisfied: Boolean, differential_results_path, report_inputs: Map, qc_results_path ->
             record(
                 batch_index: batch_index,
                 report_sequence: report_sequence,
                 qc_report_inputs: report_inputs,
                 qc_results: qc_results_path,
+                read_depth_satisfied: read_depth_satisfied,
                 differential_results: differential_results_path,
             )
         }

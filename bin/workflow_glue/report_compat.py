@@ -1,5 +1,6 @@
 """Compatibility helpers for ezCharts report generation."""
 import inspect
+from html import escape
 from pathlib import Path
 import re
 
@@ -51,6 +52,12 @@ _BRAND_LOGO_DATA_URI = (
 _EPI2ME_HEADER_LINK = re.compile(
     r'<a\b[^>]*\bhref=(?P<quote>["\'])https://labs\.epi2me\.io/?'
     r'(?P=quote)[^>]*>.*?</a>',
+    flags=re.IGNORECASE | re.DOTALL,
+)
+_REPORT_SUBTITLE = re.compile(
+    r'(?P<open><p\b[^>]*\bclass=["\'][^"\']*\bfs-5\b[^"\']*["\'][^>]*>)'
+    r'(?P<body>.*?)'
+    r'(?P<close></p>)',
     flags=re.IGNORECASE | re.DOTALL,
 )
 _BRAND_STYLES = f"""
@@ -210,11 +217,21 @@ def _insert_before_last(html, closing_tag, content):
     return f"{html[:index]}{content}{html[index:]}"
 
 
-def apply_report_branding(report_path):
+def apply_report_branding(report_path, subtitle_notice=None):
     """Apply branding and robust nested-tab behavior to a LabsReport."""
     report_path = Path(report_path)
     html = report_path.read_text()
     html = _EPI2ME_HEADER_LINK.sub(_BRAND_MARKUP, html, count=1)
+    if subtitle_notice:
+        def add_subtitle_notice(match):
+            notice = escape(str(subtitle_notice))
+            return (
+                f"{match.group('open')}{match.group('body')} "
+                f'<strong class="seq-lm-dea-readiness-notice">{notice}</strong>'
+                f"{match.group('close')}"
+            )
+
+        html = _REPORT_SUBTITLE.sub(add_subtitle_notice, html, count=1)
     if 'id="seq-lm-report-branding"' not in html and "</head>" in html:
         html = _insert_before_last(html, "</head>", _BRAND_STYLES)
     if 'id="seq-lm-report-navigation"' not in html and "</body>" in html:

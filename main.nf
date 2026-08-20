@@ -197,6 +197,7 @@ process qc_report {
     qc_report_inputs: Map
     qc_results: Path
     differential_results: Path
+    read_depth_satisfied: Boolean
 
     stage:
     stageAs qc_results, 'qc_results'
@@ -210,10 +211,14 @@ process qc_report {
     def quoted_rows: String = shell_quote(rows)
     def params_json: String = new groovy.json.JsonBuilder(params).toPrettyString()
     def quoted_params_json: String = shell_quote(params_json)
-    def differential_args: String = params.differential_expression
+    def has_differential_results: Boolean = differential_results.name != optional_file().name
+    def differential_args: String = has_differential_results
         ? '--differential-results differential_results'
         : ''
-    def gene_set_args: String = params.gene_set_enrichment ? '--gene-set-enrichment' : ''
+    def gene_set_args: String = params.gene_set_enrichment && has_differential_results ? '--gene-set-enrichment' : ''
+    def readiness_args: String = params.differential_expression && !read_depth_satisfied
+        ? '--dea-read-depth-not-satisfied'
+        : ''
     """
         printf 'name\\tgroup\\tchunks_seen\\tlatest_batch_index\\tqc_dir\\n' > report_samples.tsv
         printf '%s\\n' ${quoted_rows} >> report_samples.tsv
@@ -232,6 +237,7 @@ process qc_report {
             --latest-batch ${qc_report_inputs.latest_batch_index} \
             ${differential_args} \
             ${gene_set_args} \
+            ${readiness_args} \
             --lfc-cutoff ${params.de_lfc_cutoff} \
             --padj-cutoff ${params.de_padj_cutoff}
         """
@@ -294,6 +300,7 @@ workflow sample_pipeline {
         )
         quantified_samples_ch = differential_expression.out.quantifications
         differential_results_ch = differential_expression.out.results
+        differential_report_batches_ch = differential_expression.out.report_batches
 
         quantification_output_ch = quantified_samples_ch.map { quantified_sample ->
             tuple(
@@ -302,7 +309,7 @@ workflow sample_pipeline {
             )
         }
         output(quantification_output_ch)
-        published_differential_results_ch = publish_differential_results(
+        publish_differential_results(
             differential_results_ch.map { result ->
                 tuple(result.batch_index, result.analysis_index, result.results)
             }
@@ -416,13 +423,14 @@ workflow sample_pipeline {
 
     if (differential_expression_enabled) {
         qc_report_ready_ch = join_report_batches(
-            published_differential_results_ch,
+            differential_report_batches_ch,
             qc_report_input_tree_ch,
         )
         qc_report(
             qc_report_ready_ch.map { result -> result.qc_report_inputs },
             qc_report_ready_ch.map { result -> result.qc_results },
             qc_report_ready_ch.map { result -> result.differential_results },
+            qc_report_ready_ch.map { result -> result.read_depth_satisfied },
         )
     }
     else {
@@ -430,6 +438,7 @@ workflow sample_pipeline {
             qc_report_input_tree_ch.map { result -> result.qc_report_inputs },
             qc_report_input_tree_ch.map { result -> result.qc_results },
             optional_file(),
+            true,
         )
     }
 }
@@ -469,6 +478,12 @@ workflow {
     }
     if (params.de_padj_cutoff <= 0 || params.de_padj_cutoff > 1) {
         error('--de_padj_cutoff must be greater than 0 and at most 1.')
+    }
+    if (params.min_read_count < 0) {
+        error('--min_read_count must be nonnegative.')
+    }
+    if (params.min_replicate_sample_count < 1) {
+        error('--min_replicate_sample_count must be at least 1.')
     }
 
     if (params.disable_ping == false) {

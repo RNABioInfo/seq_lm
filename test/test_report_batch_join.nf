@@ -6,13 +6,13 @@ include { join_report_batches } from '../modules/report_batches.nf'
 
 workflow {
     /*
-     * edgeR emits sparse batch indices in analysis order. QC inputs arrive in
-     * the opposite order to prove the keyed join is reordered by report
-     * sequence rather than by the sparse batch index.
+     * A failed later precondition may arrive before an earlier edgeR result.
+     * QC inputs also arrive in the opposite order to prove the keyed join is
+     * restored by the sequence assigned before readiness checking.
      */
     differential_results_ch = channel.of(
-        [batch_index: 2, results: file('edgeR_batch_2')],
-        [batch_index: 4, results: file('edgeR_batch_4')],
+        [batch_index: 4, report_sequence: 1, read_depth_satisfied: false, results: file('OPTIONAL_FILE')],
+        [batch_index: 2, report_sequence: 0, read_depth_satisfied: true, results: file('edgeR_batch_2')],
     )
     qc_report_trees_ch = channel.of(
         [qc_report_inputs: [latest_batch_index: 4, rows: 'batch 4'], qc_results: file('qc_batch_4')],

@@ -97,6 +97,18 @@
           "maximum": 1,
           "default": 0.05,
           "description": "Maximum edgeR false-discovery rate used to classify significant results."
+        },
+        "min_read_count": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 10000,
+          "description": "Minimum total assigned reads required for a sample to count toward DEA readiness."
+        },
+        "min_replicate_sample_count": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 2,
+          "description": "Minimum number of samples per group that must satisfy the DEA read-count threshold."
         }
       }
     },

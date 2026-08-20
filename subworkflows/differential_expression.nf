@@ -180,6 +180,7 @@ workflow differential_expression {
         [(sample_key(quantified_sample.sample)): quantified_sample]
     }
     def next_analysis_index: Integer = first_analysis_index
+    def next_report_sequence: Integer = 0
     quantified_sample_batches_ch = ordered_quantified_sample_updates_ch.flatMap { update_batch ->
         update_batch.samples.each { quantified_sample ->
             latest_quantifications[sample_key(quantified_sample.sample)] = quantified_sample
@@ -194,16 +195,54 @@ workflow differential_expression {
         def quant_batch = record(
             batch_index: update_batch.batch_index,
             analysis_index: next_analysis_index,
+            report_sequence: next_report_sequence,
             samples: latest_quantifications.values().toList().toSorted { left, right ->
                 "${left.sample.group}/${left.sample.name}" <=> "${right.sample.group}/${right.sample.name}"
             },
         )
         next_analysis_index += 1
+        next_report_sequence += 1
         return [quant_batch]
     }
 
+    checked_quantified_sample_batches_ch = check_differential_analysis_readiness(
+        quantified_sample_batches_ch
+    )
+    readiness_status_ch = checked_quantified_sample_batches_ch.map { checked ->
+        def readiness_text: String = checked.readiness.text.trim().toLowerCase()
+        if (!(readiness_text in ['true', 'false'])) {
+            error(
+                "Unexpected differential-analysis readiness result for batch " +
+                "${checked.batch_index}: '${readiness_text}'."
+            )
+        }
+        tuple(checked.batch_index, readiness_text == 'true')
+    }
+    readiness_decisions_ch = quantified_sample_batches_ch
+        .map { quant_batch -> tuple(quant_batch.batch_index, quant_batch) }
+        .join(readiness_status_ch, by: 0)
+        .map { _batch_index: Integer, quant_batch, read_depth_satisfied: Boolean ->
+            record(
+                quant_batch: quant_batch,
+                read_depth_satisfied: read_depth_satisfied,
+            )
+        }
+    ready_quantified_sample_batches_ch = readiness_decisions_ch
+        .filter { decision -> decision.read_depth_satisfied }
+        .map { decision -> decision.quant_batch }
+    deferred_report_batches_ch = readiness_decisions_ch
+        .filter { decision -> !decision.read_depth_satisfied }
+        .map { decision ->
+            record(
+                batch_index: decision.quant_batch.batch_index,
+                report_sequence: decision.quant_batch.report_sequence,
+                read_depth_satisfied: false,
+                results: optional_file(),
+            )
+        }
+
     edgeR_results_ch = run_differential_expression_edgeR(
-        quantified_sample_batches_ch,
+        ready_quantified_sample_batches_ch,
         gene_sets,
         annotation,
     )
@@ -213,10 +252,19 @@ workflow differential_expression {
     else {
         analysis_results_ch = edgeR_results_ch
     }
+    completed_report_batches_ch = analysis_results_ch.map { result ->
+        record(
+            batch_index: result.batch_index,
+            report_sequence: result.report_sequence,
+            read_depth_satisfied: true,
+            results: result.results,
+        )
+    }
 
     emit:
     quantifications = quantified_samples_ch
     results = analysis_results_ch
+    report_batches = completed_report_batches_ch.mix(deferred_report_batches_ch)
 }
 
 /**
@@ -364,6 +412,48 @@ process oarfish_quant {
 }
 
 /**
+ * Check that each experimental group contains enough samples at the requested
+ * cumulative read depth before launching edgeR.
+ */
+process check_differential_analysis_readiness {
+    label 'seq_lm_qc'
+    container 'rnabioinfo/seq_lm_report:v1.0.0'
+    cpus 1
+
+    input:
+    quant_batch: QuantifiedSampleBatch
+
+    stage:
+    stageAs quant_batch.samples*.counts, 'quant/input?.quant'
+
+    output:
+    record(
+        batch_index: quant_batch.batch_index,
+        readiness: file('differential_analysis_ready.txt'),
+    )
+
+    script:
+    def manifest_rows: String = quant_batch.samples
+        .withIndex()
+        .collect { sample, index: Integer ->
+            [de_manifest_field(sample.sample.name), de_manifest_field(sample.sample.group), "input${index + 1}.quant"].join('\t')
+        }
+        .join('\n')
+    def quoted_manifest_rows: String = shell_quote(manifest_rows)
+    """
+        printf 'name\\tgroup\\tcount_file\\n' > quant_manifest.tsv
+        printf '%s\\n' ${quoted_manifest_rows} >> quant_manifest.tsv
+
+        stability_read_count \\
+            --min_read_count ${params.min_read_count} \\
+            --min_replicate_sample_count ${params.min_replicate_sample_count} \\
+            --metadata quant_manifest.tsv \\
+            --counts_dir quant \\
+            > differential_analysis_ready.txt
+        """
+}
+
+/**
  * Rebuild the full count matrix and rerun edgeR for one live batch.
  */
 process run_differential_expression_edgeR {
@@ -384,6 +474,7 @@ process run_differential_expression_edgeR {
     record(
         batch_index: quant_batch.batch_index,
         analysis_index: quant_batch.analysis_index,
+        report_sequence: quant_batch.report_sequence,
         results: file(differential_expression_results_dir(quant_batch.analysis_index)),
     )
 
@@ -432,6 +523,7 @@ process run_gene_set_variation_analysis {
     record(
         batch_index: differential_result.batch_index,
         analysis_index: differential_result.analysis_index,
+        report_sequence: differential_result.report_sequence,
         results: file(differential_expression_results_dir(differential_result.analysis_index)),
     )
 

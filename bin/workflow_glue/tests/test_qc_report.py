@@ -67,6 +67,32 @@ def test_write_report_rebrands_labs_header(tmp_path):
     assert "#004191" in html
 
 
+def test_write_report_adds_dea_readiness_notice_to_subtitle(tmp_path):
+    """A failed DEA precondition is visible without adding a DEA tab."""
+
+    class Report:
+        def write(self, path):
+            path.write_text(
+                '<html><head></head><body><header><h1>Report</h1>'
+                '<p class="py-2 fs-5">Workflow results.</p>'
+                '</header><main>Quality Control</main></body></html>'
+            )
+
+    report_path = tmp_path / "qc_report.html"
+    qc_report.write_report(
+        Report(),
+        report_path,
+        "2",
+        0,
+        "For DEA, the required read depth is not yet satisfied.",
+    )
+
+    html = report_path.read_text()
+    assert "Workflow results." in html
+    assert "For DEA, the required read depth is not yet satisfied." in html
+    assert 'class="seq-lm-dea-readiness-notice"' in html
+
+
 def write_flagstat(path):
     """Write enough samtools flagstat rows for the QC report parser."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -426,6 +452,7 @@ def test_qc_report_writes_html(tmp_path):
             str(versions),
             "--params",
             str(params),
+            "--dea-read-depth-not-satisfied",
             "--refresh-seconds",
             "0",
         ]
@@ -437,6 +464,7 @@ def test_qc_report_writes_html(tmp_path):
     assert ">Quality Control<" in qc_only_html
     assert ">Differential Analysis<" not in qc_only_html
     assert ">Gene Set Enrichment<" not in qc_only_html
+    assert "For DEA, the required read depth is not yet satisfied." in qc_only_html
 
 
 def test_gene_set_report_requires_differential_results():
