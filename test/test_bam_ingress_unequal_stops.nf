@@ -40,6 +40,8 @@ workflow {
         live_analysis: true,
         timeline_analysis: false,
         sample_sheet_path: sample_sheet,
+        bam_poll_interval_ms: 100,
+        bam_stability_polls: 3,
     )
     bam_ingress(ingress_args)
         .collect()

@@ -23,8 +23,22 @@
           "type": "boolean",
           "default": true,
           "fa_icon": "fas fa-eye",
-          "description": "Watch eligible sample directories for new BAM files.",
-          "help_text": "A sample is watched only when this option and the sample sheet row's is_live value are both true. Disable this option to process every sample once from the BAM files present at startup."
+          "description": "Poll eligible sample directories for new BAM files.",
+          "help_text": "A sample is polled only when this option and the sample sheet row's is_live value are both true. Disable this option to process every sample once from the BAM files present at startup."
+        },
+        "bam_poll_interval_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 5,
+          "description": "Seconds between scans of live BAM directories.",
+          "help_text": "Polling is used instead of filesystem notifications so Windows-written BAMs below WSL mounts are discovered reliably."
+        },
+        "bam_stability_polls": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 3,
+          "description": "Consecutive unchanged observations required before accepting a new BAM.",
+          "help_text": "A BAM must retain the same size and modification time across this many polls before it is sent to downstream analysis."
         },
         "timeline_analysis": {
           "type": "boolean",

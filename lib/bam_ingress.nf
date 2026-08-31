@@ -6,6 +6,8 @@ record BamIngressArgs {
     live_analysis: Boolean
     timeline_analysis: Boolean?
     sample_sheet_path: Path?
+    bam_poll_interval_ms: Integer
+    bam_stability_polls: Integer
 }
 
 record LiveSampleEvent {
@@ -31,7 +33,7 @@ record LivePathEvent {
 def bam_ingress(ingress_args) {
     def samples: List<Sample> = get_samples(ingress_args)
     validate_samples(samples)
-    return mixed_analysis_ingress(samples, ingress_args.live_analysis, samples.size())
+    return mixed_analysis_ingress(samples, ingress_args, samples.size())
 }
 
 /**
@@ -40,7 +42,7 @@ def bam_ingress(ingress_args) {
  * quantifications can satisfy the remaining differential-analysis inputs.
  */
 def bam_ingress(samples: List<Sample>, ingress_args, experiment_sample_count: Integer) {
-    return mixed_analysis_ingress(samples, ingress_args.live_analysis, experiment_sample_count)
+    return mixed_analysis_ingress(samples, ingress_args, experiment_sample_count)
 }
 
 def get_samples(ingress_args) -> List<Sample> {
@@ -153,9 +155,9 @@ def sample_label(sample) -> String {
     return "${sample.group}/${sample.name}"
 }
 
-def mixed_analysis_ingress(samples: List<Sample>, live_analysis: Boolean, experiment_sample_count: Integer) {
+def mixed_analysis_ingress(samples: List<Sample>, ingress_args, experiment_sample_count: Integer) {
     def live_samples: List<Sample> = samples.findAll { sample ->
-        live_analysis && sample.is_live
+        ingress_args.live_analysis && sample.is_live
     }
     log.info(
         "Running workflow with ${live_samples.size()} live sample(s) and " + "${samples.size() - live_samples.size()} final sample(s)."
@@ -165,7 +167,7 @@ def mixed_analysis_ingress(samples: List<Sample>, live_analysis: Boolean, experi
     def existing_chunks: List<SampleChunk> = samples.collect { sample ->
         def existing_bams: List<Path> = get_bam_files_in_dir(sample.bam_dir)
         existing_bams_by_sample[sample_key(sample)] = existing_bams
-        def effectively_live: Boolean = live_analysis && sample.is_live
+        def effectively_live: Boolean = ingress_args.live_analysis && sample.is_live
         log.info(
             "BAM ingress startup scan for sample '${sample_label(sample)}' " + "found ${existing_bams.size()} existing BAM file(s) in ${sample.bam_dir}; " + "effective mode=${effectively_live ? 'live' : 'final'}."
         )
@@ -196,6 +198,8 @@ def mixed_analysis_ingress(samples: List<Sample>, live_analysis: Boolean, experi
                 sample_index,
                 existing_bams_by_sample[sample_key(sample)],
                 live_samples.size(),
+                ingress_args.bam_poll_interval_ms,
+                ingress_args.bam_stability_polls,
             )
         )
     }
@@ -267,7 +271,14 @@ def mixed_analysis_ingress(samples: List<Sample>, live_analysis: Boolean, experi
     return channel.of(startup_batch).concat(live_batches_ch)
 }
 
-def make_live_analysis_ingress_channel(sample, sample_index: Integer, initial_bams: List<Path>, live_sample_count: Integer) {
+def make_live_analysis_ingress_channel(
+    sample,
+    sample_index: Integer,
+    initial_bams: List<Path>,
+    live_sample_count: Integer,
+    poll_interval_ms: Integer,
+    stability_polls: Integer
+) {
     def existing_stop_files: List<Path> = get_stop_files_in_dir(sample.bam_dir)
     def batch_index: Integer = 0
     def accepted_bam_paths: Set<String> = new LinkedHashSet<String>()
@@ -275,58 +286,43 @@ def make_live_analysis_ingress_channel(sample, sample_index: Integer, initial_ba
 
     if (!existing_stop_files.empty) {
         log.warn(
-            "Sample '${sample_label(sample)}' has existing STOP file(s) " + "at startup: ${existing_stop_files}. No future BAM watcher will be opened for this sample."
+            "Sample '${sample_label(sample)}' has existing STOP file(s) " + "at startup: ${existing_stop_files}. No future BAM poller will be opened for this sample."
         )
         log_sample_stop(sample, existing_stop_files[0], 'existing', batch_index, live_sample_count)
         return channel.of(make_live_stop_event(batch_index, sample_index, sample))
     }
 
     log.info(
-        "Starting live BAM watcher for sample '${sample_label(sample)}' " + "in ${sample.bam_dir}; waiting for BAM create events and STOP create/modify events."
+        "Starting live BAM poller for sample '${sample_label(sample)}' in ${sample.bam_dir}; " +
+            "interval=${poll_interval_ms} ms, required stable polls=${stability_polls}."
     )
 
     return LiveBamWatcher
-        .watch(
+        .poll(
             sample.bam_dir,
-            { watched_dir_count: Integer ->
+            initial_bams,
+            poll_interval_ms as Long,
+            stability_polls,
+            {
                 log.info(
-                    "Live BAM watcher is active for sample '${sample_label(sample)}'; " + "watching ${watched_dir_count} director${watched_dir_count == 1 ? 'y' : 'ies'} under ${sample.bam_dir}."
+                    "Live BAM poller is active for sample '${sample_label(sample)}' under ${sample.bam_dir}."
                 )
             },
         ) { error: Throwable ->
             log.error(
-                "Live BAM watcher failed for sample '${sample_label(sample)}'; " + "closing this sample stream.",
+                "Live BAM poller failed for sample '${sample_label(sample)}'; " + "closing this sample stream.",
                 error,
             )
         }
         .map { event -> make_live_path_event(event.source as String, event.path as Path) }
         .flatMap { event ->
             if (is_stop_path(event.path)) {
-                def pending_bams: List<Path> = get_bam_files_in_dir(sample.bam_dir).findAll { bam_path: Path -> !accepted_bam_paths.contains(path_key(bam_path)) }
-                if (!pending_bams.empty) {
-                    log.info(
-                        "Draining ${pending_bams.size()} pending BAM file(s) for sample '${sample_label(sample)}' " + "before honoring STOP at ${event.path}."
-                    )
-                }
-
-                def drained_events: List<LiveSampleEvent> = pending_bams.collect { pending_bam: Path ->
-                    accepted_bam_paths.add(path_key(pending_bam))
-                    batch_index += 1
-                    log.info(
-                        "Accepted live BAM event for sample '${sample_label(sample)}': " + "batch_index=${batch_index}, source=drain, path=${pending_bam}."
-                    )
-                    return make_sample_chunk_event(
-                        batch_index,
-                        sample_index,
-                        make_sample_chunk(sample, [pending_bam]),
-                    )
-                }
                 log_sample_stop(sample, event.path, event.source, batch_index, live_sample_count)
-                return drained_events + [make_live_stop_event(batch_index, sample_index, sample)]
+                return [make_live_stop_event(batch_index, sample_index, sample)]
             }
-            if (event.source != "create") {
+            if (event.source != "poll") {
                 log.info(
-                    "Ignoring non-create live BAM path event for sample '${sample_label(sample)}': " + "source=${event.source}, path=${event.path}."
+                    "Ignoring non-poll live BAM path event for sample '${sample_label(sample)}': " + "source=${event.source}, path=${event.path}."
                 )
                 return []
             }
@@ -361,7 +357,7 @@ def make_live_path_event(source: String, path: Path) {
 
 def log_sample_stop(sample, stop_path: Path, source: String, batch_count: Integer, live_sample_count: Integer) {
     log.info(
-        "Observed STOP for sample '${sample_label(sample)}': " + "source=${source}, path=${stop_path}, final_local_batch=${batch_count}; this watcher is closing (${live_sample_count} initially live sample(s))."
+        "Observed STOP for sample '${sample_label(sample)}': " + "source=${source}, path=${stop_path}, final_local_batch=${batch_count}; this poller is closing (${live_sample_count} initially live sample(s))."
     )
 }
 

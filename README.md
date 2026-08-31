@@ -68,7 +68,12 @@ treated_2,treated,/data/bams/treated_2,true,1
 Samples that are watched may start with an empty `bam_dir`. Samples that are
 not effectively live, either because `is_live` is `false` or because
 `--live_analysis=false`, are processed once and must have at least one BAM at
-startup. The sample sheet must contain at least one row.
+startup. Live directories are rescanned every `--bam_poll_interval_seconds`
+seconds. A new BAM is accepted only after its size and modification time remain
+unchanged for `--bam_stability_polls` consecutive scans (three by default).
+This polling approach also detects files written by Windows applications below
+WSL-mounted paths such as `/mnt/c`. The sample sheet must contain at least one
+row.
 
 For example, run the workflow with:
 

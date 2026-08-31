@@ -1,139 +1,122 @@
-import java.nio.file.ClosedWatchServiceException
 import java.nio.file.Files
 import java.nio.file.Path
-import java.nio.file.StandardWatchEventKinds
-import java.nio.file.WatchEvent
-import java.nio.file.WatchKey
-import java.nio.file.WatchService
 
 import nextflow.Global
 import nextflow.dataflow.ChannelImpl
 import nextflow.extension.CH
 
 /**
- * Closeable per-sample file watcher used by live BAM ingress.
+ * Closeable per-sample polling source used by live BAM ingress.
  *
- * Nextflow's watchPath source is intentionally open-ended. This helper owns the
- * underlying WatchService so the sample stream can bind Channel.STOP as soon as
- * that sample's STOP file is observed.
+ * Windows applications do not reliably produce Linux file notification events
+ * for files below WSL DrvFs mounts such as /mnt/c. Polling also lets ingress
+ * wait for a BAM to stop changing before downstream tools open it.
  */
 class LiveBamWatcher {
 
-    static ChannelImpl watch(Path root, Closure onActive, Closure onError) {
+    static ChannelImpl poll(
+        Path root,
+        Collection<Path> initialBams,
+        long pollIntervalMillis,
+        int requiredStablePolls,
+        Closure onActive,
+        Closure onError
+    ) {
         def target = CH.create()
-        Path watchRoot = root.toAbsolutePath().normalize()
+        Path pollRoot = root.toAbsolutePath().normalize()
+        Set<String> initiallyAccepted = initialBams.collect { Path path -> pathKey(path) } as Set<String>
 
         Global.session.addIgniter {
-            Thread watcherThread = Thread.startDaemon("bam-ingress-${watchRoot.fileName}") {
-                runWatcher(watchRoot, target, onActive, onError)
+            Thread pollerThread = Thread.startDaemon("bam-ingress-poller-${pollRoot.fileName}") {
+                runPoller(
+                    pollRoot,
+                    initiallyAccepted,
+                    pollIntervalMillis,
+                    requiredStablePolls,
+                    target,
+                    onActive,
+                    onError
+                )
             }
-            Global.onCleanup({ watcherThread.interrupt() })
+            Global.onCleanup({ pollerThread.interrupt() })
         }
 
         return new ChannelImpl(target)
     }
 
-    private static void runWatcher(Path root, def target, Closure onActive, Closure onError) {
-        WatchService watchService = null
-
+    private static void runPoller(
+        Path root,
+        Set<String> initiallyAccepted,
+        long pollIntervalMillis,
+        int requiredStablePolls,
+        def target,
+        Closure onActive,
+        Closure onError
+    ) {
         try {
-            watchService = root.fileSystem.newWatchService()
-            Map<WatchKey, Path> watchKeys = [:]
-            registerWatchDirs(root, watchService, watchKeys)
-            onActive.call(watchKeys.size())
-
-            List<Path> existingStops = findStopFiles(root)
-            if (!existingStops.isEmpty()) {
-                target.bind([source: "existing", path: existingStops[0]])
-                return
-            }
+            Set<String> acceptedBams = new LinkedHashSet<>(initiallyAccepted)
+            Map<String, Map<String, Long>> observations = [:]
+            onActive.call()
 
             while (!Thread.currentThread().isInterrupted()) {
-                WatchKey watchKey = watchService.take()
-                Path eventDir = watchKeys[watchKey]
-                if (eventDir == null) {
-                    watchKey.reset()
-                    continue
-                }
+                List<Path> stopFiles = findStopFiles(root)
+                List<Path> currentBams = findBamFiles(root)
+                Set<String> currentKeys = currentBams.collect { Path path -> pathKey(path) } as Set<String>
+                observations.keySet().removeIf { String key -> !currentKeys.contains(key) }
 
-                boolean shouldStop = false
-                for (WatchEvent<?> watchEvent : watchKey.pollEvents()) {
-                    if (watchEvent.kind() == StandardWatchEventKinds.OVERFLOW) {
-                        continue
+                currentBams.each { Path bamPath ->
+                    String key = pathKey(bamPath)
+                    if (acceptedBams.contains(key)) {
+                        return
                     }
 
-                    String source = eventSource(watchEvent.kind())
-                    Path eventPath = eventDir.resolve((Path) watchEvent.context()).toAbsolutePath().normalize()
+                    long size = Files.size(bamPath)
+                    long modified = Files.getLastModifiedTime(bamPath).toMillis()
+                    Map<String, Long> previous = observations[key]
+                    long stablePolls = previous != null && previous.size == size && previous.modified == modified
+                        ? previous.stablePolls + 1L
+                        : 1L
+                    observations[key] = [size: size, modified: modified, stablePolls: stablePolls]
 
-                    if (source == "create" && Files.isDirectory(eventPath)) {
-                        registerWatchDirs(eventPath, watchService, watchKeys)
-                    }
-
-                    target.bind([source: source, path: eventPath])
-
-                    if (isStopPath(eventPath)) {
-                        shouldStop = true
-                        break
+                    if (stablePolls >= requiredStablePolls) {
+                        acceptedBams.add(key)
+                        observations.remove(key)
+                        target.bind([source: "poll", path: bamPath])
                     }
                 }
 
-                if (shouldStop) {
+                boolean hasPendingBams = currentKeys.any { String key -> !acceptedBams.contains(key) }
+                if (!stopFiles.isEmpty() && !hasPendingBams) {
+                    target.bind([source: "poll", path: stopFiles[0]])
                     return
                 }
 
-                if (!watchKey.reset()) {
-                    watchKeys.remove(watchKey)
-                    if (watchKeys.isEmpty()) {
-                        return
-                    }
-                }
+                Thread.sleep(pollIntervalMillis)
             }
         }
         catch (InterruptedException ignored) {
             Thread.currentThread().interrupt()
         }
-        catch (ClosedWatchServiceException ignored) {
-            // The watch service is closed during normal cleanup.
-        }
         catch (Throwable error) {
             onError.call(error)
         }
         finally {
-            try {
-                if (watchService != null) {
-                    watchService.close()
-                }
-            }
-            catch (Throwable ignored) {
-                // Ignore cleanup failures after the sample stream has closed.
-            }
             target.bind(CH.stop())
         }
     }
 
-    private static void registerWatchDirs(Path root, WatchService watchService, Map<WatchKey, Path> watchKeys) {
+    private static List<Path> findBamFiles(Path root) {
+        List<Path> bamFiles = []
         Files.walk(root).withCloseable { stream ->
             def iterator = stream.iterator()
             while (iterator.hasNext()) {
-                Path dir = iterator.next()
-                if (Files.isDirectory(dir)) {
-                    registerWatchDir(dir.toAbsolutePath().normalize(), watchService, watchKeys)
+                Path path = iterator.next()
+                if (Files.isRegularFile(path) && path.fileName.toString().endsWith('.bam')) {
+                    bamFiles.add(path.toAbsolutePath().normalize())
                 }
             }
         }
-    }
-
-    private static void registerWatchDir(Path dir, WatchService watchService, Map<WatchKey, Path> watchKeys) {
-        if (watchKeys.values().contains(dir)) {
-            return
-        }
-
-        WatchKey watchKey = dir.register(
-            watchService,
-            StandardWatchEventKinds.ENTRY_CREATE,
-            StandardWatchEventKinds.ENTRY_MODIFY
-        )
-        watchKeys[watchKey] = dir
+        return bamFiles.sort { left, right -> left.toString() <=> right.toString() }
     }
 
     private static List<Path> findStopFiles(Path root) {
@@ -150,14 +133,8 @@ class LiveBamWatcher {
         return stopFiles.sort { left, right -> left.toString() <=> right.toString() }
     }
 
-    private static String eventSource(WatchEvent.Kind<?> kind) {
-        if (kind == StandardWatchEventKinds.ENTRY_CREATE) {
-            return "create"
-        }
-        if (kind == StandardWatchEventKinds.ENTRY_MODIFY) {
-            return "modify"
-        }
-        return kind.name().replace("ENTRY_", "").toLowerCase()
+    private static String pathKey(Path path) {
+        return path.toAbsolutePath().normalize().toString()
     }
 
     private static boolean isStopPath(Path path) {

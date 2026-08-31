@@ -659,6 +659,8 @@ workflow {
         live_analysis: params.live_analysis,
         timeline_analysis: params.timeline_analysis,
         sample_sheet_path: params.sample_sheet ? file(params.sample_sheet) : null,
+        bam_poll_interval_ms: (params.bam_poll_interval_seconds as Integer) * 1000,
+        bam_stability_polls: params.bam_stability_polls as Integer,
     )
     all_samples = get_samples(ingress_args)
     validate_samples(all_samples)
@@ -700,7 +702,7 @@ workflow {
         )
 
     // Finalized samples are restored from the CLI output directory and never
-    // enter BAM preparation, QC, collation, or Oarfish. Ingress watches only
+    // enter BAM preparation, QC, collation, or Oarfish. Ingress polls only
     // samples without a valid FINAL checkpoint while retaining the full
     // experiment size for downstream analysis readiness.
     sample_batch_ch = bam_ingress(
