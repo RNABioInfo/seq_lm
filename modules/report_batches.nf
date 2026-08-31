@@ -17,8 +17,11 @@ workflow join_report_batches {
         tuple(
             result.batch_index,
             result.report_sequence,
-            result.read_depth_satisfied,
+            result.differential_analysis_note,
+            result.has_differential_results,
             result.results,
+            result.stability_results,
+            result.has_stability_results,
         )
     }
 
@@ -33,14 +36,17 @@ workflow join_report_batches {
             },
             by: 0
         )
-        .map { batch_index: Integer, report_sequence: Integer, read_depth_satisfied: Boolean, differential_results_path, report_inputs: Map, qc_results_path ->
+        .map { batch_index: Integer, report_sequence: Integer, differential_analysis_note: String, has_differential_results: Boolean, differential_results_path, stability_results_path, has_stability_results: Boolean, report_inputs: Map, qc_results_path ->
             record(
                 batch_index: batch_index,
                 report_sequence: report_sequence,
                 qc_report_inputs: report_inputs,
                 qc_results: qc_results_path,
-                read_depth_satisfied: read_depth_satisfied,
+                differential_analysis_note: differential_analysis_note,
+                has_differential_results: has_differential_results,
                 differential_results: differential_results_path,
+                stability_results: stability_results_path,
+                has_stability_results: has_stability_results,
             )
         }
 

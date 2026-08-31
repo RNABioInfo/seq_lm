@@ -15,8 +15,8 @@ for quantification and edgeR without gene-set analysis. Reference inputs are
 optional for a quality-control-only run, and the GMT input is optional whenever
 gene-set enrichment is disabled.
 
-The differential-expression workflow refreshes after every synchronized live
-BAM batch. It uses the same chunk stream as quality control, but quantification
+The differential-expression workflow refreshes after every complete live BAM
+batch. It uses the same chunk stream as quality control, but quantification
 is cumulative rather than chunk-local:
 
 1. BAMs belonging to the same sample chunk are concatenated without sorting or
@@ -29,8 +29,9 @@ is cumulative rather than chunk-local:
 4. Oarfish 0.10 quantifies the cumulative genome alignments against
    `--reference_annotation`, using `--reference_genome` for soft-clip
    rescue.
-5. The latest quantification is retained for every sample. Each synchronized
-   live batch replaces the live-sample entries, reuses final-sample entries,
+5. The latest quantification is retained for every sample. Each live batch
+   replaces entries for samples contributing a new chunk, reuses entries for
+   final or already stopped samples,
    rebuilds the full count matrix, and reruns differential analysis for each
    non-control group versus the control group.
 
@@ -45,7 +46,7 @@ startup, while live samples may begin empty.
 
 Completed sample-level work is persisted below the directory supplied through
 `--out_dir`. After a sample's input stream closes normally (including a
-synchronized `STOP`), the workflow publishes its final Oarfish counts and raw
+sample-level `STOP`), the workflow publishes its final Oarfish counts and raw
 QC inputs, then writes `FINAL` as the last file in the sample directory:
 
 ```text
@@ -82,12 +83,48 @@ treated_1,treated,/data/treated_1,true
 treated_2,treated,/data/treated_2,true
 ```
 
-Post-startup batches wait for one new BAM from every live sample. Only live
-samples require `STOP`; unequal live BAM counts at shutdown are rejected as an
-incomplete synchronized run. At least two samples must use `control` as their
+Post-startup batches initially wait for one new BAM from every live sample.
+After a sample receives `STOP`, its pending BAMs are drained and it leaves all
+later synchronization barriers; remaining samples may therefore continue for
+different numbers of batches. At least two samples must use `control` as their
 group. Each other group is tested separately against the control group.
 Oarfish's EM-estimated `num_reads` values are consumed by the edgeR analysis,
 which rebuilds the current count matrix for every complete live batch.
+
+### Differential-expression stability
+
+`--stability_analysis_behavior` controls automatic depth decisions and defaults
+to `disabled`. `log` performs a dry run and records when a sample would stop.
+`terminate` records the same decision and atomically creates `STOP` in that
+sample's `bam_dir`. This release does not call MinKNOW; the action boundary is
+kept separate so MinKNOW termination can be added later.
+
+Every successful edgeR snapshot is compared with the previous successful
+snapshot. The checks cover filtered-feature identity, median absolute logFC
+change, and DE-call similarity, churn, and loss. Deferred DEA-readiness batches
+neither increment nor reset stability. The first successful snapshot is only a
+baseline. With the default `--num_stable_batches 3`, at least four successful
+edgeR snapshots are therefore required.
+
+Streaks are tracked independently for every non-control-versus-control
+contrast. A treated sample becomes eligible when its own group contrast has
+reached the threshold. A control sample becomes eligible only when every
+contrast involving the control group has reached it. Only effectively live,
+non-restored samples receive actions.
+
+Immutable audit files are published for every analyzed snapshot:
+
+```text
+<out_dir>/stability/batch_<analysis_index>/
+  config.json
+  contrast_stability.tsv
+  sample_stability.tsv
+```
+
+They contain metric values, individual checks, consecutive streaks, required
+sample contrasts, eligibility transitions, and action results. A compatible
+audit and DE snapshot seed the next invocation; changing the behavior,
+thresholds, or sample structure resets the streak with a warning.
 
 Read names must be globally unique across the BAM chunks for a sample. This is
 normally guaranteed by Nanopore UUID read identifiers. It ensures that all
@@ -157,6 +194,14 @@ and plot-type subtabs separate:
 * an edgeR `logFC` versus `logCPM` plot;
 * a volcano plot of `logFC` versus `-log10(FDR)`;
 * a heatmap containing up to 20 significant genes in each direction.
+
+The adjacent **Result Stability** tab reports every sample represented in the
+DE snapshot. Its second column is a concise status (for example, monitoring,
+stable and eligible to stop, STOP created, restored/final, or disabled),
+followed by the sample's group, live state, required contrasts, eligibility,
+action result, and analyzed batch. The report waits for the matching stability
+audit before publishing a successful DE snapshot, so the table and plots always
+describe the same batch.
 
 The heatmap selects genes by effect size after significance filtering, shows
 only the two compared conditions, and displays row z-scores of `log2(CPM + 1)`.

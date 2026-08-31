@@ -93,6 +93,23 @@ record DifferentialExpressionResult {
     results: Path
 }
 
+record StabilityComparisonInput {
+    batch_index: Integer
+    analysis_index: Integer
+    baseline: Boolean
+    previous_results: Path
+    current_results: Path
+}
+
+record StabilityAudit {
+    batch_index: Integer
+    analysis_index: Integer
+    behavior: String
+    contrast_rows: List<Map>
+    sample_rows: List<Map>
+    config: Map
+}
+
 /**
  * NanoPlot output for one merged sample chunk.
  *

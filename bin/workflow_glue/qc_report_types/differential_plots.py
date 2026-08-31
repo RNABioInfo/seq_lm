@@ -18,6 +18,7 @@ from bokeh.models import (
 from bokeh.palettes import RdBu11, Turbo256
 from ezcharts.components.ezchart import EZChart
 from ezcharts.layout.snippets import Tabs
+from ezcharts.layout.snippets.table import DataTable
 from ezcharts.plots import BokehPlot
 import numpy as np
 import pandas as pd
@@ -72,6 +73,17 @@ CONDITION_PALETTE = (
     "#CC6677",
     "#882255",
     "#AA4499",
+)
+
+STABILITY_REQUIRED_COLUMNS = (
+    "batch_index",
+    "group",
+    "sample",
+    "effectively_live",
+    "required_contrasts",
+    "eligible",
+    "behavior",
+    "action_result",
 )
 
 
@@ -448,6 +460,111 @@ def load_differential_results(
         sample_metadata=metadata,
         contrasts=contrasts,
         condition_colors=condition_palette(groups),
+    )
+
+
+def _boolean_value(value: object, label: str) -> bool:
+    """Parse a strict Boolean value from a stability audit field."""
+    normalized = str(value).strip().lower()
+    if normalized not in {"true", "false"}:
+        raise ValueError(f"Invalid Boolean value for {label}: {value!r}")
+    return normalized == "true"
+
+
+def _sample_stability_status(row: pd.Series) -> str:
+    """Return the concise user-facing status for one sample audit row."""
+    effectively_live = _boolean_value(row["effectively_live"], "effectively_live")
+    eligible = _boolean_value(row["eligible"], "eligible")
+    action_result = str(row["action_result"])
+    behavior = str(row["behavior"])
+    if not effectively_live:
+        return "Not live / restored"
+    if action_result == "stop_created":
+        return "Stable — STOP created"
+    if action_result == "stop_exists":
+        return "Stable — STOP already present"
+    if eligible and behavior == "log":
+        return "Stable — would stop"
+    if eligible and behavior == "terminate":
+        return "Stable — stopping"
+    return "Monitoring"
+
+
+def load_stability_results(
+    stability_path: str | Path | None,
+    sample_metadata: pd.DataFrame,
+    behavior: str,
+) -> pd.DataFrame:
+    """Load the sample stability audit and format its report table."""
+    if behavior not in {"disabled", "log", "terminate"}:
+        raise ValueError(f"Unknown stability behavior: {behavior}")
+    if stability_path is None:
+        status = "Disabled" if behavior == "disabled" else "Awaiting stability result"
+        return pd.DataFrame(
+            {
+                "Sample": sample_metadata.index,
+                "Status": status,
+                "Group": sample_metadata.loc[sample_metadata.index, "group"].tolist(),
+                "Live state": "Not assessed",
+                "Required contrasts": "",
+                "Eligible": "No",
+                "Action": "none",
+                "Batch": "",
+            }
+        )
+
+    path = Path(stability_path)
+    if not path.is_file():
+        raise ValueError(f"Missing sample stability audit: {path}")
+    audit = pd.read_csv(path, sep="\t", dtype=str, keep_default_na=False)
+    missing = set(STABILITY_REQUIRED_COLUMNS).difference(audit.columns)
+    if missing:
+        raise ValueError(f"{path} is missing columns: {', '.join(sorted(missing))}")
+    if audit["sample"].eq("").any() or audit["sample"].duplicated().any():
+        raise ValueError(f"{path} contains empty or duplicate sample names.")
+    expected_samples = set(sample_metadata.index)
+    observed_samples = set(audit["sample"])
+    if observed_samples != expected_samples:
+        missing_samples = sorted(expected_samples - observed_samples)
+        extra_samples = sorted(observed_samples - expected_samples)
+        details = []
+        if missing_samples:
+            details.append("missing samples: " + ", ".join(missing_samples))
+        if extra_samples:
+            details.append("unexpected samples: " + ", ".join(extra_samples))
+        raise ValueError(
+            f"{path} does not match differential metadata ({'; '.join(details)})."
+        )
+    audit = (
+        audit.set_index("sample")
+        .loc[sample_metadata.index.tolist()]
+        .reset_index()
+    )
+    expected_groups = sample_metadata.loc[audit["sample"], "group"].tolist()
+    if audit["group"].tolist() != expected_groups:
+        raise ValueError(f"{path} groups do not match differential metadata.")
+    if set(audit["behavior"]) != {behavior}:
+        raise ValueError(f"{path} behavior does not match the report configuration.")
+
+    return pd.DataFrame(
+        {
+            "Sample": audit["sample"],
+            "Status": audit.apply(_sample_stability_status, axis=1),
+            "Group": audit["group"],
+            "Live state": audit["effectively_live"].map(
+                lambda value: (
+                    "Live"
+                    if _boolean_value(value, "effectively_live")
+                    else "Final / restored"
+                )
+            ),
+            "Required contrasts": audit["required_contrasts"],
+            "Eligible": audit["eligible"].map(
+                lambda value: "Yes" if _boolean_value(value, "eligible") else "No"
+            ),
+            "Action": audit["action_result"],
+            "Batch": audit["batch_index"],
+        }
     )
 
 
@@ -1016,8 +1133,15 @@ def add_differential_analysis(
     data: DifferentialResult,
     lfc_cutoff: float,
     padj_cutoff: float,
+    stability_results: pd.DataFrame | None = None,
 ) -> None:
-    """Add overview, contrast, and plot-type tabs to the report section."""
+    """Add overview, contrast, and result-stability tabs to the report section."""
+    if stability_results is None:
+        stability_results = load_stability_results(
+            None,
+            data.sample_metadata,
+            "disabled",
+        )
     tabs = Tabs()
     with tabs.add_tab("Overview"):
         EZChart(create_pca_plot(data), "epi2melabs", height="460px")
@@ -1063,3 +1187,6 @@ def add_differential_analysis(
                         "epi2melabs",
                         height=f"{getattr(heatmap, 'report_height', 720)}px",
                     )
+
+    with tabs.add_tab("Result Stability"):
+        DataTable.from_pandas(stability_results, use_index=False)

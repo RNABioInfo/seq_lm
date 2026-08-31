@@ -89,9 +89,11 @@ The BAM sample sheet uses `alias`, `group`, and `bam_dir` columns, plus optional
 when both `--live_analysis` and its row-level `is_live` value are true.
 
 Final samples are processed once from all BAMs present at startup and must have
-at least one BAM. Later QC checkpoints wait for one new BAM from every live
-sample, retain the final-sample QC inputs, and refresh the cumulative report.
-Only live samples require `STOP` files. The workflow treats `alias` as the
+at least one BAM. Later QC checkpoints wait for one new BAM from every currently
+active live sample, retain final or stopped samples' QC inputs, and refresh the
+cumulative report. A sample leaves later batch barriers after its `STOP` is
+drained, so other samples may continue independently. Only live samples require
+`STOP` files. The workflow treats `alias` as the
 sample name and requires at least two rows where `group` is `control`.
 
 QC-only startup batches are not published as incomplete reports. The first

@@ -303,6 +303,113 @@ def test_overview_orders_pca_mds_and_bcv(tmp_path, monkeypatch):
     ]
 
 
+def test_load_stability_results_places_status_second_and_orders_samples(tmp_path):
+    """The stability table is sample ordered with its status easy to scan."""
+    metadata = sample_metadata().rename(columns={"Name": "sample", "Group": "group"})
+    metadata = metadata.set_index("sample")
+    audit = tmp_path / "sample_stability.tsv"
+    pd.DataFrame(
+        [
+            {
+                "batch_index": 4,
+                "group": "treated",
+                "sample": "treated_2",
+                "effectively_live": "true",
+                "required_contrasts": "group_treated_vs_control",
+                "eligible": "true",
+                "behavior": "log",
+                "action_result": "would_stop",
+            },
+            {
+                "batch_index": 4,
+                "group": "control",
+                "sample": "control_1",
+                "effectively_live": "true",
+                "required_contrasts": "group_treated_vs_control",
+                "eligible": "false",
+                "behavior": "log",
+                "action_result": "none",
+            },
+            {
+                "batch_index": 4,
+                "group": "treated",
+                "sample": "treated_1",
+                "effectively_live": "false",
+                "required_contrasts": "group_treated_vs_control",
+                "eligible": "true",
+                "behavior": "log",
+                "action_result": "not_live",
+            },
+            {
+                "batch_index": 4,
+                "group": "control",
+                "sample": "control_2",
+                "effectively_live": "true",
+                "required_contrasts": "group_treated_vs_control",
+                "eligible": "true",
+                "behavior": "log",
+                "action_result": "stop_created",
+            },
+        ]
+    ).to_csv(audit, sep="\t", index=False)
+
+    table = dp.load_stability_results(audit, metadata, "log")
+
+    assert table.columns[:2].tolist() == ["Sample", "Status"]
+    assert table["Sample"].tolist() == metadata.index.tolist()
+    assert table["Status"].tolist() == [
+        "Monitoring",
+        "Stable — STOP created",
+        "Not live / restored",
+        "Stable — would stop",
+    ]
+
+
+def test_disabled_stability_table_reports_every_sample():
+    """Disabled analysis remains visible and explicit for every sample."""
+    metadata = sample_metadata().rename(columns={"Name": "sample", "Group": "group"})
+    metadata = metadata.set_index("sample")
+
+    table = dp.load_stability_results(None, metadata, "disabled")
+
+    assert table.columns[:2].tolist() == ["Sample", "Status"]
+    assert table["Sample"].tolist() == metadata.index.tolist()
+    assert set(table["Status"]) == {"Disabled"}
+
+
+def test_result_stability_is_last_differential_tab(tmp_path, monkeypatch):
+    """Result Stability is rendered beside Overview and Contrasts."""
+    metadata = write_edge_r_tree(tmp_path)
+    data = dp.load_differential_results(tmp_path, metadata)
+    tab_names = []
+    captured_tables = []
+
+    class FakeTabContext:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    class FakeTabs:
+        def add_tab(self, name):
+            tab_names.append(name)
+            return FakeTabContext()
+
+    monkeypatch.setattr(dp, "Tabs", FakeTabs)
+    monkeypatch.setattr(dp, "EZChart", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        dp.DataTable,
+        "from_pandas",
+        lambda table, **_kwargs: captured_tables.append(table),
+    )
+
+    dp.add_differential_analysis(data, lfc_cutoff=1, padj_cutoff=0.05)
+
+    assert tab_names == ["Overview", "Contrasts", "Result Stability"]
+    assert captured_tables[0].columns[:2].tolist() == ["Sample", "Status"]
+
+
 def test_ma_and_volcano_include_cutoff_spans(tmp_path):
     """Both contrast plots show their applicable decision thresholds."""
     metadata = write_edge_r_tree(tmp_path)

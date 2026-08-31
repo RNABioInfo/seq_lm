@@ -109,6 +109,64 @@
           "minimum": 1,
           "default": 2,
           "description": "Minimum number of samples per group that must satisfy the DEA read-count threshold."
+        },
+        "stability_analysis_behavior": {
+          "type": "string",
+          "enum": ["disabled", "log", "terminate"],
+          "default": "disabled",
+          "description": "Response when every contrast involving a live sample has remained stable: disable assessment, log a dry-run event, or create a STOP marker."
+        },
+        "num_stable_batches": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 3,
+          "description": "Number of consecutive stable DE snapshot comparisons required before a sample is eligible to stop."
+        },
+        "stability_max_feature_diff_fraction": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.05,
+          "description": "Maximum fraction of filtered features added or dropped between DE snapshots."
+        },
+        "stability_max_median_abs_lfc_delta": {
+          "type": "number",
+          "minimum": 0,
+          "default": 0.1,
+          "description": "Maximum median absolute change in log2 fold change between DE snapshots."
+        },
+        "stability_min_jaccard_similarity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.9,
+          "description": "Minimum Jaccard similarity of sufficiently large DE-call sets."
+        },
+        "stability_max_call_churn_fraction": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.1,
+          "description": "Maximum fraction of DE calls added or lost between snapshots."
+        },
+        "stability_max_lost_call_fraction": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.1,
+          "description": "Maximum fraction of prior DE calls absent from the current snapshot."
+        },
+        "stability_min_de_calls_for_fraction_metrics": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 20,
+          "description": "DE-call union size at which fractional set-stability metrics replace the small-set absolute-change rule."
+        },
+        "stability_max_small_set_call_changes": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 2,
+          "description": "Maximum absolute DE-call transitions allowed when the call union is small."
         }
       }
     },
@@ -279,6 +337,40 @@
         ],
         "properties": {
           "differential_expression": {
+            "const": true
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "stability_analysis_behavior": {
+            "enum": ["log", "terminate"]
+          }
+        },
+        "required": ["stability_analysis_behavior"]
+      },
+      "then": {
+        "properties": {
+          "differential_expression": {
+            "const": true
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "stability_analysis_behavior": {
+            "const": "terminate"
+          }
+        },
+        "required": ["stability_analysis_behavior"]
+      },
+      "then": {
+        "properties": {
+          "live_analysis": {
             "const": true
           }
         }

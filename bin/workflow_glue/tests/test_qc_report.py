@@ -67,7 +67,14 @@ def test_write_report_rebrands_labs_header(tmp_path):
     assert "#004191" in html
 
 
-def test_write_report_adds_dea_readiness_notice_to_subtitle(tmp_path):
+@pytest.mark.parametrize(
+    "notice",
+    [
+        "For DEA, the required read depth is not yet satisfied.",
+        "For DEA, the sample quantifications contain no matching feature IDs.",
+    ],
+)
+def test_write_report_adds_dea_readiness_notice_to_subtitle(tmp_path, notice):
     """A failed DEA precondition is visible without adding a DEA tab."""
 
     class Report:
@@ -84,12 +91,12 @@ def test_write_report_adds_dea_readiness_notice_to_subtitle(tmp_path):
         report_path,
         "2",
         0,
-        "For DEA, the required read depth is not yet satisfied.",
+        notice,
     )
 
     html = report_path.read_text()
     assert "Workflow results." in html
-    assert "For DEA, the required read depth is not yet satisfied." in html
+    assert notice in html
     assert 'class="seq-lm-dea-readiness-notice"' in html
 
 
@@ -200,6 +207,19 @@ def write_differential_results(path):
         "carbon_up\tgene_4\n"
         "carbon_mixed\tgene_2\n"
         "carbon_mixed\tgene_3\n"
+    )
+
+
+def write_stability_results(path):
+    """Write the matching sample-level stability audit."""
+    path.write_text(
+        "analysis_index\tbatch_index\tgroup\tsample\tbam_dir\t"
+        "effectively_live\trequired_contrasts\teligible\tnewly_eligible\t"
+        "behavior\taction_result\n"
+        "3\t2\tcontrol\tcontrol_1\t/data/control_1\ttrue\t"
+        "group_time_point_1_vs_control\tfalse\tfalse\tlog\tnone\n"
+        "3\t2\ttime_point_1\ttreatment_1\t/data/treatment_1\ttrue\t"
+        "group_time_point_1_vs_control\ttrue\ttrue\tlog\tlogged\n"
     )
 
 
@@ -325,6 +345,8 @@ def test_qc_report_writes_html(tmp_path):
     )
     differential_results = tmp_path / "differential_results"
     write_differential_results(differential_results)
+    stability_results = tmp_path / "sample_stability.tsv"
+    write_stability_results(stability_results)
 
     versions = tmp_path / "versions"
     versions.mkdir()
@@ -347,6 +369,10 @@ def test_qc_report_writes_html(tmp_path):
             "2",
             "--differential-results",
             str(differential_results),
+            "--stability-results",
+            str(stability_results),
+            "--stability-behavior",
+            "log",
             "--gene-set-enrichment",
             "--refresh-seconds",
             "0",
@@ -386,6 +412,9 @@ def test_qc_report_writes_html(tmp_path):
     assert "logFC vs logCPM" in html
     assert "Volcano plot" in html
     assert "Top differential genes" in html
+    assert "Result Stability" in html
+    assert "Stable — would stop" in html
+    assert "Monitoring" in html
     assert "fry signed directional significance" in html
     assert "Gene-set barcode and enrichment worm" in html
     assert "GSVA scores across samples" in html
@@ -452,7 +481,8 @@ def test_qc_report_writes_html(tmp_path):
             str(versions),
             "--params",
             str(params),
-            "--dea-read-depth-not-satisfied",
+            "--dea-readiness-notice",
+            "For DEA, the required read depth is not yet satisfied.",
             "--refresh-seconds",
             "0",
         ]

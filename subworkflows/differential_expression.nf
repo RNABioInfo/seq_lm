@@ -46,6 +46,9 @@ workflow differential_expression {
     annotation: Path
     gene_sets: Path
     gene_set_enrichment: Boolean
+    de_lfc_cutoff: Number
+    min_read_count: Integer
+    min_replicate_sample_count: Integer
 
     main:
     collated_bams = collate_chunk_bam(merged_bams)
@@ -206,37 +209,45 @@ workflow differential_expression {
     }
 
     checked_quantified_sample_batches_ch = check_differential_analysis_readiness(
-        quantified_sample_batches_ch
+        quantified_sample_batches_ch,
+        min_read_count,
+        min_replicate_sample_count
     )
     readiness_status_ch = checked_quantified_sample_batches_ch.map { checked ->
         def readiness_text: String = checked.readiness.text.trim().toLowerCase()
-        if (!(readiness_text in ['true', 'false'])) {
+        def readiness_notices: Map<String, String> = [
+            insufficient_read_depth: 'For DEA, the required read depth is not yet satisfied.',
+            no_matching_feature_ids: 'For DEA, the sample quantifications contain no matching feature IDs.',
+        ]
+        if (readiness_text != 'ready' && !readiness_notices.containsKey(readiness_text)) {
             error(
                 "Unexpected differential-analysis readiness result for batch " +
                 "${checked.batch_index}: '${readiness_text}'."
             )
         }
-        tuple(checked.batch_index, readiness_text == 'true')
+        tuple(checked.batch_index, readiness_text == 'ready', readiness_notices[readiness_text] ?: '')
     }
     readiness_decisions_ch = quantified_sample_batches_ch
         .map { quant_batch -> tuple(quant_batch.batch_index, quant_batch) }
         .join(readiness_status_ch, by: 0)
-        .map { _batch_index: Integer, quant_batch, read_depth_satisfied: Boolean ->
+        .map { _batch_index: Integer, quant_batch, differential_analysis_ready: Boolean, differential_analysis_note: String ->
             record(
                 quant_batch: quant_batch,
-                read_depth_satisfied: read_depth_satisfied,
+                differential_analysis_ready: differential_analysis_ready,
+                differential_analysis_note: differential_analysis_note,
             )
         }
     ready_quantified_sample_batches_ch = readiness_decisions_ch
-        .filter { decision -> decision.read_depth_satisfied }
+        .filter { decision -> decision.differential_analysis_ready }
         .map { decision -> decision.quant_batch }
     deferred_report_batches_ch = readiness_decisions_ch
-        .filter { decision -> !decision.read_depth_satisfied }
+        .filter { decision -> !decision.differential_analysis_ready }
         .map { decision ->
             record(
                 batch_index: decision.quant_batch.batch_index,
                 report_sequence: decision.quant_batch.report_sequence,
-                read_depth_satisfied: false,
+                differential_analysis_note: decision.differential_analysis_note,
+                has_differential_results: false,
                 results: optional_file(),
             )
         }
@@ -245,6 +256,7 @@ workflow differential_expression {
         ready_quantified_sample_batches_ch,
         gene_sets,
         annotation,
+        de_lfc_cutoff,
     )
     if (gene_set_enrichment) {
         analysis_results_ch = run_gene_set_variation_analysis(edgeR_results_ch)
@@ -256,7 +268,8 @@ workflow differential_expression {
         record(
             batch_index: result.batch_index,
             report_sequence: result.report_sequence,
-            read_depth_satisfied: true,
+            differential_analysis_note: '',
+            has_differential_results: true,
             results: result.results,
         )
     }
@@ -413,7 +426,8 @@ process oarfish_quant {
 
 /**
  * Check that each experimental group contains enough samples at the requested
- * cumulative read depth before launching edgeR.
+ * cumulative read depth and that all quantifications share feature IDs before
+ * launching edgeR.
  */
 process check_differential_analysis_readiness {
     label 'seq_lm_qc'
@@ -422,6 +436,8 @@ process check_differential_analysis_readiness {
 
     input:
     quant_batch: QuantifiedSampleBatch
+    min_read_count: Integer
+    min_replicate_sample_count: Integer
 
     stage:
     stageAs quant_batch.samples*.counts, 'quant/input?.quant'
@@ -445,8 +461,8 @@ process check_differential_analysis_readiness {
         printf '%s\\n' ${quoted_manifest_rows} >> quant_manifest.tsv
 
         stability_read_count \\
-            --min_read_count ${params.min_read_count} \\
-            --min_replicate_sample_count ${params.min_replicate_sample_count} \\
+            --min_read_count ${min_read_count} \\
+            --min_replicate_sample_count ${min_replicate_sample_count} \\
             --metadata quant_manifest.tsv \\
             --counts_dir quant \\
             > differential_analysis_ready.txt
@@ -466,6 +482,7 @@ process run_differential_expression_edgeR {
     quant_batch: QuantifiedSampleBatch
     gene_sets: Path
     annotation: Path
+    de_lfc_cutoff: Number
 
     stage:
     stageAs quant_batch.samples*.counts, 'quant/input?.quant'
@@ -499,7 +516,7 @@ process run_differential_expression_edgeR {
             --output_dir ${results_dir} \
             ${gene_set_args} \
             --annotation ${annotation} \
-            --lfc ${params.de_lfc_cutoff}
+            --lfc ${de_lfc_cutoff}
         """
 }
 

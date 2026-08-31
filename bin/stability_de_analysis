@@ -1,0 +1,357 @@
+#!/usr/bin/env python3
+
+"""Compare consecutive edgeR snapshots and report stability per contrast."""
+
+from __future__ import annotations
+
+import argparse as ap
+import math
+import pathlib as pl
+import re
+from dataclasses import asdict, dataclass
+
+import pandas as pd
+
+
+CONTRAST_DIRECTORY = re.compile(r"^group_(.+)_vs_(.+)$")
+FEATURE_COUNTS_FILE = "feature_counts.tsv"
+SAMPLE_METADATA_FILE = "sample_metadata.tsv"
+EDGE_R_RESULTS_FILE = "edgeR_results.tsv"
+
+
+@dataclass(frozen=True)
+class FilteredFeatureCounts:
+    current_counts: pd.DataFrame
+    previous_counts: pd.DataFrame
+
+    @staticmethod
+    def from_paths(current_counts_path: pl.Path, previous_counts_path: pl.Path) -> "FilteredFeatureCounts":
+        return FilteredFeatureCounts(
+            _read_unique_feature_table(current_counts_path, ("feature_id",)),
+            _read_unique_feature_table(previous_counts_path, ("feature_id",)),
+        )
+
+
+@dataclass(frozen=True)
+class DEResults:
+    current_results: pd.DataFrame
+    previous_results: pd.DataFrame
+
+    @staticmethod
+    def from_paths(current_results_path: pl.Path, previous_results_path: pl.Path) -> "DEResults":
+        required = ("feature_id", "logFC", "FDR")
+        return DEResults(
+            _read_unique_feature_table(current_results_path, required),
+            _read_unique_feature_table(previous_results_path, required),
+        )
+
+
+@dataclass(frozen=True)
+class FeatureMetrics:
+    current_feature_count: int
+    previous_feature_count: int
+    added_feature_fraction: float
+    dropped_feature_fraction: float
+    feature_identity_stable: bool
+
+
+@dataclass(frozen=True)
+class ContrastMetrics:
+    contrast_id: str
+    target_group: str
+    reference_group: str
+    current_de_call_count: int
+    previous_de_call_count: int
+    de_call_union_count: int
+    changed_de_call_count: int
+    added_feature_fraction: float
+    dropped_feature_fraction: float
+    median_abs_lfc_delta: float
+    jaccard_similarity: float
+    call_churn_fraction: float
+    lost_call_fraction: float
+    feature_identity_stable: bool
+    effect_size_stable: bool
+    de_calls_stable: bool
+    stable: bool
+    reason: str
+
+
+def _read_unique_feature_table(path: pl.Path, required_columns: tuple[str, ...]) -> pd.DataFrame:
+    if not path.is_file():
+        raise ValueError(f"Required stability input does not exist: {path}")
+    table = pd.read_csv(path, sep="\t")
+    missing = set(required_columns).difference(table.columns)
+    if missing:
+        raise ValueError(f"{path} is missing columns: {', '.join(sorted(missing))}")
+    if table["feature_id"].isna().any() or table["feature_id"].astype(str).eq("").any():
+        raise ValueError(f"{path} contains empty feature IDs.")
+    if table["feature_id"].duplicated().any():
+        raise ValueError(f"{path} contains duplicate feature IDs.")
+    return table
+
+
+def _fraction_argument(value: str) -> float:
+    try:
+        parsed = float(value)
+    except ValueError as error:
+        raise ap.ArgumentTypeError("must be a number") from error
+    if not math.isfinite(parsed) or not 0 <= parsed <= 1:
+        raise ap.ArgumentTypeError("must be finite and between 0 and 1")
+    return parsed
+
+
+def _positive_fraction_argument(value: str) -> float:
+    parsed = _fraction_argument(value)
+    if parsed == 0:
+        raise ap.ArgumentTypeError("must be greater than 0 and at most 1")
+    return parsed
+
+
+def _nonnegative_float_argument(value: str) -> float:
+    try:
+        parsed = float(value)
+    except ValueError as error:
+        raise ap.ArgumentTypeError("must be a number") from error
+    if not math.isfinite(parsed) or parsed < 0:
+        raise ap.ArgumentTypeError("must be finite and nonnegative")
+    return parsed
+
+
+def _positive_integer_argument(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as error:
+        raise ap.ArgumentTypeError("must be an integer") from error
+    if parsed < 1:
+        raise ap.ArgumentTypeError("must be at least 1")
+    return parsed
+
+
+def _nonnegative_integer_argument(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as error:
+        raise ap.ArgumentTypeError("must be an integer") from error
+    if parsed < 0:
+        raise ap.ArgumentTypeError("must be nonnegative")
+    return parsed
+
+
+def argparser() -> ap.ArgumentParser:
+    parser = ap.ArgumentParser(description=__doc__)
+    inputs = parser.add_argument_group("checkpoint inputs")
+    inputs.add_argument("--current-results", required=True, type=pl.Path, metavar="DIR")
+    inputs.add_argument("--previous-results", required=True, type=pl.Path, metavar="DIR")
+    inputs.add_argument("--output", required=True, type=pl.Path, metavar="TSV")
+    thresholds = parser.add_argument_group("stability thresholds")
+    thresholds.add_argument("--max-feature-diff-fraction", required=True, type=_fraction_argument)
+    thresholds.add_argument("--max-median-abs-lfc-delta", required=True, type=_nonnegative_float_argument)
+    thresholds.add_argument("--min-jaccard-similarity", required=True, type=_fraction_argument)
+    thresholds.add_argument("--max-call-churn-fraction", required=True, type=_fraction_argument)
+    thresholds.add_argument("--max-lost-call-fraction", required=True, type=_fraction_argument)
+    thresholds.add_argument("--max-fdr", required=True, type=_positive_fraction_argument)
+    thresholds.add_argument("--min-abs-lfc", required=True, type=_nonnegative_float_argument)
+    thresholds.add_argument("--min-de-calls-for-fraction-metrics", required=True, type=_positive_integer_argument)
+    thresholds.add_argument("--max-small-set-call-changes", required=True, type=_nonnegative_integer_argument)
+    return parser
+
+
+def feature_metrics(max_diff_fraction: float, feature_counts: FilteredFeatureCounts) -> FeatureMetrics:
+    if not math.isfinite(max_diff_fraction) or not 0 <= max_diff_fraction <= 1:
+        raise ValueError("max_diff_fraction must be finite and between 0 and 1.")
+    current_ids = set(feature_counts.current_counts["feature_id"])
+    previous_ids = set(feature_counts.previous_counts["feature_id"])
+    if not current_ids or not previous_ids:
+        return FeatureMetrics(len(current_ids), len(previous_ids), 1.0, 1.0, False)
+    added_fraction = len(current_ids - previous_ids) / len(current_ids)
+    dropped_fraction = len(previous_ids - current_ids) / len(previous_ids)
+    return FeatureMetrics(
+        len(current_ids), len(previous_ids), added_fraction, dropped_fraction,
+        max(added_fraction, dropped_fraction) <= max_diff_fraction,
+    )
+
+
+def feature_identity_is_stable(max_diff_fraction: float, feature_counts: FilteredFeatureCounts) -> bool:
+    return feature_metrics(max_diff_fraction, feature_counts).feature_identity_stable
+
+
+def _numeric_column(table: pd.DataFrame, column: str, label: str) -> pd.Series:
+    values = pd.to_numeric(table[column], errors="coerce")
+    if values.isna().any() or not values.map(math.isfinite).all():
+        raise ValueError(f"{label} contains non-finite or non-numeric {column} values.")
+    return values
+
+
+def effect_size_metrics(de_results: DEResults) -> float:
+    current = de_results.current_results[["feature_id", "logFC"]].copy()
+    previous = de_results.previous_results[["feature_id", "logFC"]].copy()
+    current["logFC"] = _numeric_column(current, "logFC", "Current DE results")
+    previous["logFC"] = _numeric_column(previous, "logFC", "Previous DE results")
+    shared = current.merge(previous, on="feature_id", suffixes=("_current", "_previous"), validate="one_to_one")
+    if shared.empty:
+        return math.nan
+    return float((shared["logFC_current"] - shared["logFC_previous"]).abs().median())
+
+
+def effect_size_is_stable(max_median_abs_lfc_delta: float, de_results: DEResults) -> bool:
+    if not math.isfinite(max_median_abs_lfc_delta) or max_median_abs_lfc_delta < 0:
+        raise ValueError("max_median_abs_lfc_delta must be finite and nonnegative.")
+    delta = effect_size_metrics(de_results)
+    return math.isfinite(delta) and delta <= max_median_abs_lfc_delta
+
+
+def _significant_feature_ids(results: pd.DataFrame, max_fdr: float, min_abs_lfc: float, label: str) -> set[str]:
+    log_fc = _numeric_column(results, "logFC", label)
+    fdr = _numeric_column(results, "FDR", label)
+    if ((fdr < 0) | (fdr > 1)).any():
+        raise ValueError(f"{label} contains FDR values outside [0, 1].")
+    return set(results.loc[(fdr <= max_fdr) & (log_fc.abs() >= min_abs_lfc), "feature_id"])
+
+
+def call_metrics(max_fdr: float, min_abs_lfc: float, de_results: DEResults) -> tuple[set[str], set[str], int, int, float, float, float]:
+    current = _significant_feature_ids(de_results.current_results, max_fdr, min_abs_lfc, "Current DE results")
+    previous = _significant_feature_ids(de_results.previous_results, max_fdr, min_abs_lfc, "Previous DE results")
+    union = current | previous
+    changed = current ^ previous
+    shared = current & previous
+    lost = previous - current
+    return (
+        current, previous, len(union), len(changed),
+        len(shared) / len(union) if union else 1.0,
+        len(changed) / len(union) if union else 0.0,
+        len(lost) / len(previous) if previous else 0.0,
+    )
+
+
+def de_calls_are_stable(
+    min_jaccard_similarity: float,
+    max_call_churn_fraction: float,
+    max_lost_call_fraction: float,
+    max_fdr: float,
+    min_abs_lfc: float,
+    min_de_calls_for_fraction_metrics: int,
+    max_small_set_call_changes: int,
+    de_results: DEResults,
+) -> bool:
+    for name, value in {
+        "min_jaccard_similarity": min_jaccard_similarity,
+        "max_call_churn_fraction": max_call_churn_fraction,
+        "max_lost_call_fraction": max_lost_call_fraction,
+    }.items():
+        if not math.isfinite(value) or not 0 <= value <= 1:
+            raise ValueError(f"{name} must be finite and between 0 and 1.")
+    if not math.isfinite(max_fdr) or not 0 < max_fdr <= 1:
+        raise ValueError("max_fdr must be finite, greater than 0, and at most 1.")
+    if not math.isfinite(min_abs_lfc) or min_abs_lfc < 0:
+        raise ValueError("min_abs_lfc must be finite and nonnegative.")
+    if min_de_calls_for_fraction_metrics < 1:
+        raise ValueError("min_de_calls_for_fraction_metrics must be at least 1.")
+    if max_small_set_call_changes < 0:
+        raise ValueError("max_small_set_call_changes must be nonnegative.")
+    _, _, union_count, changed_count, jaccard, churn, lost = call_metrics(max_fdr, min_abs_lfc, de_results)
+    if union_count < min_de_calls_for_fraction_metrics:
+        return changed_count <= max_small_set_call_changes
+    return jaccard >= min_jaccard_similarity and churn <= max_call_churn_fraction and lost <= max_lost_call_fraction
+
+
+def _safe_name(value: str) -> str:
+    return re.sub(r"[^A-Za-z0-9._-]", "_", value)
+
+
+def _read_groups(results_dir: pl.Path) -> list[str]:
+    path = results_dir / SAMPLE_METADATA_FILE
+    if not path.is_file():
+        raise ValueError(f"Missing sample metadata: {path}")
+    metadata = pd.read_csv(path, sep="\t")
+    missing = {"sample", "group"}.difference(metadata.columns)
+    if missing:
+        raise ValueError(f"{path} is missing columns: {', '.join(sorted(missing))}")
+    if metadata[["sample", "group"]].isna().any().any() or metadata.duplicated(["group", "sample"]).any():
+        raise ValueError(f"{path} contains empty or duplicate sample metadata.")
+    return metadata["group"].astype(str).drop_duplicates().tolist()
+
+
+def _contrast_groups(contrast_id: str, groups: list[str]) -> tuple[str, str]:
+    if not CONTRAST_DIRECTORY.fullmatch(contrast_id):
+        raise ValueError(f"Invalid contrast directory name: {contrast_id}")
+    matches = [
+        (target, reference)
+        for target in groups for reference in groups
+        if target != reference and contrast_id == f"group_{_safe_name(target)}_vs_{_safe_name(reference)}"
+    ]
+    if len(matches) != 1:
+        raise ValueError(f"Could not uniquely resolve contrast '{contrast_id}' to sample groups.")
+    return matches[0]
+
+
+def _contrast_paths(results_dir: pl.Path) -> dict[str, pl.Path]:
+    if not results_dir.is_dir():
+        raise ValueError(f"Results directory does not exist: {results_dir}")
+    paths = {
+        child.name: child / EDGE_R_RESULTS_FILE
+        for child in results_dir.iterdir()
+        if child.is_dir() and (child / EDGE_R_RESULTS_FILE).is_file()
+    }
+    if not paths:
+        raise ValueError(f"No contrast directories containing {EDGE_R_RESULTS_FILE} were found in {results_dir}.")
+    return paths
+
+
+def assess_results(previous_dir: pl.Path, current_dir: pl.Path, args: ap.Namespace) -> list[ContrastMetrics]:
+    previous_groups = _read_groups(previous_dir)
+    current_groups = _read_groups(current_dir)
+    if set(previous_groups) != set(current_groups):
+        raise ValueError("Sample groups changed between stability checkpoints.")
+    previous_paths = _contrast_paths(previous_dir)
+    current_paths = _contrast_paths(current_dir)
+    if previous_paths.keys() != current_paths.keys():
+        raise ValueError("Contrast sets changed between stability checkpoints.")
+    features = feature_metrics(
+        args.max_feature_diff_fraction,
+        FilteredFeatureCounts.from_paths(current_dir / FEATURE_COUNTS_FILE, previous_dir / FEATURE_COUNTS_FILE),
+    )
+    assessments: list[ContrastMetrics] = []
+    for contrast_id in sorted(current_paths):
+        target_group, reference_group = _contrast_groups(contrast_id, current_groups)
+        de_results = DEResults.from_paths(current_paths[contrast_id], previous_paths[contrast_id])
+        median_delta = effect_size_metrics(de_results)
+        current_calls, previous_calls, union_count, changed_count, jaccard, churn, lost = call_metrics(
+            args.max_fdr, args.min_abs_lfc, de_results
+        )
+        effect_stable = math.isfinite(median_delta) and median_delta <= args.max_median_abs_lfc_delta
+        calls_stable = (
+            changed_count <= args.max_small_set_call_changes
+            if union_count < args.min_de_calls_for_fraction_metrics
+            else jaccard >= args.min_jaccard_similarity
+            and churn <= args.max_call_churn_fraction
+            and lost <= args.max_lost_call_fraction
+        )
+        checks = {
+            "feature_identity": features.feature_identity_stable,
+            "effect_size": effect_stable,
+            "de_calls": calls_stable,
+        }
+        assessments.append(ContrastMetrics(
+            contrast_id, target_group, reference_group, len(current_calls), len(previous_calls),
+            union_count, changed_count, features.added_feature_fraction, features.dropped_feature_fraction,
+            median_delta, jaccard, churn, lost, checks["feature_identity"], checks["effect_size"],
+            checks["de_calls"], all(checks.values()),
+            "stable" if all(checks.values()) else ",".join(name for name, passed in checks.items() if not passed),
+        ))
+    return assessments
+
+
+def main() -> int:
+    args = argparser().parse_args()
+    try:
+        assessments = assess_results(args.previous_results, args.current_results, args)
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame([asdict(assessment) for assessment in assessments]).to_csv(args.output, sep="\t", index=False)
+    except (OSError, ValueError, pd.errors.ParserError) as error:
+        raise SystemExit(f"stability_de_analysis: {error}") from error
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

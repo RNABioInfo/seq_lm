@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-"""Determine whether every DEA group has enough sufficiently deep samples."""
+"""Check count-table preconditions for differential expression analysis."""
 
 import argparse as ap
 import csv
@@ -8,13 +8,40 @@ import pathlib as pl
 import sys
 
 
-def analysis_is_stable(
+READY = "ready"
+INSUFFICIENT_READ_DEPTH = "insufficient_read_depth"
+NO_MATCHING_FEATURE_IDS = "no_matching_feature_ids"
+FEATURE_ID_COLUMNS = (
+    "tname",
+    "target_id",
+    "transcript_id",
+    "gene_id",
+    "feature_id",
+    "name",
+    "id",
+)
+
+
+def _feature_id_column(fieldnames: list[str] | None) -> str:
+    """Return the feature-ID column using the same precedence as edgeR."""
+    available = fieldnames or []
+    by_lowercase = {column.lower(): column for column in available}
+    for candidate in FEATURE_ID_COLUMNS:
+        if candidate in by_lowercase:
+            return by_lowercase[candidate]
+    raise ValueError(
+        "Count file has no supported feature-ID column. Available columns: "
+        + ", ".join(available)
+    )
+
+
+def analysis_readiness(
     metadata_path: pl.Path,
     counts_dir: pl.Path,
     min_read_count: int,
     min_replicate_sample_count: int,
-) -> bool:
-    """Return whether each group has enough samples above the read threshold."""
+) -> str:
+    """Return the first unmet DEA precondition, or ``ready``."""
     with metadata_path.open(newline="") as metadata_handle:
         metadata_reader = csv.DictReader(metadata_handle, delimiter="\t")
         metadata_rows = list(metadata_reader)
@@ -28,9 +55,10 @@ def analysis_is_stable(
             + ", ".join(sorted(missing_columns))
         )
     if not metadata_rows:
-        return False
+        return INSUFFICIENT_READ_DEPTH
 
     passing_replicates_by_group: dict[str, int] = {}
+    shared_feature_ids: set[str] | None = None
     for metadata_row in metadata_rows:
         counts_path = counts_dir / metadata_row["count_file"]
         with counts_path.open(newline="") as counts_handle:
@@ -42,22 +70,53 @@ def analysis_is_stable(
                     f"Count file {counts_path} is missing required columns: "
                     + ", ".join(sorted(missing_count_columns))
                 )
-            total_reads = sum(float(row["num_reads"]) for row in counts_reader)
+            feature_id_column = _feature_id_column(counts_reader.fieldnames)
+            total_reads = 0.0
+            feature_ids: set[str] = set()
+            for row in counts_reader:
+                total_reads += float(row["num_reads"])
+                if row.get(feature_id_column):
+                    feature_ids.add(row[feature_id_column])
+            shared_feature_ids = (
+                feature_ids
+                if shared_feature_ids is None
+                else shared_feature_ids.intersection(feature_ids)
+            )
 
         group = metadata_row["group"]
         passing_replicates_by_group.setdefault(group, 0)
         if total_reads >= min_read_count:
             passing_replicates_by_group[group] += 1
 
-    return all(
+    read_depth_satisfied = all(
         replicate_count >= min_replicate_sample_count
         for replicate_count in passing_replicates_by_group.values()
     )
+    if not read_depth_satisfied:
+        return INSUFFICIENT_READ_DEPTH
+    if not shared_feature_ids:
+        return NO_MATCHING_FEATURE_IDS
+    return READY
+
+
+def analysis_is_stable(
+    metadata_path: pl.Path,
+    counts_dir: pl.Path,
+    min_read_count: int,
+    min_replicate_sample_count: int,
+) -> bool:
+    """Retain the public Boolean helper for callers that only need readiness."""
+    return analysis_readiness(
+        metadata_path,
+        counts_dir,
+        min_read_count,
+        min_replicate_sample_count,
+    ) == READY
 
 
 def main() -> int:
     argument_parser = ap.ArgumentParser(
-        description="Script for determining whether min requirements for DEA are fulfilled"
+        description="Check read-depth and feature-ID preconditions for DEA"
     )
     argument_parser.add_argument("--min_read_count", type=int, required=True)
     argument_parser.add_argument(
@@ -85,13 +144,13 @@ def main() -> int:
         )
         return 1
 
-    is_stable = analysis_is_stable(
+    readiness = analysis_readiness(
         meta_path,
         counts_dir,
         args.min_read_count,
         args.min_replicate_sample_count,
     )
-    print(str(is_stable).lower())
+    print(readiness)
     return 0
 
 

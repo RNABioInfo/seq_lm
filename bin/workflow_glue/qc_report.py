@@ -15,6 +15,7 @@ from .util import get_named_logger, wf_parser  # noqa: ABS101
 from .qc_report_types.differential_plots import (
     add_differential_analysis,
     load_differential_results,
+    load_stability_results,
 )
 from .qc_report_types.gene_set_plots import (
     add_gene_set_enrichment,
@@ -327,12 +328,18 @@ def main(args):
     logger = get_named_logger("SeqLMReport")
     samples = load_qc_samples(args.samples)
     differential = None
+    stability_results = None
     fry_results = None
     gsva_results = None
     if args.differential_results is not None:
         differential = load_differential_results(
             args.differential_results,
             samples.samples_df,
+        )
+        stability_results = load_stability_results(
+            args.stability_results,
+            differential.sample_metadata,
+            args.stability_behavior,
         )
         if args.gene_set_enrichment:
             fry_results = load_gene_set_results(
@@ -399,6 +406,7 @@ def main(args):
                     differential,
                     args.lfc_cutoff,
                     args.padj_cutoff,
+                    stability_results,
                 )
 
             if args.gene_set_enrichment:
@@ -427,11 +435,7 @@ def main(args):
         args.report,
         args.latest_batch,
         args.refresh_seconds,
-        (
-            "For DEA, the required read depth is not yet satisfied."
-            if args.dea_read_depth_not_satisfied
-            else None
-        ),
+        args.dea_readiness_notice,
     )
     logger.info(f"Analysis report written to {args.report}.")
 
@@ -468,14 +472,23 @@ def argparser():
         ),
     )
     parser.add_argument(
+        "--stability-results",
+        help="Per-sample stability audit TSV for the represented DE snapshot.",
+    )
+    parser.add_argument(
+        "--stability-behavior",
+        choices=("disabled", "log", "terminate"),
+        default="disabled",
+        help="Configured DE stability behavior [default: %(default)s].",
+    )
+    parser.add_argument(
         "--gene-set-enrichment",
         action="store_true",
         help="Include fry and GSVA gene-set results in the report.",
     )
     parser.add_argument(
-        "--dea-read-depth-not-satisfied",
-        action="store_true",
-        help="Show a subtitle notice and omit unavailable DEA result tabs.",
+        "--dea-readiness-notice",
+        help="Show this DEA precondition notice and omit unavailable result tabs.",
     )
     parser.add_argument(
         "--lfc-cutoff",

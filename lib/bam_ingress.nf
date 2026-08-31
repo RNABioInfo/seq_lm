@@ -8,10 +8,12 @@ record BamIngressArgs {
     sample_sheet_path: Path?
 }
 
-record SampleChunkEvent {
+record LiveSampleEvent {
     batch_index: Integer
     sample_index: Integer
-    chunk: SampleChunk
+    sample: Sample
+    chunk: SampleChunk?
+    is_stop: Boolean
 }
 
 record LivePathEvent {
@@ -185,9 +187,6 @@ def mixed_analysis_ingress(samples: List<Sample>, live_analysis: Boolean, experi
         return channel.of(startup_batch)
     }
 
-    def stopped_samples: Set<String> = java.util.Collections.synchronizedSet(new LinkedHashSet<String>())
-    def stopped_sample_count = new java.util.concurrent.atomic.AtomicInteger(0)
-    def stopped_batch_counts: Map<String,Integer> = java.util.Collections.synchronizedMap([:])
     def ch_events = channel.empty()
     live_samples.each { sample ->
         def sample_index: Integer = samples.indexOf(sample)
@@ -196,51 +195,79 @@ def mixed_analysis_ingress(samples: List<Sample>, live_analysis: Boolean, experi
                 sample,
                 sample_index,
                 existing_bams_by_sample[sample_key(sample)],
-                stopped_samples,
-                stopped_sample_count,
-                stopped_batch_counts,
                 live_samples.size(),
             )
         )
     }
 
-    def pending_batch_events: Map<Integer,List<SampleChunkEvent>> = [:]
+    def live_sample_indices: List<Integer> = live_samples.collect { sample -> samples.indexOf(sample) }
+    def pending_batch_events: Map<Integer,Map<Integer,LiveSampleEvent>> = [:]
+    def stopped_final_batches: Map<Integer,Integer> = [:]
+    def next_batch_index: Integer = 1
     def live_batches_ch = ch_events
-        .map { event ->
-            def events: List<SampleChunkEvent> = pending_batch_events[event.batch_index]
-            if (events == null) {
-                events = []
-                pending_batch_events[event.batch_index] = events
-            }
-            events.add(event)
-            if (events.size() < live_samples.size()) {
-                return null
-            }
-            if (events.size() > live_samples.size()) {
-                error(
-                    "Live BAM batch ${event.batch_index} received more than ${live_samples.size()} sample event(s)."
+        .flatMap { event ->
+            if (event.is_stop) {
+                if (stopped_final_batches.containsKey(event.sample_index)) {
+                    error("Received duplicate terminal event for sample '${sample_label(event.sample)}'.")
+                }
+                stopped_final_batches[event.sample_index] = event.batch_index
+                log.info(
+                    "Sample '${sample_label(event.sample)}' left live batch synchronization after local batch ${event.batch_index}."
                 )
             }
-            pending_batch_events.remove(event.batch_index)
-            def chunks: List<SampleChunk> = events
-                .toSorted { left, right -> left.sample_index <=> right.sample_index }
-                .collect { grouped_event -> grouped_event.chunk }
-            def batch: SampleBatch = record(
-                batch_index: event.batch_index,
-                chunks: chunks,
-                experiment_sample_count: experiment_sample_count,
-            )
-            log.info(
-                "Emitting synchronized live BAM batch ${batch.batch_index}: " + batch.chunks.collect { chunk -> "${sample_label(chunk.sample)}=${chunk.bam_paths.size()} BAM(s)" }.join(", ")
-            )
-            return batch
+            else {
+                def events: Map<Integer,LiveSampleEvent> = pending_batch_events.computeIfAbsent(event.batch_index) { [:] }
+                if (events.put(event.sample_index, event) != null) {
+                    error("Live BAM batch ${event.batch_index} received a duplicate event for sample '${sample_label(event.sample)}'.")
+                }
+            }
+
+            def highest_pending_index: Integer = pending_batch_events.empty ? next_batch_index - 1 : pending_batch_events.keySet().max()
+            def candidate_indices: List<Integer> = highest_pending_index < next_batch_index
+                ? []
+                : (next_batch_index..highest_pending_index).toList()
+            def readiness: Map = candidate_indices.inject([open: true, indices: []]) { state: Map, candidate_index: Integer ->
+                if (!state.open) {
+                    return state
+                }
+                def required_indices: List<Integer> = live_sample_indices.findAll { sample_index: Integer ->
+                    !stopped_final_batches.containsKey(sample_index) || stopped_final_batches[sample_index] >= candidate_index
+                }
+                def events: Map<Integer,LiveSampleEvent> = pending_batch_events[candidate_index] ?: [:]
+                if (required_indices.empty || !required_indices.every { sample_index: Integer -> events.containsKey(sample_index) }) {
+                    state.open = false
+                    return state
+                }
+                state.indices.add(candidate_index)
+                return state
+            }
+            def ready_batches: List<SampleBatch> = (readiness.indices as List<Integer>).collect { ready_index: Integer ->
+                def required_indices: List<Integer> = live_sample_indices.findAll { sample_index: Integer ->
+                    !stopped_final_batches.containsKey(sample_index) || stopped_final_batches[sample_index] >= ready_index
+                }
+                def events: Map<Integer,LiveSampleEvent> = pending_batch_events[ready_index]
+                def chunks: List<SampleChunk> = required_indices
+                    .toSorted()
+                    .collect { sample_index: Integer -> events[sample_index].chunk }
+                pending_batch_events.remove(ready_index)
+                def batch: SampleBatch = record(
+                    batch_index: ready_index,
+                    chunks: chunks,
+                    experiment_sample_count: experiment_sample_count,
+                )
+                log.info(
+                    "Emitting live BAM batch ${batch.batch_index} from ${chunks.size()} remaining sample(s): " + chunks.collect { chunk -> "${sample_label(chunk.sample)}=${chunk.bam_paths.size()} BAM(s)" }.join(', ')
+                )
+                return batch
+            }
+            next_batch_index += ready_batches.size()
+            return ready_batches
         }
-        .filter { batch -> batch != null }
 
     return channel.of(startup_batch).concat(live_batches_ch)
 }
 
-def make_live_analysis_ingress_channel(sample, sample_index: Integer, initial_bams: List<Path>, stopped_samples: Set<String>, stopped_sample_count: java.util.concurrent.atomic.AtomicInteger, stopped_batch_counts: Map<String,Integer>, live_sample_count: Integer) {
+def make_live_analysis_ingress_channel(sample, sample_index: Integer, initial_bams: List<Path>, live_sample_count: Integer) {
     def existing_stop_files: List<Path> = get_stop_files_in_dir(sample.bam_dir)
     def batch_index: Integer = 0
     def accepted_bam_paths: Set<String> = new LinkedHashSet<String>()
@@ -250,17 +277,8 @@ def make_live_analysis_ingress_channel(sample, sample_index: Integer, initial_ba
         log.warn(
             "Sample '${sample_label(sample)}' has existing STOP file(s) " + "at startup: ${existing_stop_files}. No future BAM watcher will be opened for this sample."
         )
-        log_sample_stop(
-            sample,
-            existing_stop_files[0],
-            "existing",
-            batch_index,
-            stopped_samples,
-            stopped_sample_count,
-            stopped_batch_counts,
-            live_sample_count,
-        )
-        return channel.empty()
+        log_sample_stop(sample, existing_stop_files[0], 'existing', batch_index, live_sample_count)
+        return channel.of(make_live_stop_event(batch_index, sample_index, sample))
     }
 
     log.info(
@@ -291,7 +309,7 @@ def make_live_analysis_ingress_channel(sample, sample_index: Integer, initial_ba
                     )
                 }
 
-                def drained_events: List<SampleChunkEvent> = pending_bams.collect { pending_bam: Path ->
+                def drained_events: List<LiveSampleEvent> = pending_bams.collect { pending_bam: Path ->
                     accepted_bam_paths.add(path_key(pending_bam))
                     batch_index += 1
                     log.info(
@@ -303,17 +321,8 @@ def make_live_analysis_ingress_channel(sample, sample_index: Integer, initial_ba
                         make_sample_chunk(sample, [pending_bam]),
                     )
                 }
-                log_sample_stop(
-                    sample,
-                    event.path,
-                    event.source,
-                    batch_index,
-                    stopped_samples,
-                    stopped_sample_count,
-                    stopped_batch_counts,
-                    live_sample_count,
-                )
-                return drained_events
+                log_sample_stop(sample, event.path, event.source, batch_index, live_sample_count)
+                return drained_events + [make_live_stop_event(batch_index, sample_index, sample)]
             }
             if (event.source != "create") {
                 log.info(
@@ -350,34 +359,10 @@ def make_live_path_event(source: String, path: Path) {
     return record(source: source, path: path)
 }
 
-def log_sample_stop(sample, stop_path: Path, source: String, batch_count: Integer, stopped_samples: Set<String>, stopped_sample_count: java.util.concurrent.atomic.AtomicInteger, stopped_batch_counts: Map<String,Integer>, live_sample_count: Integer) {
-    if (!stopped_samples.add(sample_key(sample))) {
-        log.warn(
-            "Duplicate STOP event for already stopped sample '${sample_label(sample)}': " + "source=${source}, path=${stop_path}."
-        )
-        return null
-    }
-
-    stopped_batch_counts[sample_key(sample)] = batch_count
-    def stopped_count: Integer = stopped_sample_count.incrementAndGet()
+def log_sample_stop(sample, stop_path: Path, source: String, batch_count: Integer, live_sample_count: Integer) {
     log.info(
-        "Observed STOP for sample '${sample_label(sample)}': " + "source=${source}, path=${stop_path}. Stopped ${stopped_count}/${live_sample_count} sample watcher(s)."
+        "Observed STOP for sample '${sample_label(sample)}': " + "source=${source}, path=${stop_path}, final_local_batch=${batch_count}; this watcher is closing (${live_sample_count} initially live sample(s))."
     )
-    if (stopped_count == live_sample_count) {
-        def batch_counts: List<Integer> = stopped_batch_counts.values().toList()
-        if (batch_counts.unique().size() != 1) {
-            def counts: String = stopped_batch_counts
-                .collect { key, count ->
-                    "${key.replace('\t', '/')}=${count}"
-                }
-                .sort()
-                .join(', ')
-            throw new IllegalStateException("Live samples stopped with unequal synchronized BAM batch counts: ${counts}. " + "Every live sample must contribute one BAM to every post-startup batch.")
-        }
-        log.info(
-            "All ${live_sample_count} live sample watcher(s) have observed STOP after " + "${batch_counts[0]} synchronized batch(es); " + "live ingress is closed and downstream tasks are draining."
-        )
-    }
 }
 
 def is_stop_path(path: Path) -> Boolean {
@@ -388,8 +373,12 @@ def is_bam_path(path: Path) -> Boolean {
     return path.name.endsWith('.bam')
 }
 
-def make_sample_chunk_event(batch_index: Integer, sample_index: Integer, chunk) {
-    return record(batch_index: batch_index, sample_index: sample_index, chunk: chunk)
+def make_sample_chunk_event(batch_index: Integer, sample_index: Integer, chunk) -> LiveSampleEvent {
+    return record(batch_index: batch_index, sample_index: sample_index, sample: chunk.sample, chunk: chunk, is_stop: false)
+}
+
+def make_live_stop_event(batch_index: Integer, sample_index: Integer, sample) -> LiveSampleEvent {
+    return record(batch_index: batch_index, sample_index: sample_index, sample: sample, chunk: null, is_stop: true)
 }
 
 def make_sample_chunk(sample, bam_paths: List<Path>) {

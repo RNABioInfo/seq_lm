@@ -28,6 +28,11 @@ include { quality_control } from './subworkflows/quality_control.nf'
 include { differential_expression } from './subworkflows/differential_expression.nf'
 include { order_batches } from './lib/util.nf'
 include {
+    differential_stability ;
+    discover_stability_state ;
+    stability_config
+} from './lib/stability.nf'
+include {
     discover_sample_checkpoints ;
     file_identity ;
     next_analysis_snapshot_index ;
@@ -197,11 +202,15 @@ process qc_report {
     qc_report_inputs: Map
     qc_results: Path
     differential_results: Path
-    read_depth_satisfied: Boolean
+    differential_analysis_note: String
+    stability_results: Path
+    has_differential_results: Boolean
+    has_stability_results: Boolean
 
     stage:
     stageAs qc_results, 'qc_results'
     stageAs differential_results, 'differential_results'
+    stageAs stability_results, 'stability_results.tsv'
 
     output:
     report_files = files('qc_report*', arity: '3')
@@ -211,13 +220,15 @@ process qc_report {
     def quoted_rows: String = shell_quote(rows)
     def params_json: String = new groovy.json.JsonBuilder(params).toPrettyString()
     def quoted_params_json: String = shell_quote(params_json)
-    def has_differential_results: Boolean = differential_results.name != optional_file().name
     def differential_args: String = has_differential_results
         ? '--differential-results differential_results'
         : ''
     def gene_set_args: String = params.gene_set_enrichment && has_differential_results ? '--gene-set-enrichment' : ''
-    def readiness_args: String = params.differential_expression && !read_depth_satisfied
-        ? '--dea-read-depth-not-satisfied'
+    def readiness_args: String = differential_analysis_note
+        ? "--dea-readiness-notice ${shell_quote(differential_analysis_note)}"
+        : ''
+    def stability_args: String = has_stability_results
+        ? '--stability-results stability_results.tsv'
         : ''
     """
         printf 'name\\tgroup\\tchunks_seen\\tlatest_batch_index\\tqc_dir\\n' > report_samples.tsv
@@ -238,6 +249,8 @@ process qc_report {
             ${differential_args} \
             ${gene_set_args} \
             ${readiness_args} \
+            ${stability_args} \
+            --stability-behavior ${params.stability_analysis_behavior} \
             --lfc-cutoff ${params.de_lfc_cutoff} \
             --padj-cutoff ${params.de_padj_cutoff}
         """
@@ -256,6 +269,14 @@ workflow sample_pipeline {
     gene_sets: Path
     differential_expression_enabled: Boolean
     gene_set_enrichment_enabled: Boolean
+    de_lfc_cutoff: Number
+    min_read_count: Integer
+    min_replicate_sample_count: Integer
+    all_samples: List<Sample>
+    active_samples: List<Sample>
+    stability_behavior: String
+    stability_settings: Map
+    initial_stability_state: Map
 
     main:
     /*
@@ -297,6 +318,9 @@ workflow sample_pipeline {
             reference_annotation,
             gene_sets,
             gene_set_enrichment_enabled,
+            de_lfc_cutoff,
+            min_read_count,
+            min_replicate_sample_count,
         )
         quantified_samples_ch = differential_expression.out.quantifications
         differential_results_ch = differential_expression.out.results
@@ -314,6 +338,65 @@ workflow sample_pipeline {
                 tuple(result.batch_index, result.analysis_index, result.results)
             }
         )
+        if (stability_behavior != 'disabled') {
+            differential_stability(
+                differential_results_ch,
+                all_samples,
+                active_samples,
+                stability_behavior,
+                stability_settings,
+                initial_stability_state,
+            )
+            stability_audits_ch = differential_stability.out
+            differential_reports_with_stability_ch = differential_report_batches_ch
+                .filter { report_batch -> report_batch.has_differential_results }
+                .map { report_batch -> tuple(report_batch.batch_index, report_batch) }
+                .join(
+                    stability_audits_ch.map { audit ->
+                        tuple(audit.batch_index, audit.sample_stability)
+                    },
+                    by: 0,
+                )
+                .map { _batch_index: Integer, report_batch, sample_stability_path ->
+                    record(
+                        batch_index: report_batch.batch_index,
+                        report_sequence: report_batch.report_sequence,
+                        differential_analysis_note: report_batch.differential_analysis_note,
+                        has_differential_results: true,
+                        results: report_batch.results,
+                        stability_results: sample_stability_path,
+                        has_stability_results: true,
+                    )
+                }
+                .mix(
+                    differential_report_batches_ch
+                        .filter { report_batch -> !report_batch.has_differential_results }
+                        .map { report_batch ->
+                            record(
+                                batch_index: report_batch.batch_index,
+                                report_sequence: report_batch.report_sequence,
+                                differential_analysis_note: report_batch.differential_analysis_note,
+                                has_differential_results: false,
+                                results: report_batch.results,
+                                stability_results: optional_file(),
+                                has_stability_results: false,
+                            )
+                        }
+                )
+        }
+        else {
+            differential_reports_with_stability_ch = differential_report_batches_ch.map { report_batch ->
+                record(
+                    batch_index: report_batch.batch_index,
+                    report_sequence: report_batch.report_sequence,
+                    differential_analysis_note: report_batch.differential_analysis_note,
+                    has_differential_results: report_batch.has_differential_results,
+                    results: report_batch.results,
+                    stability_results: optional_file(),
+                    has_stability_results: false,
+                )
+            }
+        }
     }
 
     if (differential_expression_enabled && fresh_sample_count > 0) {
@@ -423,14 +506,17 @@ workflow sample_pipeline {
 
     if (differential_expression_enabled) {
         qc_report_ready_ch = join_report_batches(
-            differential_report_batches_ch,
+            differential_reports_with_stability_ch,
             qc_report_input_tree_ch,
         )
         qc_report(
             qc_report_ready_ch.map { result -> result.qc_report_inputs },
             qc_report_ready_ch.map { result -> result.qc_results },
             qc_report_ready_ch.map { result -> result.differential_results },
-            qc_report_ready_ch.map { result -> result.read_depth_satisfied },
+            qc_report_ready_ch.map { result -> result.differential_analysis_note },
+            qc_report_ready_ch.map { result -> result.stability_results },
+            qc_report_ready_ch.map { result -> result.has_differential_results },
+            qc_report_ready_ch.map { result -> result.has_stability_results },
         )
     }
     else {
@@ -438,7 +524,10 @@ workflow sample_pipeline {
             qc_report_input_tree_ch.map { result -> result.qc_report_inputs },
             qc_report_input_tree_ch.map { result -> result.qc_results },
             optional_file(),
-            true,
+            '',
+            optional_file(),
+            false,
+            false,
         )
     }
 }
@@ -484,6 +573,39 @@ workflow {
     }
     if (params.min_replicate_sample_count < 1) {
         error('--min_replicate_sample_count must be at least 1.')
+    }
+    def stability_behaviors: Set<String> = ['disabled', 'log', 'terminate'].toSet()
+    if (!stability_behaviors.contains(params.stability_analysis_behavior as String)) {
+        error('--stability_analysis_behavior must be disabled, log, or terminate.')
+    }
+    if (params.stability_analysis_behavior != 'disabled' && !params.differential_expression) {
+        error('--stability_analysis_behavior requires --differential_expression.')
+    }
+    if (params.stability_analysis_behavior == 'terminate' && !params.live_analysis) {
+        error('--stability_analysis_behavior terminate requires --live_analysis.')
+    }
+    if (params.num_stable_batches < 1) {
+        error('--num_stable_batches must be at least 1.')
+    }
+    def fraction_stability_params: Map<String,Number> = [
+        stability_max_feature_diff_fraction: params.stability_max_feature_diff_fraction,
+        stability_min_jaccard_similarity: params.stability_min_jaccard_similarity,
+        stability_max_call_churn_fraction: params.stability_max_call_churn_fraction,
+        stability_max_lost_call_fraction: params.stability_max_lost_call_fraction,
+    ]
+    fraction_stability_params.each { name: String, value: Number ->
+        if (value < 0 || value > 1) {
+            error("--${name} must be between 0 and 1.")
+        }
+    }
+    if (params.stability_max_median_abs_lfc_delta < 0) {
+        error('--stability_max_median_abs_lfc_delta must be nonnegative.')
+    }
+    if (params.stability_min_de_calls_for_fraction_metrics < 1) {
+        error('--stability_min_de_calls_for_fraction_metrics must be at least 1.')
+    }
+    if (params.stability_max_small_set_call_changes < 0) {
+        error('--stability_max_small_set_call_changes must be nonnegative.')
     }
 
     if (params.disable_ping == false) {
@@ -555,6 +677,27 @@ workflow {
     first_analysis_index = params.differential_expression
         ? next_analysis_snapshot_index(output_root)
         : 0
+    stability_parameter_values = [
+        behavior: params.stability_analysis_behavior as String,
+        num_stable_batches: params.num_stable_batches as Integer,
+        max_feature_diff_fraction: params.stability_max_feature_diff_fraction,
+        max_median_abs_lfc_delta: params.stability_max_median_abs_lfc_delta,
+        min_jaccard_similarity: params.stability_min_jaccard_similarity,
+        max_call_churn_fraction: params.stability_max_call_churn_fraction,
+        max_lost_call_fraction: params.stability_max_lost_call_fraction,
+        max_fdr: params.de_padj_cutoff,
+        min_abs_lfc: params.de_lfc_cutoff,
+        min_de_calls_for_fraction_metrics: params.stability_min_de_calls_for_fraction_metrics as Integer,
+        max_small_set_call_changes: params.stability_max_small_set_call_changes as Integer,
+    ]
+    stability_parameter_values.config = stability_config(stability_parameter_values, all_samples)
+    initial_stability_state = params.stability_analysis_behavior == 'disabled'
+        ? [previous_results: optional_file(), streaks: [:], eligible: [:]]
+        : discover_stability_state(
+            output_root,
+            first_analysis_index,
+            stability_parameter_values.config,
+        )
 
     // Finalized samples are restored from the CLI output directory and never
     // enter BAM preparation, QC, collation, or Oarfish. Ingress watches only
@@ -576,6 +719,14 @@ workflow {
         gene_sets,
         params.differential_expression,
         params.gene_set_enrichment,
+        params.de_lfc_cutoff,
+        params.min_read_count,
+        params.min_replicate_sample_count,
+        all_samples,
+        checkpoint_state.active,
+        params.stability_analysis_behavior,
+        stability_parameter_values,
+        initial_stability_state,
     )
 
     onComplete:
