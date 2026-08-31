@@ -77,7 +77,8 @@ workflow {
             assert audits.size() == final_index + 1
             def rows: List<String> = java.nio.file.Files.readAllLines(audits[-1].sample_stability)
             def expected_eligible: String = params.test_reset ? 'false' : 'true'
-            assert rows.drop(1).every { row: String -> row.split('\t', -1)[7] == expected_eligible }
+            assert rows.drop(1).every { row: String -> row.split('\t', -1)[7] == (params.test_reset ? '1' : '2') }
+            assert rows.drop(1).every { row: String -> row.split('\t', -1)[8] == expected_eligible }
             if (params.test_reset) {
                 def contrast_rows: List<String> = java.nio.file.Files.readAllLines(audits[-1].contrast_stability)
                 assert contrast_rows[1].split('\t', -1)[20] == '1'
@@ -85,11 +86,11 @@ workflow {
             }
             if (params.test_behavior == 'terminate') {
                 assert samples.every { sample -> java.nio.file.Files.isRegularFile(sample.bam_dir.resolve('STOP')) }
-                assert rows.drop(1).every { row: String -> row.split('\t', -1)[10] == 'stop_created' }
+                assert rows.drop(1).every { row: String -> row.split('\t', -1)[11] == 'stop_created' }
             }
             else {
                 assert samples.every { sample -> !java.nio.file.Files.exists(sample.bam_dir.resolve('STOP')) }
-                assert rows.drop(1).every { row: String -> row.split('\t', -1)[10] == 'logged' }
+                assert rows.drop(1).every { row: String -> row.split('\t', -1)[11] == 'logged' }
             }
             java.nio.file.Files.createDirectories(
                 output_root.resolve("differential_expression/batch_${final_index}")

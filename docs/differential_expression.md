@@ -196,11 +196,13 @@ and plot-type subtabs separate:
 * a heatmap containing up to 20 significant genes in each direction.
 
 The adjacent **Result Stability** tab reports every sample represented in the
-DE snapshot. Its second column is a concise status (for example, monitoring,
-stable and eligible to stop, STOP created, restored/final, or disabled),
-followed by the sample's group, live state, required contrasts, eligibility,
-action result, and analyzed batch. The report waits for the matching stability
-audit before publishing a successful DE snapshot, so the table and plots always
+DE snapshot. Its second column reports the number of consecutive stable
+comparisons for that sample. For a sample requiring multiple contrasts, this
+is the minimum streak across those contrasts, because every required contrast
+must reach the threshold before the sample becomes eligible. The remaining
+columns report group, live state, required contrasts, eligibility, action
+result, and analyzed batch. The report waits for the matching stability audit
+before publishing a successful DE snapshot, so the table and plots always
 describe the same batch.
 
 The heatmap selects genes by effect size after significance filtering, shows

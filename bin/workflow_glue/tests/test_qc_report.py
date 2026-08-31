@@ -214,12 +214,12 @@ def write_stability_results(path):
     """Write the matching sample-level stability audit."""
     path.write_text(
         "analysis_index\tbatch_index\tgroup\tsample\tbam_dir\t"
-        "effectively_live\trequired_contrasts\teligible\tnewly_eligible\t"
-        "behavior\taction_result\n"
+        "effectively_live\trequired_contrasts\tconsecutive_stable_batches\t"
+        "eligible\tnewly_eligible\tbehavior\taction_result\n"
         "3\t2\tcontrol\tcontrol_1\t/data/control_1\ttrue\t"
-        "group_time_point_1_vs_control\tfalse\tfalse\tlog\tnone\n"
+        "group_time_point_1_vs_control\t2\tfalse\tfalse\tlog\tnone\n"
         "3\t2\ttime_point_1\ttreatment_1\t/data/treatment_1\ttrue\t"
-        "group_time_point_1_vs_control\ttrue\ttrue\tlog\tlogged\n"
+        "group_time_point_1_vs_control\t3\ttrue\ttrue\tlog\tlogged\n"
     )
 
 
@@ -413,8 +413,7 @@ def test_qc_report_writes_html(tmp_path):
     assert "Volcano plot" in html
     assert "Top differential genes" in html
     assert "Result Stability" in html
-    assert "Stable — would stop" in html
-    assert "Monitoring" in html
+    assert "#Stable consec. batches" in html
     assert "fry signed directional significance" in html
     assert "Gene-set barcode and enrichment worm" in html
     assert "GSVA scores across samples" in html

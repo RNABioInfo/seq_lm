@@ -81,6 +81,7 @@ STABILITY_REQUIRED_COLUMNS = (
     "sample",
     "effectively_live",
     "required_contrasts",
+    "consecutive_stable_batches",
     "eligible",
     "behavior",
     "action_result",
@@ -471,23 +472,15 @@ def _boolean_value(value: object, label: str) -> bool:
     return normalized == "true"
 
 
-def _sample_stability_status(row: pd.Series) -> str:
-    """Return the concise user-facing status for one sample audit row."""
-    effectively_live = _boolean_value(row["effectively_live"], "effectively_live")
-    eligible = _boolean_value(row["eligible"], "eligible")
-    action_result = str(row["action_result"])
-    behavior = str(row["behavior"])
-    if not effectively_live:
-        return "Not live / restored"
-    if action_result == "stop_created":
-        return "Stable — STOP created"
-    if action_result == "stop_exists":
-        return "Stable — STOP already present"
-    if eligible and behavior == "log":
-        return "Stable — would stop"
-    if eligible and behavior == "terminate":
-        return "Stable — stopping"
-    return "Monitoring"
+def _nonnegative_integer_value(value: object, label: str) -> int:
+    """Parse a nonnegative integer from a stability audit field."""
+    try:
+        parsed = int(str(value).strip())
+    except ValueError as error:
+        raise ValueError(f"Invalid integer value for {label}: {value!r}") from error
+    if parsed < 0:
+        raise ValueError(f"Invalid negative value for {label}: {value!r}")
+    return parsed
 
 
 def load_stability_results(
@@ -499,11 +492,10 @@ def load_stability_results(
     if behavior not in {"disabled", "log", "terminate"}:
         raise ValueError(f"Unknown stability behavior: {behavior}")
     if stability_path is None:
-        status = "Disabled" if behavior == "disabled" else "Awaiting stability result"
         return pd.DataFrame(
             {
                 "Sample": sample_metadata.index,
-                "Status": status,
+                "#Stable consec. batches": 0,
                 "Group": sample_metadata.loc[sample_metadata.index, "group"].tolist(),
                 "Live state": "Not assessed",
                 "Required contrasts": "",
@@ -549,7 +541,12 @@ def load_stability_results(
     return pd.DataFrame(
         {
             "Sample": audit["sample"],
-            "Status": audit.apply(_sample_stability_status, axis=1),
+            "#Stable consec. batches": audit["consecutive_stable_batches"].map(
+                lambda value: _nonnegative_integer_value(
+                    value,
+                    "consecutive_stable_batches",
+                )
+            ),
             "Group": audit["group"],
             "Live state": audit["effectively_live"].map(
                 lambda value: (

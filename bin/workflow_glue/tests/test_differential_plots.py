@@ -303,8 +303,8 @@ def test_overview_orders_pca_mds_and_bcv(tmp_path, monkeypatch):
     ]
 
 
-def test_load_stability_results_places_status_second_and_orders_samples(tmp_path):
-    """The stability table is sample ordered with its status easy to scan."""
+def test_load_stability_results_places_streak_second_and_orders_samples(tmp_path):
+    """The stability table is sample ordered with its streak easy to scan."""
     metadata = sample_metadata().rename(columns={"Name": "sample", "Group": "group"})
     metadata = metadata.set_index("sample")
     audit = tmp_path / "sample_stability.tsv"
@@ -316,6 +316,7 @@ def test_load_stability_results_places_status_second_and_orders_samples(tmp_path
                 "sample": "treated_2",
                 "effectively_live": "true",
                 "required_contrasts": "group_treated_vs_control",
+                "consecutive_stable_batches": "4",
                 "eligible": "true",
                 "behavior": "log",
                 "action_result": "would_stop",
@@ -326,6 +327,7 @@ def test_load_stability_results_places_status_second_and_orders_samples(tmp_path
                 "sample": "control_1",
                 "effectively_live": "true",
                 "required_contrasts": "group_treated_vs_control",
+                "consecutive_stable_batches": "1",
                 "eligible": "false",
                 "behavior": "log",
                 "action_result": "none",
@@ -336,6 +338,7 @@ def test_load_stability_results_places_status_second_and_orders_samples(tmp_path
                 "sample": "treated_1",
                 "effectively_live": "false",
                 "required_contrasts": "group_treated_vs_control",
+                "consecutive_stable_batches": "3",
                 "eligible": "true",
                 "behavior": "log",
                 "action_result": "not_live",
@@ -346,6 +349,7 @@ def test_load_stability_results_places_status_second_and_orders_samples(tmp_path
                 "sample": "control_2",
                 "effectively_live": "true",
                 "required_contrasts": "group_treated_vs_control",
+                "consecutive_stable_batches": "3",
                 "eligible": "true",
                 "behavior": "log",
                 "action_result": "stop_created",
@@ -355,14 +359,9 @@ def test_load_stability_results_places_status_second_and_orders_samples(tmp_path
 
     table = dp.load_stability_results(audit, metadata, "log")
 
-    assert table.columns[:2].tolist() == ["Sample", "Status"]
+    assert table.columns[:2].tolist() == ["Sample", "#Stable consec. batches"]
     assert table["Sample"].tolist() == metadata.index.tolist()
-    assert table["Status"].tolist() == [
-        "Monitoring",
-        "Stable — STOP created",
-        "Not live / restored",
-        "Stable — would stop",
-    ]
+    assert table["#Stable consec. batches"].tolist() == [1, 3, 3, 4]
 
 
 def test_disabled_stability_table_reports_every_sample():
@@ -372,9 +371,9 @@ def test_disabled_stability_table_reports_every_sample():
 
     table = dp.load_stability_results(None, metadata, "disabled")
 
-    assert table.columns[:2].tolist() == ["Sample", "Status"]
+    assert table.columns[:2].tolist() == ["Sample", "#Stable consec. batches"]
     assert table["Sample"].tolist() == metadata.index.tolist()
-    assert set(table["Status"]) == {"Disabled"}
+    assert set(table["#Stable consec. batches"]) == {0}
 
 
 def test_result_stability_is_last_differential_tab(tmp_path, monkeypatch):
@@ -407,7 +406,10 @@ def test_result_stability_is_last_differential_tab(tmp_path, monkeypatch):
     dp.add_differential_analysis(data, lfc_cutoff=1, padj_cutoff=0.05)
 
     assert tab_names == ["Overview", "Contrasts", "Result Stability"]
-    assert captured_tables[0].columns[:2].tolist() == ["Sample", "Status"]
+    assert captured_tables[0].columns[:2].tolist() == [
+        "Sample",
+        "#Stable consec. batches",
+    ]
 
 
 def test_ma_and_volcano_include_cutoff_spans(tmp_path):

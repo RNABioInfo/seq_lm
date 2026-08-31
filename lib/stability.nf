@@ -214,6 +214,9 @@ workflow differential_stability {
             def required: List<String> = contrast_definitions
                 .findAll { contrast: Map -> sample.group in [contrast.target_group, contrast.reference_group] }
                 *.contrast_id
+            def consecutive_stable_batches: Integer = required.empty
+                ? 0
+                : required.collect { contrast_id: String -> streaks[contrast_id] ?: 0 }.min() as Integer
             def effectively_live: Boolean = sample.is_live && active_keys.contains(key)
             def eligible: Boolean = effectively_live && !required.empty && required.every { contrast_id: String ->
                 (streaks[contrast_id] ?: 0) >= settings.num_stable_batches
@@ -228,6 +231,7 @@ workflow differential_stability {
                 bam_dir: sample.bam_dir.toAbsolutePath().normalize(),
                 effectively_live: effectively_live,
                 required_contrasts: required.join(','),
+                consecutive_stable_batches: consecutive_stable_batches,
                 eligible: eligible,
                 newly_eligible: newly_eligible,
                 behavior: behavior,
@@ -338,7 +342,8 @@ process finalize_stability_audit {
     ]
     def sample_columns: List<String> = [
         'analysis_index', 'batch_index', 'group', 'sample', 'bam_dir', 'effectively_live',
-        'required_contrasts', 'eligible', 'newly_eligible', 'behavior', 'action_result',
+        'required_contrasts', 'consecutive_stable_batches', 'eligible', 'newly_eligible',
+        'behavior', 'action_result',
     ]
     write_stability_tsv(task.workDir.resolve('contrast_stability.tsv'), contrast_columns, audit.contrast_rows)
     write_stability_tsv(task.workDir.resolve('sample_stability.tsv'), sample_columns, audit.sample_rows)
