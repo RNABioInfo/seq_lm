@@ -1,0 +1,24 @@
+name: seq-lm
+
+channels:
+  - conda-forge
+  - bioconda
+  - nodefaults
+
+dependencies:
+  # Nextflow host runtime. Analysis processes continue to use the workflow's
+  # Docker or Singularity/Apptainer containers.
+  - nextflow>=26.04.3
+  - openjdk=17
+
+  # seq-run-manager and repository-side utilities/tests.
+  - python=3.12
+  - openssl>=3.0
+  - pandas>=2.2
+  - pysam>=0.22
+  - pytest>=7.4
+  - pip>=24
+
+  # minknow-api is distributed through PyPI by Oxford Nanopore Technologies.
+  - pip:
+      - minknow-api==6.10.3

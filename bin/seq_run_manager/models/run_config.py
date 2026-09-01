@@ -9,8 +9,9 @@ from .sample import Sample
 class RunConfig:
     host: Optional[str]
     port: Optional[int]
-    certificate_path: str
-    key_path: str
+    client_certificate_path: str
+    client_private_key_path: str
+    ca_certificate_path: str
     flow_cell_ids: Optional[List[str]]
     position_ids: Optional[List[str]]
     experiment_id: str
@@ -29,11 +30,14 @@ class RunConfig:
         return len(self.samples)
 
     def validate(self):
-        if not Path(self.certificate_path).exists():
-            raise Exception("Certificate file does not exist")
+        if not Path(self.client_certificate_path).exists():
+            raise Exception("Client certificate file does not exist")
 
-        if not Path(self.key_path).exists():
-            raise Exception("Key file does not exist")
+        if not Path(self.client_private_key_path).exists():
+            raise Exception("Client private key file does not exist")
+
+        if not Path(self.ca_certificate_path).exists():
+            raise Exception("CA certificate file does not exist")
 
         if self.experiment_id is None:
             raise Exception("Experiment ID is required")

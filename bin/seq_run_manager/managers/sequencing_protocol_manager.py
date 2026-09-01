@@ -1,9 +1,9 @@
-from typing import Optional, Iterator
-from minknow_api.tools import protocols
-from minknow_api import protocol_pb2
+from collections.abc import Iterator
 from pathlib import Path
+
 import minknow_api as mk
-import os
+from minknow_api import protocol_pb2
+from minknow_api.tools import protocols
 
 from ..models.run_config import RunConfig
 
@@ -14,12 +14,11 @@ class SequencingProtocolManager:
         position_connection: mk.Connection,
         flowcell_product_code: str,
         kit: str,
-    ) -> Optional[mk.protocol_pb2.ProtocolInfo]:  # type: ignore
+    ) -> mk.protocol_pb2.ProtocolInfo | None:  # type: ignore
         return protocols.find_protocol(
             device_connection=position_connection,
             product_code=flowcell_product_code,
             kit=kit,
-            basecalling=True,
         )
 
     @staticmethod
@@ -47,9 +46,13 @@ class SequencingProtocolManager:
                 reference_files=[run_config.reference_genome_path],
                 bed_file=run_config.sampling_regions_path,
             )
-
         basecalling_args = protocols.BasecallingArgs(
-            config=run_config.basecall_config, barcoding=None, alignment=alignment_args
+            simplex_model=run_config.basecall_config,
+            modified_models=None,
+            stereo_model=None,
+            barcoding=None,
+            alignment=alignment_args,
+            min_qscore=7,
         )
 
         read_until_args = None

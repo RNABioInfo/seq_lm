@@ -17,6 +17,25 @@ The workflow uses [nextflow](https://www.nextflow.io/) to manage compute and
 software resources, as such nextflow will need to be installed before attempting
 to run the workflow.
 
+Create the host environment with Conda or Mamba:
+
+```bash
+conda env create --file environment.yml
+conda activate seq-lm
+```
+
+To update an existing installation after `environment.yml` changes:
+
+```bash
+conda env update --file environment.yml --prune
+```
+
+The environment supports Linux, macOS, and Windows through WSL. It installs
+Nextflow, Java, OpenSSL, the MinKNOW Python API, and host-side test utilities.
+Workflow analysis processes still require Docker or Singularity/Apptainer;
+their specialized Python, R, and bioinformatics dependencies remain in the
+versioned process containers.
+
 The workflow can currently be run using either
 [Docker](https://www.docker.com/products/docker-desktop) or
 [Singularity](https://docs.sylabs.io/guides/latest/user-guide/) to provide isolation of
@@ -72,6 +91,38 @@ For example, run the workflow with:
 ```bash
 nextflow run epi2me-labs/wf-template --sample_sheet samples.csv
 ```
+
+### MinKNOW client certificates
+
+The sequencing run manager can generate its client certificate and private key,
+copy MinKNOW's root CA certificate, and optionally install the public client
+certificate into a local MinKNOW installation:
+
+```bash
+seq-run-manager setup-certificates \
+    --minknow-client-certs-directory /path/to/minknow/conf/rpc-client-certs
+```
+
+Credentials are written to
+`~/.config/seq-run-manager/minknow` by default. Existing credentials are never
+replaced unless `--force` is supplied. The command requires `openssl`, supports
+Linux and macOS, and supports Windows-hosted MinKNOW when run inside WSL.
+
+The MinKNOW CA is auto-detected from its standard Linux, macOS, and WSL-mounted
+Windows locations. If MinKNOW uses a non-standard data directory, specify it:
+
+```bash
+seq-run-manager setup-certificates \
+    --ca-certificate-source /path/to/minknow/ca.crt \
+    --minknow-client-certs-directory /path/to/minknow/conf/rpc-client-certs
+```
+
+Under WSL, both Windows paths must be expressed as mounted Linux paths, for
+example `/mnt/c/data/rpc-certs/minknow/ca.crt` and the corresponding
+`/mnt/c/.../conf/rpc-client-certs` directory. Only the public client certificate
+is installed into MinKNOW; the private key remains in the credential output
+directory. MinKNOW may need to be restarted after installing or replacing a
+client certificate.
 
 **Workflow outputs**
 

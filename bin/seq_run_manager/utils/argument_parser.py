@@ -1,16 +1,22 @@
 import argparse
 import csv
+from collections.abc import Sequence
 from pathlib import Path
-from typing import List
 
+from ..models.certificate_setup_config import CertificateSetupConfig
 from ..models.run_config import RunConfig
 from ..models.sample import Sample
 
 
 class ArgumentParser:
     @staticmethod
-    def parse_cli_arguments() -> RunConfig:
-        parser = argparse.ArgumentParser(description="Run manager for MinKNOW runs")
+    def parse_cli_arguments(arguments: Sequence[str] | None = None) -> RunConfig:
+        parser = argparse.ArgumentParser(
+            description="Run manager for MinKNOW runs",
+            epilog=(
+                "Additional command: seq-run-manager setup-certificates --help"
+            ),
+        )
         parser.add_argument(
             "--host",
             default="host.docker.internal",
@@ -23,12 +29,23 @@ class ArgumentParser:
             type=int,
         )
         parser.add_argument(
+            "--client_certificate_path",
             "--certificate_path",
+            dest="client_certificate_path",
             required=True,
-            help="Specify the path to the certificate (required)",
+            help="Path to the PEM-encoded client certificate chain",
         )
         parser.add_argument(
-            "--key_path", required=True, help="Specify the path to the key (required)"
+            "--client_private_key_path",
+            "--key_path",
+            dest="client_private_key_path",
+            required=True,
+            help="Path to the PEM-encoded client private key",
+        )
+        parser.add_argument(
+            "--ca_certificate_path",
+            required=True,
+            help="Path to the PEM-encoded MinKNOW root CA certificate",
         )
         parser.add_argument(
             "-e", "--experiment_id", required=True, help="Experiment ID (required)"
@@ -74,15 +91,16 @@ class ArgumentParser:
             "--simulate_run", action="store_true", help="Simulate run (default: False)"
         )
 
-        args = parser.parse_args()
+        args = parser.parse_args(arguments)
 
         samples = ArgumentParser.parse_tsv_to_samples(args.metadata)
 
         config = RunConfig(
             host=args.host,
             port=args.port,
-            certificate_path=args.certificate_path,
-            key_path=args.key_path,
+            client_certificate_path=args.client_certificate_path,
+            client_private_key_path=args.client_private_key_path,
+            ca_certificate_path=args.ca_certificate_path,
             run_id=args.run_id,
             experiment_id=args.experiment_id,
             flow_cell_ids=args.flow_cell_ids,
@@ -99,6 +117,75 @@ class ArgumentParser:
 
         config.validate()
         return config
+
+    @staticmethod
+    def parse_certificate_setup_arguments(
+        arguments: Sequence[str] | None = None,
+    ) -> CertificateSetupConfig:
+        parser = argparse.ArgumentParser(
+            prog="seq-run-manager setup-certificates",
+            description=(
+                "Generate MinKNOW client credentials and copy the MinKNOW root CA"
+            ),
+        )
+        parser.add_argument(
+            "--output-directory",
+            type=Path,
+            default=Path.home() / ".config" / "seq-run-manager" / "minknow",
+            help="Credential output directory",
+        )
+        parser.add_argument(
+            "--ca-certificate-source",
+            type=Path,
+            help=(
+                "Existing MinKNOW ca.crt; auto-detected from MinKNOW and WSL "
+                "locations when omitted"
+            ),
+        )
+        parser.add_argument(
+            "--minknow-client-certs-directory",
+            type=Path,
+            help=(
+                "MinKNOW conf/rpc-client-certs directory in which to install the "
+                "public client certificate"
+            ),
+        )
+        parser.add_argument(
+            "--common-name",
+            default="seq-run-manager",
+            help="Common Name for the generated client certificate",
+        )
+        parser.add_argument(
+            "--valid-days",
+            type=int,
+            default=3650,
+            help="Client certificate validity in days (default: 3650)",
+        )
+        parser.add_argument(
+            "--key-size",
+            type=int,
+            choices=(2048, 3072, 4096),
+            default=4096,
+            help="RSA private key size (default: 4096)",
+        )
+        parser.add_argument(
+            "--force",
+            action="store_true",
+            help="Replace existing generated and installed credentials",
+        )
+        args = parser.parse_args(arguments)
+        if args.valid_days < 1:
+            parser.error("--valid-days must be greater than zero")
+
+        return CertificateSetupConfig(
+            output_directory=args.output_directory,
+            ca_certificate_source=args.ca_certificate_source,
+            minknow_client_certs_directory=args.minknow_client_certs_directory,
+            common_name=args.common_name,
+            valid_days=args.valid_days,
+            key_size=args.key_size,
+            force=args.force,
+        )
 
     @staticmethod
     def parse_tsv_to_samples(file_path: str) -> list[Sample]:

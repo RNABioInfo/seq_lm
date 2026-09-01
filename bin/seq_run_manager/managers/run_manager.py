@@ -1,44 +1,48 @@
-from ..models.acquisition import Acquisition
-from ..models.run_config import RunConfig
-from ..managers.sequencing_protocol_manager import SequencingProtocolManager
-from ..managers.connection_manager import ConnectionManager
-from typing import List
 import time
-import minknow_api as mk
 from pathlib import Path
+
+import minknow_api as mk
+
+from ..managers.connection_manager import ConnectionManager
+from ..managers.sequencing_protocol_manager import SequencingProtocolManager
+from ..models.acquisition import Acquisition
+from ..models.manager_error import ManagerError
+from ..models.run_config import RunConfig
 
 
 class RunManager:
     connection_manager: ConnectionManager
-    active_acquisitions: List[Acquisition] = []
+    active_acquisitions: list[Acquisition]
     # For more information on the protocol states, see the minknow_api.proto.protocol.ProtocolState enum
-    __permitted_protocol_states = [
-        0,
-        4,
-        5,
-        1,
-    ]  # 0: PROTOCOL_RUNNING, 4: PROTOCOL_WAITING_FOR_TEMPERATURE, 5: PROTOCOL_WAITING_FOR_ACQUISITION, 1: PROTOCOL_COMPLETED
+    __permitted_protocol_states: list [int]
 
     def __init__(self, connection_manager: ConnectionManager) -> None:
         self.connection_manager = connection_manager
+        self.active_acquisitions = []
+        self.__permitted_protocol_states = [
+            0,
+            4,
+            5,
+            1,
+        ]  # 0: PROTOCOL_RUNNING, 4: PROTOCOL_WAITING_FOR_TEMPERATURE, 5: PROTOCOL_WAITING_FOR_ACQUISITION, 1: PROTOCOL_COMPLETED
 
     def __get_product_code(self, connection: mk.Connection) -> str:
-        flow_cell_info = connection.device.get_flow_cell_info()  # type: ignore
+        flow_cell_info = connection.device.get_flow_cell_info() # type: ignore
         product_code = flow_cell_info.user_specified_product_code
         if not product_code:
             product_code = flow_cell_info.product_code
         return product_code
 
-    def __get_uniform_product_code(self, connections: List[mk.Connection]) -> str:
+    def __get_uniform_product_code(self, connections: list[mk.Connection]) -> str:
         product_code = self.__get_product_code(connections[0])
         for connection in connections:
             other_product_code = self.__get_product_code(connection)
             if other_product_code != product_code:
-                raise Exception("All flow cells must have the same product code")
+                raise ManagerError("All flow cells must have the same product code")
         return product_code
 
-    def __start_acquisitions(self, run_config: RunConfig) -> List[Acquisition]:
-        connections: List[mk.Connection] = self.connection_manager.connect_to_positions(
+    def __start_acquisitions(self, run_config: RunConfig) -> list[Acquisition]:
+        connections: list[mk.Connection] = self.connection_manager.connect_to_positions(
             run_config
         )
 
@@ -46,7 +50,7 @@ class RunManager:
 
         self.__check_bascalling_config(run_config, product_code)
 
-        protocol: Optional[mk.protocol_pb2.ProtocolInfo] = SequencingProtocolManager.get_sequencing_protocol(  # type: ignore
+        protocol: mk.protocol_pb2.ProtocolInfo | None = SequencingProtocolManager.get_sequencing_protocol(  # type: ignore
             connections[0], product_code, run_config.kit
         )
 
@@ -56,20 +60,20 @@ class RunManager:
             )
             available_kits = []
             for protocol in available_protocols:
-                tags = protocol.tags
+                tags = protocol.tags  # type: ignore
                 if tags["flow cell"].string_value == product_code:
                     available_kits.append(tags["kit"].string_value)
 
-            raise Exception(
+            raise ManagerError(
                 f"No protocol identifier found. \nAvailable kits for this flow cell: {available_kits}"
             )
 
         if len(connections) != len(run_config.samples):
-            raise Exception(
+            raise ManagerError(
                 "Number of connected devices does not match number of requested samples"
             )
 
-        acquisitions: List[Acquisition] = []
+        acquisitions: list[Acquisition] = []
 
         for connection, sample in zip(connections, run_config.samples):
             seq_id = SequencingProtocolManager.start_sequencing_protocol(
@@ -93,7 +97,7 @@ class RunManager:
         )
         requested_config = str(Path(run_config.basecall_config).stem)
         if requested_config not in configs_for_run:
-            raise Exception(
+            raise ManagerError(
                 f"Basecalling config {run_config.basecall_config} not available for flow cell {uniform_product_code} and kit {run_config.kit}. Available configs: {configs_for_run}"
             )
 
@@ -112,7 +116,7 @@ class RunManager:
                 ):
                     if hasattr(event, "state"):
                         if not event.state in self.__permitted_protocol_states:
-                            raise Exception(
+                            raise ManagerError(
                                 f"Unexpected protocol state: {event.state}. Check the minknow log for more information."
                             )
                         break
@@ -121,7 +125,7 @@ class RunManager:
                     try:
                         acquisition.stop_run_throws()
                         continue
-                    except Exception as e:
+                    except Exception as e:  # noqa: BLE001
                         print(
                             f"Error stopping acquisition: {e}. Please stop run: {event.run_id} manually."
                         )

@@ -23,21 +23,21 @@ class ConnectionManager:
 
     @staticmethod
     def __connect_to_minknow(run_config: RunConfig) -> mk_manager.Manager:
-        certificate_bytes: bytes | None = None
-        if run_config.certificate_path:
-            with open(run_config.certificate_path, "rb") as cert:
-                certificate_bytes = cert.read()
+        with open(run_config.client_certificate_path, "rb") as certificate:
+            client_certificate_bytes = certificate.read()
 
-        key_bytes: bytes | None = None
-        if run_config.key_path:
-            with open(run_config.key_path, "rb") as key:
-                key_bytes = key.read()
+        with open(run_config.client_private_key_path, "rb") as private_key:
+            client_private_key_bytes = private_key.read()
+
+        with open(run_config.ca_certificate_path, "rb") as ca_certificate:
+            ca_certificate_bytes = ca_certificate.read()
 
         return mk_manager.Manager(
             host=run_config.host or "127.0.0.1",
             port=run_config.port,
-            client_certificate_chain=certificate_bytes,
-            client_private_key=key_bytes,
+            client_certificate_chain=client_certificate_bytes,
+            client_private_key=client_private_key_bytes,
+            ca_certificate=ca_certificate_bytes,
         )
 
     def disconnect(self) -> None:
