@@ -57,6 +57,6 @@ def get_sequencing_arguments(_run_dir: Path) -> Map {
     if (!params.ex_special_alignment) {
         args['reference_genome'] = params.reference_genome
     }
-    args['basecall_config'] = params.ex_basecall_config
+    args['basecall_model'] = params.ex_basecall_model
     return args
 }

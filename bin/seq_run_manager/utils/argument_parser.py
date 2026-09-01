@@ -73,15 +73,23 @@ class ArgumentParser:
         )
         parser.add_argument(
             "-b",
-            "--basecall_config",
-            help="Basecall config (default: rna_rp4_130bps_sup_prom.cfg)",
-            default="rna_rp4_130bps_hac_prom",
+            "--basecall_model",
+            help=(
+                "Dorado simplex model name. MinKNOW's default HAC model for the "
+                "flow cell, kit, and sampling rate is used when omitted"
+            ),
+        )
+        parser.add_argument(
+            "--min_qscore",
+            type=float,
+            help="Minimum basecall Q-score (default: selected model's cutoff)",
         )
         parser.add_argument(
             "-u",
             "--output_chunk_size",
             help="Output chunk size (default: 4000)",
             default=4000,
+            type=int,
         )
         parser.add_argument(
             "-m", "--metadata", help="Metadata file (required)", required=True
@@ -109,7 +117,8 @@ class ArgumentParser:
             reference_genome_path=args.reference_genome,
             sampling_regions_path=args.sampling_regions,
             adaptive_sampling_mode=args.adaptive_sampling_mode,
-            basecall_config=args.basecall_config,
+            basecall_model=args.basecall_model,
+            min_qscore=args.min_qscore,
             output_chunk_size=args.output_chunk_size,
             samples=samples,
             simulate_run=args.simulate_run,

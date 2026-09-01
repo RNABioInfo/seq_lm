@@ -35,24 +35,23 @@ class SequencingProtocolManager:
         sample_id: str,
         sample_dir: Path,
         run_config: RunConfig,
+        simplex_model: str,
+        min_qscore: float,
     ) -> str:
 
         alignment_args = None
-        if (
-            run_config.sampling_regions_path is not None
-            and run_config.sampling_regions_path is not None
-        ):
+        if run_config.reference_genome_path is not None:
             alignment_args = protocols.AlignmentArgs(
                 reference_files=[run_config.reference_genome_path],
                 bed_file=run_config.sampling_regions_path,
             )
         basecalling_args = protocols.BasecallingArgs(
-            simplex_model=run_config.basecall_config,
+            simplex_model=simplex_model,
             modified_models=None,
             stereo_model=None,
             barcoding=None,
             alignment=alignment_args,
-            min_qscore=7,
+            min_qscore=min_qscore,
         )
 
         read_until_args = None
@@ -60,16 +59,20 @@ class SequencingProtocolManager:
             run_config.sampling_regions_path is not None
         ):
             read_until_args = protocols.ReadUntilArgs(
-                run_config.adaptive_sampling_mode,
-                run_config.reference_genome_path,
-                run_config.sampling_regions_path,
-                None,
-                None,
+                filter_type=run_config.adaptive_sampling_mode,
+                reference_files=[run_config.reference_genome_path],
+                bed_file=run_config.sampling_regions_path,
+                first_channel=None,
+                last_channel=None,
             )
 
-        pod5_args = protocols.OutputArgs(run_config.output_chunk_size)
-        fastq_args = protocols.OutputArgs(run_config.output_chunk_size)
-        bam_args = protocols.OutputArgs(4000)
+        pod5_args = protocols.OutputArgs(
+            reads_per_file=run_config.output_chunk_size, batch_duration=None
+        )
+        fastq_args = protocols.OutputArgs(
+            reads_per_file=run_config.output_chunk_size, batch_duration=None
+        )
+        bam_args = protocols.OutputArgs(reads_per_file=4000, batch_duration=None)
 
         protocol_identifier = protocol.identifier  # type: ignore
 

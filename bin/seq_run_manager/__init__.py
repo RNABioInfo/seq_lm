@@ -4,10 +4,7 @@ import socket
 import sys
 
 from .managers.certificate_manager import CertificateManager, CertificateSetupError
-from .managers.connection_manager import ConnectionManager
-from .managers.run_manager import RunManager
 from .models.manager_error import ManagerError
-from .models.run_config import RunConfig
 from .utils.argument_parser import ArgumentParser
 
 __version__ = "0.0.1"
@@ -20,6 +17,10 @@ def main():
     if len(sys.argv) > 1 and sys.argv[1] == "setup-certificates":
         setup_certificates()
         return
+
+    from .managers.connection_manager import ConnectionManager
+    from .managers.run_manager import RunManager
+    from .models.run_config import RunConfig
 
     run_config: RunConfig = ArgumentParser.parse_cli_arguments()
 

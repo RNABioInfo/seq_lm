@@ -1,3 +1,4 @@
+import base64
 import os
 import shutil
 import subprocess
@@ -259,8 +260,97 @@ extendedKeyUsage = clientAuth
             shutil.copyfile(certificate, temporary_certificate)
             os.replace(temporary_certificate, installed_certificate)
             installed_certificate.chmod(0o644)
+        except PermissionError as error:
+            if cls._is_wsl() and cls._is_windows_mounted_path(
+                installation_directory
+            ):
+                print(
+                    "Windows permissions require elevation. Approve the Windows "
+                    "User Account Control prompt to install the public certificate."
+                )
+                cls._install_client_certificate_with_windows_elevation(
+                    certificate, installed_certificate, force
+                )
+                return
+            raise CertificateSetupError(
+                f"Permission denied installing the client certificate at "
+                f"{installed_certificate}"
+            ) from error
         finally:
             temporary_certificate.unlink(missing_ok=True)
+
+    @classmethod
+    def _install_client_certificate_with_windows_elevation(
+        cls, certificate: Path, installed_certificate: Path, force: bool
+    ) -> None:
+        powershell = shutil.which("powershell.exe")
+        wslpath = shutil.which("wslpath")
+        if powershell is None or wslpath is None:
+            raise CertificateSetupError(
+                "Could not invoke Windows PowerShell elevation from WSL. Copy the "
+                f"public certificate manually to {installed_certificate} from an "
+                "Administrator PowerShell session."
+            )
+
+        windows_path = cls._run(wslpath, "-w", str(installed_certificate)).stdout.strip()
+        escaped_windows_path = windows_path.replace("'", "''")
+        certificate_base64 = base64.b64encode(certificate.read_bytes()).decode("ascii")
+        overwrite_guard = "" if force else (
+            f"if (Test-Path -LiteralPath '{escaped_windows_path}') {{ exit 17 }}; "
+        )
+        elevated_script = (
+            overwrite_guard
+            + f"$bytes = [Convert]::FromBase64String('{certificate_base64}'); "
+            + f"[IO.File]::WriteAllBytes('{escaped_windows_path}', $bytes)"
+        )
+        encoded_script = base64.b64encode(
+            elevated_script.encode("utf-16-le")
+        ).decode("ascii")
+        launcher_script = (
+            "$process = Start-Process -FilePath 'powershell.exe' -Verb RunAs "
+            "-Wait -PassThru -ArgumentList "
+            f"@('-NoProfile','-NonInteractive','-EncodedCommand','{encoded_script}'); "
+            "exit $process.ExitCode"
+        )
+
+        try:
+            cls._run(
+                powershell,
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                launcher_script,
+            )
+        except CertificateSetupError as error:
+            raise CertificateSetupError(
+                "Windows did not install the client certificate. Approve the UAC "
+                "prompt, or copy the public certificate from an Administrator "
+                f"PowerShell session to {windows_path}."
+            ) from error
+
+        if (
+            not installed_certificate.is_file()
+            or installed_certificate.read_bytes() != certificate.read_bytes()
+        ):
+            raise CertificateSetupError(
+                "Windows reported success, but the installed public certificate "
+                f"could not be verified at {installed_certificate}"
+            )
+
+    @staticmethod
+    def _is_wsl() -> bool:
+        try:
+            return "microsoft" in Path("/proc/sys/kernel/osrelease").read_text().lower()
+        except OSError:
+            return False
+
+    @staticmethod
+    def _is_windows_mounted_path(path: Path) -> bool:
+        try:
+            path.resolve().relative_to("/mnt")
+        except ValueError:
+            return False
+        return True
 
     @classmethod
     def _ensure_install_is_allowed(

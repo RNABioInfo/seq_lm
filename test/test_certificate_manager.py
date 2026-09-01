@@ -4,6 +4,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from seq_run_manager.managers.certificate_manager import (
     CertificateManager,
@@ -47,6 +48,34 @@ class CertificateManagerTest(unittest.TestCase):
 
             with self.assertRaises(CertificateSetupError):
                 CertificateManager.setup(config)
+
+    def test_uses_windows_elevation_when_wsl_mount_rejects_direct_copy(self):
+        certificate = Path("/tmp/minknow_cert.pem")
+        installation_directory = Path("/mnt/c/Program Files/MinKNOW/conf")
+
+        with (
+            patch.object(shutil, "copyfile", side_effect=PermissionError),
+            patch.object(CertificateManager, "_is_wsl", return_value=True),
+            patch.object(
+                CertificateManager,
+                "_is_windows_mounted_path",
+                return_value=True,
+            ),
+            patch.object(
+                CertificateManager,
+                "_install_client_certificate_with_windows_elevation",
+            ) as elevated_install,
+            patch.object(Path, "unlink"),
+        ):
+            CertificateManager._install_client_certificate(
+                certificate, installation_directory, force=False
+            )
+
+        elevated_install.assert_called_once_with(
+            certificate,
+            installation_directory.resolve() / "seq-run-manager.pem",
+            False,
+        )
 
     @staticmethod
     def _create_test_ca(certificate: Path, private_key: Path) -> None:

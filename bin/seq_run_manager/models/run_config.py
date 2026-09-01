@@ -17,10 +17,11 @@ class RunConfig:
     experiment_id: str
     run_id: str
     kit: str
-    reference_genome_path: str
+    reference_genome_path: Optional[str]
     sampling_regions_path: Optional[str]
     adaptive_sampling_mode: Optional[str]
-    basecall_config: str
+    basecall_model: Optional[str]
+    min_qscore: Optional[float]
     output_chunk_size: int
     samples: List[Sample]
     simulate_run: bool
@@ -56,8 +57,25 @@ class RunConfig:
                     "Reference genome must be a .fasta, .fa, .fna or .mmi file"
                 )
 
-        if Path(self.basecall_config).suffix != ".cfg":
-            raise Exception("Basecall config must be a .cfg file")
+        if self.sampling_regions_path:
+            if Path(self.sampling_regions_path).suffix.lower() != ".bed":
+                raise Exception("Sampling regions must be a .bed file")
+            if not self.reference_genome_path:
+                raise Exception("Sampling regions require a reference genome")
+
+        if self.adaptive_sampling_mode and not self.sampling_regions_path:
+            raise Exception("Adaptive sampling requires a sampling-regions BED file")
+
+        if self.basecall_model and self.basecall_model.endswith(".cfg"):
+            raise Exception(
+                "Basecall model must be a Dorado simplex model name, not a legacy .cfg file"
+            )
+
+        if self.min_qscore is not None and self.min_qscore < 0:
+            raise Exception("Minimum Q-score must be non-negative")
+
+        if self.output_chunk_size < 1:
+            raise Exception("Output chunk size must be greater than zero")
 
         if len(self.samples) < 1:
             raise Exception("No samples provided")

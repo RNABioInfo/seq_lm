@@ -1,7 +1,7 @@
 import time
-from pathlib import Path
 
 import minknow_api as mk
+from minknow_api.tools import protocols
 
 from ..managers.connection_manager import ConnectionManager
 from ..managers.sequencing_protocol_manager import SequencingProtocolManager
@@ -48,8 +48,6 @@ class RunManager:
 
         product_code = self.__get_uniform_product_code(connections)
 
-        self.__check_bascalling_config(run_config, product_code)
-
         protocol: mk.protocol_pb2.ProtocolInfo | None = SequencingProtocolManager.get_sequencing_protocol(  # type: ignore
             connections[0], product_code, run_config.kit
         )
@@ -68,6 +66,10 @@ class RunManager:
                 f"No protocol identifier found. \nAvailable kits for this flow cell: {available_kits}"
             )
 
+        simplex_model, min_qscore = self.__resolve_basecalling_settings(
+            run_config, connections[0], protocol, product_code
+        )
+
         if len(connections) != len(run_config.samples):
             raise ManagerError(
                 "Number of connected devices does not match number of requested samples"
@@ -77,7 +79,13 @@ class RunManager:
 
         for connection, sample in zip(connections, run_config.samples):
             seq_id = SequencingProtocolManager.start_sequencing_protocol(
-                connection, protocol, sample.id, sample.replicate_dir, run_config
+                connection,
+                protocol,
+                sample.id,
+                sample.replicate_dir,
+                run_config,
+                simplex_model,
+                min_qscore,
             )
             acquisitions.append(
                 Acquisition(sample=sample, id=seq_id, connection=connection)
@@ -86,20 +94,50 @@ class RunManager:
 
         return acquisitions
 
-    def __check_bascalling_config(
-        self, run_config: RunConfig, uniform_product_code: str
-    ) -> None:
-        configs_by_flow_cell = mk.manager.Manager.basecaller(self.connection_manager.manager).rpc.list_configs_by_kit()  # type: ignore
-        configs_for_run: list = (
-            configs_by_flow_cell.flow_cell_configs[uniform_product_code]
-            .kit_configs[run_config.kit]
-            .configs
-        )
-        requested_config = str(Path(run_config.basecall_config).stem)
-        if requested_config not in configs_for_run:
-            raise ManagerError(
-                f"Basecalling config {run_config.basecall_config} not available for flow cell {uniform_product_code} and kit {run_config.kit}. Available configs: {configs_for_run}"
+    def __resolve_basecalling_settings(
+        self,
+        run_config: RunConfig,
+        position_connection: mk.Connection,
+        protocol: mk.protocol_pb2.ProtocolInfo,  # type: ignore
+        product_code: str,
+    ) -> tuple[str, float]:
+        sample_rate = protocol.tags["sample rate"].int_value  # type: ignore
+        configurations = list(
+            self.connection_manager.manager.find_basecall_configurations(
+                flow_cell_product_code=product_code,
+                sequencing_kit=run_config.kit,
+                sampling_rate=sample_rate,
+                include_outdated=False,
             )
+        )
+        if not configurations:
+            raise ManagerError(
+                "No current basecalling models are available for "
+                f"flow cell {product_code}, kit {run_config.kit}, and "
+                f"sampling rate {sample_rate}"
+            )
+
+        try:
+            if run_config.basecall_model:
+                simplex_model = protocols.find_simplex_model(
+                    configurations, run_config.basecall_model
+                )
+            else:
+                _, simplex_model = protocols.find_default_simplex_model(
+                    position_connection,
+                    run_config.kit,
+                    sample_rate,
+                    configurations,
+                )
+        except RuntimeError as error:
+            raise ManagerError(str(error)) from error
+
+        min_qscore = (
+            run_config.min_qscore
+            if run_config.min_qscore is not None
+            else simplex_model.default_q_score_cutoff
+        )
+        return simplex_model.name, min_qscore
 
     def __watch_acquisitions_status(self) -> None:
         while True:

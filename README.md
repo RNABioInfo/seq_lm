@@ -121,8 +121,11 @@ Under WSL, both Windows paths must be expressed as mounted Linux paths, for
 example `/mnt/c/data/rpc-certs/minknow/ca.crt` and the corresponding
 `/mnt/c/.../conf/rpc-client-certs` directory. Only the public client certificate
 is installed into MinKNOW; the private key remains in the credential output
-directory. MinKNOW may need to be restarted after installing or replacing a
-client certificate.
+directory. Run the command as the normal WSL user, not with `sudo`. When the
+MinKNOW installation is protected by Windows ACLs, the command opens a Windows
+User Account Control prompt and performs only the public-certificate copy with
+Administrator privileges. MinKNOW may need to be restarted after installing or
+replacing a client certificate.
 
 **Workflow outputs**
 
