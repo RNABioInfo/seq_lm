@@ -182,4 +182,21 @@ class RunManager:
         if run_config.simulate_run:
             self.connection_manager.remove_all_simulated_positions()
 
-    # def stop_run(self, )
+    def stop_run(self, run_id: str):
+        connections = self.connection_manager.connect_to_all_positions()
+
+        for connection in connections:
+            response = SequencingProtocolManager.get_currently_active_protocol(connection)
+
+            if not response or response.run_id != run_id:
+                continue
+
+            stop_response = SequencingProtocolManager.stop_sequencing_protocol(connection, run_id)
+
+            if not stop_response:
+                raise ManagerError("Could not stop protocol")
+
+            return
+
+        raise ManagerError(f"Did not find position with specified run_id: {run_id}")
+            

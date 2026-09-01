@@ -31,16 +31,9 @@ def main():
     connection_manager.print_available_positions()
     connection_manager.remove_all_simulated_positions()
 
-    positions = connection_manager.get_available_positions()
-
-    for pos in positions:
-        connection = pos.connect()
-        active = SequencingProtocolManager.get_currently_active_protocol(connection)
-        print(f"active: {active}")
-
-    return
-
     run_manager: RunManager = RunManager(connection_manager)
+
+    run_manager.stop_run("1bc8bbfb-3ebb-4f94-914a-a3c6ae1d11f1")
 
     if run_config.simulate_run:
         sys.exit(0)

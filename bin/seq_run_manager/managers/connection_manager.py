@@ -214,3 +214,6 @@ class ConnectionManager:
                 f"Could not connect to all positions. Expected {run_config.sample_count}, got {len(connections)}"
             )
         return connections
+
+    def connect_to_all_positions(self) -> list[mk.Connection]:
+        return [pos.connect() for pos in self.get_available_positions()]
