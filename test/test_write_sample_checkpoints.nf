@@ -3,7 +3,7 @@
 nextflow.enable.types = true
 
 include { ChunkQCResult ; QuantifiedSample ; Sample } from '../lib/sample.nf'
-include { file_identity ; write_sample_checkpoints } from '../lib/sample_checkpoints.nf'
+include { file_identity ; sha256_file ; write_sample_checkpoints } from '../lib/sample_checkpoints.nf'
 
 workflow {
     def root: Path = java.nio.file.Files.createTempDirectory('seq-lm-checkpoint-writer-')
@@ -65,11 +65,24 @@ workflow {
             def sample_dir: Path = outputs instanceof Collection ? outputs.iterator().next() : outputs
             def final_marker: Path = sample_dir.resolve('FINAL')
             assert java.nio.file.Files.isRegularFile(final_marker)
+            assert !java.nio.file.Files.exists(sample_dir.resolve('manifest.in.json'))
+            def manifest: Map = new groovy.json.JsonSlurper().parse(final_marker) as Map
             assert java.nio.file.Files.readString(sample_dir.resolve('quantification/final.quant')).contains('\t10\n')
             assert java.nio.file.Files.readString(sample_dir.resolve('qc/nanoplot/chunk_2.tsv.gz')) == 'nanoplot-old'
             assert java.nio.file.Files.isRegularFile(sample_dir.resolve('qc/nanoplot/chunk_3.tsv.gz'))
             assert java.nio.file.Files.readString(sample_dir.resolve('qc/flagstat/chunk_2.tsv')) == 'flagstat-old'
             assert java.nio.file.Files.isRegularFile(sample_dir.resolve('qc/flagstat/chunk_3.tsv'))
+            assert manifest.quantification.sha256 == sha256_file(
+                sample_dir.resolve(manifest.quantification.path as String)
+            )
+            manifest.qc.each { manifest_qc ->
+                assert manifest_qc.nanoplot_sha256 == sha256_file(
+                    sample_dir.resolve(manifest_qc.nanoplot as String)
+                )
+                assert manifest_qc.flagstat_sha256 == sha256_file(
+                    sample_dir.resolve(manifest_qc.flagstat as String)
+                )
+            }
             'sample checkpoint writer passed'
         }
         .view()

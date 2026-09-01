@@ -284,42 +284,45 @@ process write_sample_checkpoints {
             [batch_index: qc.batch_index, nanoplot: nanoplot_path, flagstat: flagstat_path]
         }
         def manifest: Map = checkpoint_static_manifest(sample, reference_identity)
-        manifest.quantification = [path: 'quantification/final.quant']
-        manifest.qc = qc_manifest
-        def manifest_json: String = groovy.json.JsonOutput.toJson(manifest)
+        def quantification_sha256_placeholder: String = '__SEQ_LM_QUANTIFICATION_SHA256__'
+        manifest.quantification = [
+            path: 'quantification/final.quant',
+            sha256: quantification_sha256_placeholder,
+        ]
+        manifest.qc = qc_manifest.withIndex().collect { qc, index ->
+            qc + [
+                nanoplot_sha256: "__SEQ_LM_NANOPLOT_SHA256_${index}__",
+                flagstat_sha256: "__SEQ_LM_FLAGSTAT_SHA256_${index}__",
+            ]
+        }
+        def manifest_json: String = groovy.json.JsonOutput.prettyPrint(
+            groovy.json.JsonOutput.toJson(manifest)
+        )
         def quoted_manifest: String = "'" + manifest_json.replace("'", "'\"'\"'") + "'"
         commands.add(
             "cp checkpoint_inputs/quant/input${quant_index}.quant ${sample_dir}/quantification/final.quant"
         )
         commands.add("printf '%s\\n' ${quoted_manifest} > ${sample_dir}/manifest.in.json")
+        commands.add(
+            "sha256sum ${sample_dir}/quantification/final.quant | " +
+                "{ read -r checksum _; sed -i.bak 's/${quantification_sha256_placeholder}/'\"\${checksum}\"'/' ${sample_dir}/manifest.in.json; rm ${sample_dir}/manifest.in.json.bak; }"
+        )
+        sorted_qc.withIndex().each { indexed_qc, index ->
+            def qc = indexed_qc.value
+            def nanoplot_path: String = "${sample_dir}/qc/nanoplot/chunk_${qc.batch_index}.tsv.gz"
+            def flagstat_path: String = "${sample_dir}/qc/flagstat/chunk_${qc.batch_index}.tsv"
+            commands.add(
+                "sha256sum ${nanoplot_path} | " +
+                    "{ read -r checksum _; sed -i.bak 's/__SEQ_LM_NANOPLOT_SHA256_${index}__/'\"\${checksum}\"'/' ${sample_dir}/manifest.in.json; rm ${sample_dir}/manifest.in.json.bak; }"
+            )
+            commands.add(
+                "sha256sum ${flagstat_path} | " +
+                    "{ read -r checksum _; sed -i.bak 's/__SEQ_LM_FLAGSTAT_SHA256_${index}__/'\"\${checksum}\"'/' ${sample_dir}/manifest.in.json; rm ${sample_dir}/manifest.in.json.bak; }"
+            )
+        }
+        commands.add("mv ${sample_dir}/manifest.in.json ${sample_dir}/FINAL")
     }
     """
         ${commands.join('\n')}
-
-        python3 - <<'PY'
-import hashlib
-import json
-import pathlib
-
-def digest(path):
-    checksum = hashlib.sha256()
-    with path.open("rb") as handle:
-        for block in iter(lambda: handle.read(1024 * 1024), b""):
-            checksum.update(block)
-    return checksum.hexdigest()
-
-for manifest_path in pathlib.Path("checkpoint_output").glob("*/*/manifest.in.json"):
-    sample_dir = manifest_path.parent
-    manifest = json.loads(manifest_path.read_text())
-    quantification = manifest["quantification"]
-    quantification["sha256"] = digest(sample_dir / quantification["path"])
-    for qc in manifest["qc"]:
-        qc["nanoplot_sha256"] = digest(sample_dir / qc["nanoplot"])
-        qc["flagstat_sha256"] = digest(sample_dir / qc["flagstat"])
-    (sample_dir / "FINAL").write_text(
-        json.dumps(manifest, indent=2, sort_keys=True) + "\\n"
-    )
-    manifest_path.unlink()
-PY
         """
 }
