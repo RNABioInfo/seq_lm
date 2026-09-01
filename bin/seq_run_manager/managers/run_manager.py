@@ -135,9 +135,9 @@ class RunManager:
         min_qscore = (
             run_config.min_qscore
             if run_config.min_qscore is not None
-            else simplex_model.default_q_score_cutoff
+            else simplex_model.default_q_score_cutoff # type: ignore
         )
-        return simplex_model.name, min_qscore
+        return simplex_model.name, min_qscore # type: ignore
 
     def __watch_acquisitions_status(self) -> None:
         while True:
