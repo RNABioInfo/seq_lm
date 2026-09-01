@@ -34,13 +34,15 @@ class CertificateManagerTest(unittest.TestCase):
                 key_size=2048,
                 force=False,
             )
-            certificate, private_key, copied_ca = CertificateManager.setup(config)
+            certificate, private_key, client_ca, copied_ca = CertificateManager.setup(
+                config
+            )
 
             self.assertTrue(certificate.is_file())
             self.assertTrue(private_key.is_file())
             self.assertEqual(source_ca.read_bytes(), copied_ca.read_bytes())
             self.assertEqual(
-                certificate.read_bytes(),
+                client_ca.read_bytes(),
                 (trust_directory / "seq-run-manager.pem").read_bytes(),
             )
             self.assertEqual(stat.S_IMODE(private_key.stat().st_mode), 0o600)

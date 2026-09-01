@@ -15,11 +15,12 @@ class CertificateSetupError(Exception):
 class CertificateManager:
     CLIENT_CERTIFICATE_NAME = "minknow_cert.pem"
     CLIENT_PRIVATE_KEY_NAME = "minknow_key.pem"
+    CLIENT_CA_CERTIFICATE_NAME = "minknow_client_ca.pem"
     CA_CERTIFICATE_NAME = "minknow_cert.crt"
     INSTALLED_CLIENT_CERTIFICATE_NAME = "seq-run-manager.pem"
 
     @classmethod
-    def setup(cls, config: CertificateSetupConfig) -> tuple[Path, Path, Path]:
+    def setup(cls, config: CertificateSetupConfig) -> tuple[Path, Path, Path, Path]:
         openssl = shutil.which("openssl")
         if openssl is None:
             raise CertificateSetupError(
@@ -31,8 +32,14 @@ class CertificateManager:
 
         client_certificate = output_directory / cls.CLIENT_CERTIFICATE_NAME
         client_private_key = output_directory / cls.CLIENT_PRIVATE_KEY_NAME
+        client_ca_certificate = output_directory / cls.CLIENT_CA_CERTIFICATE_NAME
         ca_certificate = output_directory / cls.CA_CERTIFICATE_NAME
-        targets = (client_certificate, client_private_key, ca_certificate)
+        targets = (
+            client_certificate,
+            client_private_key,
+            client_ca_certificate,
+            ca_certificate,
+        )
         cls._ensure_replace_is_allowed(targets, config.force)
         if config.minknow_client_certs_directory is not None:
             cls._ensure_install_is_allowed(
@@ -48,12 +55,14 @@ class CertificateManager:
             temporary_path = Path(temporary_directory)
             generated_certificate = temporary_path / cls.CLIENT_CERTIFICATE_NAME
             generated_private_key = temporary_path / cls.CLIENT_PRIVATE_KEY_NAME
+            generated_client_ca = temporary_path / cls.CLIENT_CA_CERTIFICATE_NAME
             copied_ca_certificate = temporary_path / cls.CA_CERTIFICATE_NAME
 
             cls._generate_client_credentials(
                 openssl=openssl,
                 certificate=generated_certificate,
                 private_key=generated_private_key,
+                client_ca_certificate=generated_client_ca,
                 temporary_directory=temporary_path,
                 common_name=config.common_name,
                 valid_days=config.valid_days,
@@ -64,25 +73,33 @@ class CertificateManager:
                 openssl,
                 generated_certificate,
                 generated_private_key,
+                generated_client_ca,
                 copied_ca_certificate,
             )
 
             os.replace(generated_certificate, client_certificate)
             os.replace(generated_private_key, client_private_key)
+            os.replace(generated_client_ca, client_ca_certificate)
             os.replace(copied_ca_certificate, ca_certificate)
 
         client_certificate.chmod(0o644)
         client_private_key.chmod(0o600)
+        client_ca_certificate.chmod(0o644)
         ca_certificate.chmod(0o644)
 
         if config.minknow_client_certs_directory is not None:
             cls._install_client_certificate(
-                client_certificate,
+                client_ca_certificate,
                 config.minknow_client_certs_directory,
                 config.force,
             )
 
-        return client_certificate, client_private_key, ca_certificate
+        return (
+            client_certificate,
+            client_private_key,
+            client_ca_certificate,
+            ca_certificate,
+        )
 
     @classmethod
     def certificate_fingerprint(cls, certificate: Path) -> str:
@@ -144,6 +161,7 @@ class CertificateManager:
         openssl: str,
         certificate: Path,
         private_key: Path,
+        client_ca_certificate: Path,
         temporary_directory: Path,
         common_name: str,
         valid_days: int,
@@ -158,19 +176,28 @@ class CertificateManager:
             )
 
         openssl_configuration = temporary_directory / "openssl-client.cnf"
+        client_ca_private_key = temporary_directory / "minknow_client_ca_key.pem"
+        certificate_request = temporary_directory / "minknow_client.csr"
         openssl_configuration.write_text(
             """[req]
 distinguished_name = subject
-x509_extensions = client_extensions
 prompt = no
 
 [subject]
 CN = placeholder
 
+[client_ca_extensions]
+basicConstraints = critical,CA:TRUE,pathlen:0
+keyUsage = critical,keyCertSign,cRLSign
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid:always
+
 [client_extensions]
 basicConstraints = critical,CA:FALSE
 keyUsage = critical,digitalSignature,keyEncipherment
 extendedKeyUsage = clientAuth
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid,issuer
 """
         )
         cls._run(
@@ -184,14 +211,58 @@ extendedKeyUsage = clientAuth
             "-days",
             str(valid_days),
             "-keyout",
+            str(client_ca_private_key),
+            "-out",
+            str(client_ca_certificate),
+            "-config",
+            str(openssl_configuration),
+            "-subj",
+            f"/CN={common_name} CA",
+            "-extensions",
+            "client_ca_extensions",
+        )
+        cls._run(
+            openssl,
+            "req",
+            "-new",
+            "-newkey",
+            f"rsa:{key_size}",
+            "-sha256",
+            "-nodes",
+            "-keyout",
             str(private_key),
             "-out",
-            str(certificate),
+            str(certificate_request),
             "-config",
             str(openssl_configuration),
             "-subj",
             f"/CN={common_name}",
         )
+        leaf_certificate = temporary_directory / "minknow_client_leaf.pem"
+        cls._run(
+            openssl,
+            "x509",
+            "-req",
+            "-in",
+            str(certificate_request),
+            "-CA",
+            str(client_ca_certificate),
+            "-CAkey",
+            str(client_ca_private_key),
+            "-CAcreateserial",
+            "-days",
+            str(valid_days),
+            "-sha256",
+            "-out",
+            str(leaf_certificate),
+            "-extfile",
+            str(openssl_configuration),
+            "-extensions",
+            "client_extensions",
+        )
+        with certificate.open("wb") as certificate_chain:
+            certificate_chain.write(leaf_certificate.read_bytes())
+            certificate_chain.write(client_ca_certificate.read_bytes())
 
     @classmethod
     def _validate_credentials(
@@ -199,9 +270,11 @@ extendedKeyUsage = clientAuth
         openssl: str,
         certificate: Path,
         private_key: Path,
+        client_ca_certificate: Path,
         ca_certificate: Path,
     ) -> None:
         cls._validate_certificate(openssl, certificate, "client certificate")
+        cls._validate_certificate(openssl, client_ca_certificate, "client CA certificate")
         cls._validate_certificate(openssl, ca_certificate, "MinKNOW CA certificate")
         cls._run(openssl, "pkey", "-in", str(private_key), "-check", "-noout")
 
@@ -212,6 +285,14 @@ extendedKeyUsage = clientAuth
             raise CertificateSetupError(
                 "Generated certificate is not valid for TLS client authentication"
             )
+
+        cls._run(
+            openssl,
+            "verify",
+            "-CAfile",
+            str(client_ca_certificate),
+            str(certificate),
+        )
 
         certificate_key = cls._run(
             openssl, "x509", "-in", str(certificate), "-pubkey", "-noout"

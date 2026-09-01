@@ -43,15 +43,19 @@ def main():
 def setup_certificates():
     config = ArgumentParser.parse_certificate_setup_arguments(sys.argv[2:])
     try:
-        client_certificate, client_private_key, ca_certificate = (
-            CertificateManager.setup(config)
-        )
+        (
+            client_certificate,
+            client_private_key,
+            client_ca_certificate,
+            ca_certificate,
+        ) = CertificateManager.setup(config)
     except CertificateSetupError as error:
         raise SystemExit(f"Certificate setup failed: {error}") from error
 
     print("MinKNOW credentials created and validated:")
     print(f"  Client certificate: {client_certificate}")
     print(f"  Client private key: {client_private_key}")
+    print(f"  Client CA certificate: {client_ca_certificate}")
     print(f"  CA certificate: {ca_certificate}")
     print(
         "  Client certificate SHA-256: "

@@ -1,3 +1,4 @@
+import os
 import secrets
 import string
 import time
@@ -38,6 +39,7 @@ class ConnectionManager:
             client_certificate_chain=client_certificate_bytes,
             client_private_key=client_private_key_bytes,
             ca_certificate=ca_certificate_bytes,
+            environ={**os.environ, "MINKNOW_API_USE_LOCAL_TOKEN": "0"},
         )
 
     def disconnect(self) -> None:

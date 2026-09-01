@@ -94,9 +94,9 @@ nextflow run epi2me-labs/wf-template --sample_sheet samples.csv
 
 ### MinKNOW client certificates
 
-The sequencing run manager can generate its client certificate and private key,
-copy MinKNOW's root CA certificate, and optionally install the public client
-certificate into a local MinKNOW installation:
+The sequencing run manager can generate a private client CA, a signed client
+certificate and private key, copy MinKNOW's root CA certificate, and optionally
+install the public client CA into a local MinKNOW installation:
 
 ```bash
 seq-run-manager setup-certificates \
@@ -120,8 +120,9 @@ seq-run-manager setup-certificates \
 Under WSL, both Windows paths must be expressed as mounted Linux paths, for
 example `/mnt/c/data/rpc-certs/minknow/ca.crt` and the corresponding
 `/mnt/c/.../conf/rpc-client-certs` directory. Only the public client certificate
-is installed into MinKNOW; the private key remains in the credential output
-directory. Run the command as the normal WSL user, not with `sudo`. When the
+is installed into MinKNOW; the generated client certificate chain and its
+private key remain in the credential output directory. Run the command as the
+normal WSL user, not with `sudo`. When the
 MinKNOW installation is protected by Windows ACLs, the command opens a Windows
 User Account Control prompt and performs only the public-certificate copy with
 Administrator privileges. MinKNOW may need to be restarted after installing or
