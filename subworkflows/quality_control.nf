@@ -63,7 +63,7 @@ def qc_result_key(result) -> String {
  */
 process nanoplot_qc {
     label 'seq_lm_qc'
-    container 'rnabioinfo/seq_lm_quality_control:v2.1.0'
+    container 'rnabioinfo/seq_lm_quality_control:v2.1.1'
     cpus 4
 
     input:

@@ -37,7 +37,16 @@ def aggregate_nanoplot(nanoplot_paths: list[Path]) -> pd.DataFrame | None:
     if not nanoplot_paths:
         return None
 
-    nanoplot_results = [pd.read_csv(path, sep="\t") for path in nanoplot_paths]
+    nanoplot_results = []
+    for path in nanoplot_paths:
+        try:
+            nanoplot_results.append(pd.read_csv(path, sep="\t"))
+        except pd.errors.EmptyDataError:
+            # QC versions before the producer wrote an explicit header created
+            # a valid, headerless gzip stream when a BAM had no usable reads.
+            # Preserve that chunk as an empty table so cumulative live reports
+            # can still include its flagstat counts and later QC chunks.
+            nanoplot_results.append(pd.DataFrame(columns=NANOPLOT_COLUMNS))
     missing_columns = sorted(
         {
             column

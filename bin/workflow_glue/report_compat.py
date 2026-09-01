@@ -8,6 +8,10 @@ from bokeh.resources import Resources
 
 
 _BRAND_COLOR = "#004191"
+_REPORT_SUBHEADLINE = (
+    "Long-read RNA sequencing quality control, differential expression, "
+    "and gene set enrichment."
+)
 # Keep the report portable and container-safe by embedding the supplied PNG.
 _BRAND_LOGO_DATA_URI = (
     "data:image/png;base64,"
@@ -222,16 +226,18 @@ def apply_report_branding(report_path, subtitle_notice=None):
     report_path = Path(report_path)
     html = report_path.read_text()
     html = _EPI2ME_HEADER_LINK.sub(_BRAND_MARKUP, html, count=1)
-    if subtitle_notice:
-        def add_subtitle_notice(match):
-            notice = escape(str(subtitle_notice))
-            return (
-                f"{match.group('open')}{match.group('body')} "
-                f'<strong class="seq-lm-dea-readiness-notice">{notice}</strong>'
-                f"{match.group('close')}"
-            )
 
-        html = _REPORT_SUBTITLE.sub(add_subtitle_notice, html, count=1)
+    def replace_subtitle(match):
+        body = escape(_REPORT_SUBHEADLINE)
+        if subtitle_notice:
+            notice = escape(str(subtitle_notice))
+            body += (
+                " "
+                f'<strong class="seq-lm-dea-readiness-notice">{notice}</strong>'
+            )
+        return f"{match.group('open')}{body}{match.group('close')}"
+
+    html = _REPORT_SUBTITLE.sub(replace_subtitle, html, count=1)
     if 'id="seq-lm-report-branding"' not in html and "</head>" in html:
         html = _insert_before_last(html, "</head>", _BRAND_STYLES)
     if 'id="seq-lm-report-navigation"' not in html and "</body>" in html:

@@ -3,6 +3,7 @@ from .models.run_config import RunConfig
 from .utils.argument_parser import ArgumentParser
 from .managers.connection_manager import ConnectionManager
 from .managers.run_manager import RunManager
+import sys
 
 __version__ = "0.0.1"
 _package_name = "seq_run_manager"
@@ -20,6 +21,10 @@ def main():
     connection_manager.remove_all_simulated_positions()
 
     run_manager: RunManager = RunManager(connection_manager)
+
+    if run_config.simulate_run:
+        sys.exit(0)
+
     run_manager.start_run(run_config)
 
     connection_manager.disconnect()

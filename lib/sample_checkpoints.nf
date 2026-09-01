@@ -12,7 +12,7 @@ def sample_final_marker() -> String {
 }
 
 def sample_checkpoint_tools() -> Map<String,String> {
-    return [samtools: 'rnabioinfo/seq_lm_samtools:v1.0.0', quality_control: 'rnabioinfo/seq_lm_quality_control:v1.0.0', oarfish: 'rnabioinfo/seq_lm_oarfish:v1.0.0']
+    return [samtools: 'rnabioinfo/seq_lm_samtools:v1.0.0', quality_control: 'rnabioinfo/seq_lm_quality_control:v2.1.1', oarfish: 'rnabioinfo/seq_lm_oarfish:v1.0.0']
 }
 
 def sample_checkpoint_key(sample) -> String {
@@ -212,7 +212,7 @@ def checkpoint_static_manifest(sample, reference_identity: Map) -> Map {
  */
 process write_sample_checkpoints {
     label 'seq_lm_qc'
-    container 'rnabioinfo/seq_lm_quality_control:v1.0.0'
+    container 'rnabioinfo/seq_lm_quality_control:v2.1.1'
     cpus 1
 
     publishDir params.out_dir, mode: 'copy', overwrite: true, saveAs: { path ->

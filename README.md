@@ -5,19 +5,11 @@ template that can be used as the basis for creating new workflows.
 
 > This workflow is not intended to be used by end users.
 
-
-
-
-
 ## Introduction
 
 This section of documentation typically contains an overview of the workflow in terms of motivation
 and bioinformatics methods, listing any key tools or algorithms employed, whilst also describing its
 range of use-cases and what a suitable input dataset should look like.
-
-
-
-
 
 ## Quickstart
 

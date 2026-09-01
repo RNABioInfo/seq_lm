@@ -44,7 +44,7 @@ def test_write_report_uses_live_shell_and_versioned_snapshot(tmp_path):
 
 
 def test_write_report_rebrands_labs_header(tmp_path):
-    """Generated reports use the embedded project logo and header color."""
+    """Generated reports use the project logo, color, and subheadline."""
 
     class Report:
         def write(self, path):
@@ -53,7 +53,10 @@ def test_write_report_rebrands_labs_header(tmp_path):
                 '<nav class="fixed-top bg-dark">'
                 '<a href="https://labs.epi2me.io/">'
                 '<div alt="EPI2ME Labs Logo"><svg></svg></div>'
-                "</a></nav></header></body></html>"
+                "</a></nav>"
+                '<p class="py-2 fs-5">Results generated through the qc_report '
+                "workflow provided by Oxford Nanopore Technologies.</p>"
+                "</header></body></html>"
             )
 
     report_path = tmp_path / "qc_report.html"
@@ -65,6 +68,11 @@ def test_write_report_rebrands_labs_header(tmp_path):
     assert 'alt="RNA BioInfo AUCG logo"' in html
     assert "data:image/png;base64," in html
     assert "#004191" in html
+    assert (
+        "Long-read RNA sequencing quality control, differential expression, "
+        "and gene set enrichment."
+    ) in html
+    assert "Oxford Nanopore Technologies" not in html
 
 
 @pytest.mark.parametrize(
@@ -95,7 +103,11 @@ def test_write_report_adds_dea_readiness_notice_to_subtitle(tmp_path, notice):
     )
 
     html = report_path.read_text()
-    assert "Workflow results." in html
+    assert "Workflow results." not in html
+    assert (
+        "Long-read RNA sequencing quality control, differential expression, "
+        "and gene set enrichment."
+    ) in html
     assert notice in html
     assert 'class="seq-lm-dea-readiness-notice"' in html
 

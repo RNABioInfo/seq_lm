@@ -1,7 +1,8 @@
-from typing import Optional, List
 from dataclasses import dataclass
-from .sample import Sample
 from pathlib import Path
+from typing import List, Optional
+
+from .sample import Sample
 
 
 @dataclass
@@ -56,6 +57,3 @@ class RunConfig:
 
         if len(self.samples) < 1:
             raise Exception("No samples provided")
-
-        if self.simulate_run:
-            raise Exception("Simulated runs are not supported yet")

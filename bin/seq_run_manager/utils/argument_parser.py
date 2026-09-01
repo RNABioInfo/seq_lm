@@ -101,7 +101,7 @@ class ArgumentParser:
         return config
 
     @staticmethod
-    def parse_tsv_to_samples(file_path: str) -> List[Sample]:
+    def parse_tsv_to_samples(file_path: str) -> list[Sample]:
         with open(file_path, "r") as f:
             reader = csv.DictReader(f, delimiter="\t")
             return [
