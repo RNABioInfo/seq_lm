@@ -175,9 +175,11 @@ class RunManager:
 
             time.sleep(5)
 
-    def start_run(self, run_config: RunConfig) -> None:
+    def start_run_watcher(self, run_config: RunConfig) -> None:
         self.active_acquisitions = self.__start_acquisitions(run_config)
         self.__watch_acquisitions_status()
 
         if run_config.simulate_run:
             self.connection_manager.remove_all_simulated_positions()
+
+    # def stop_run(self, )

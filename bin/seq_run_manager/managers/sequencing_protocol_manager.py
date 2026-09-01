@@ -94,13 +94,13 @@ class SequencingProtocolManager:
         offload_location_info.offload_location_path = sequencing_dir.as_posix()
 
         print(f"Offload location path: {offload_location_info.offload_location_path}")
-        run_id = device_connection.protocol.start_protocol(  # type: ignore
+        response = device_connection.protocol.start_protocol(  # type: ignore
             identifier=protocol_identifier,
             args=protocol_args,
             user_info=user_info,
             offload_location_info=offload_location_info,
         )
-        return run_id
+        return response.run_id
 
     @staticmethod
     def stream_current_protocol_updates(
@@ -113,3 +113,15 @@ class SequencingProtocolManager:
         position_connection: mk.Connection, run_id: str
     ) -> Iterator[mk.statistics_pb2.StreamAcquisitionOutputResponse]:  # type: ignore
         return position_connection.statistics.stream_acquisition_output(acquisition_run_id=run_id)  # type: ignore
+
+    @staticmethod
+    def stop_sequencing_protocol(
+        position_connection: mk.Connection, run_id: str
+    ) -> protocol_pb2.StopProtocolResponse:  # type: ignore
+        position_connection.protocol.stop_protocol(protocol_run_id = run_id) # type: ignore
+
+    @staticmethod
+    def get_currently_active_protocol(
+        position_connection: mk.Connection,
+    ) -> protocol_pb2.ProtocolRunInfo: # type: ignore
+        return position_connection.protocol.get_current_protocol_run() # type: ignore

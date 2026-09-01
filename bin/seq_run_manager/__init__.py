@@ -4,6 +4,7 @@ import socket
 import sys
 
 from .managers.certificate_manager import CertificateManager, CertificateSetupError
+from .managers.sequencing_protocol_manager import SequencingProtocolManager
 from .models.manager_error import ManagerError
 from .utils.argument_parser import ArgumentParser
 
@@ -30,12 +31,21 @@ def main():
     connection_manager.print_available_positions()
     connection_manager.remove_all_simulated_positions()
 
+    positions = connection_manager.get_available_positions()
+
+    for pos in positions:
+        connection = pos.connect()
+        active = SequencingProtocolManager.get_currently_active_protocol(connection)
+        print(f"active: {active}")
+
+    return
+
     run_manager: RunManager = RunManager(connection_manager)
 
     if run_config.simulate_run:
         sys.exit(0)
 
-    run_manager.start_run(run_config)
+    run_manager.start_run_watcher(run_config)
 
     connection_manager.disconnect()
 
