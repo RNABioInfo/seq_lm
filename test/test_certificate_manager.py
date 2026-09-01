@@ -10,7 +10,7 @@ from seq_run_manager.managers.certificate_manager import (
     CertificateManager,
     CertificateSetupError,
 )
-from seq_run_manager.models.certificate_setup_config import CertificateSetupConfig
+from seq_run_manager.models.certificate_config import CertificateConfig
 
 
 @unittest.skipUnless(shutil.which("openssl"), "OpenSSL is required")
@@ -25,7 +25,7 @@ class CertificateManagerTest(unittest.TestCase):
             trust_directory.mkdir()
             self._create_test_ca(source_ca, source_ca_key)
 
-            config = CertificateSetupConfig(
+            config = CertificateConfig(
                 output_directory=output_directory,
                 ca_certificate_source=source_ca,
                 minknow_client_certs_directory=trust_directory,

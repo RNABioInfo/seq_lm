@@ -5,7 +5,7 @@ import minknow_api as mk
 from minknow_api import protocol_pb2
 from minknow_api.tools import protocols
 
-from ..models.run_config import RunConfig
+from ..models.start_run_config import StartRunConfig
 
 
 class SequencingProtocolManager:
@@ -34,7 +34,7 @@ class SequencingProtocolManager:
         protocol: mk.protocol_pb2.ProtocolInfo,  # type: ignore
         sample_id: str,
         sample_dir: Path,
-        run_config: RunConfig,
+        run_config: StartRunConfig,
         simplex_model: str,
         min_qscore: float,
     ) -> str:
@@ -42,8 +42,12 @@ class SequencingProtocolManager:
         alignment_args = None
         if run_config.reference_genome_path is not None:
             alignment_args = protocols.AlignmentArgs(
-                reference_files=[run_config.reference_genome_path],
-                bed_file=run_config.sampling_regions_path,
+                reference_files=[str(run_config.reference_genome_path)],
+                bed_file=(
+                    str(run_config.sampling_regions_path)
+                    if run_config.sampling_regions_path is not None
+                    else None
+                ),
             )
         basecalling_args = protocols.BasecallingArgs(
             simplex_model=simplex_model,
@@ -60,8 +64,8 @@ class SequencingProtocolManager:
         ):
             read_until_args = protocols.ReadUntilArgs(
                 filter_type=run_config.adaptive_sampling_mode,
-                reference_files=[run_config.reference_genome_path],
-                bed_file=run_config.sampling_regions_path,
+                reference_files=[str(run_config.reference_genome_path)],
+                bed_file=str(run_config.sampling_regions_path),
                 first_channel=None,
                 last_channel=None,
             )
@@ -89,9 +93,8 @@ class SequencingProtocolManager:
         user_info.protocol_group_id.value = run_config.experiment_id
         user_info.sample_id.value = sample_id
 
-        sequencing_dir = sample_dir.parents[1]
         offload_location_info = protocol_pb2.OffloadLocationInfo()  # type: ignore
-        offload_location_info.offload_location_path = sequencing_dir.as_posix()
+        offload_location_info.offload_location_path = sample_dir.as_posix()
 
         print(f"Offload location path: {offload_location_info.offload_location_path}")
         response = device_connection.protocol.start_protocol(  # type: ignore
@@ -118,7 +121,7 @@ class SequencingProtocolManager:
     def stop_sequencing_protocol(
         position_connection: mk.Connection, run_id: str
     ) -> protocol_pb2.StopProtocolResponse:  # type: ignore
-        position_connection.protocol.stop_protocol(protocol_run_id = run_id) # type: ignore
+        return position_connection.protocol.stop_protocol(protocol_run_id = run_id) # type: ignore
 
     @staticmethod
     def get_currently_active_protocol(

@@ -5,7 +5,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from ..models.certificate_setup_config import CertificateSetupConfig
+from ..models.certificate_config import CertificateConfig
 
 
 class CertificateSetupError(Exception):
@@ -20,7 +20,7 @@ class CertificateManager:
     INSTALLED_CLIENT_CERTIFICATE_NAME = "seq-run-manager.pem"
 
     @classmethod
-    def setup(cls, config: CertificateSetupConfig) -> tuple[Path, Path, Path, Path]:
+    def setup(cls, config: CertificateConfig) -> tuple[Path, Path, Path, Path]:
         openssl = shutil.which("openssl")
         if openssl is None:
             raise CertificateSetupError(

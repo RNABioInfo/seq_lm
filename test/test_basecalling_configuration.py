@@ -10,12 +10,12 @@ from seq_run_manager.managers.run_manager import RunManager
 from seq_run_manager.managers.sequencing_protocol_manager import (
     SequencingProtocolManager,
 )
-from seq_run_manager.models.run_config import RunConfig
 from seq_run_manager.models.sample import Sample
+from seq_run_manager.models.start_run_config import StartRunConfig
 
 
 class BasecallingConfigurationTest(unittest.TestCase):
-    def _run_config(self, root: Path, **overrides) -> RunConfig:
+    def _run_config(self, root: Path, **overrides) -> StartRunConfig:
         credential_paths = [root / name for name in ("client.pem", "key.pem", "ca.crt")]
         for credential_path in credential_paths:
             credential_path.touch()
@@ -23,13 +23,12 @@ class BasecallingConfigurationTest(unittest.TestCase):
         values = {
             "host": "localhost",
             "port": 9501,
-            "client_certificate_path": str(credential_paths[0]),
-            "client_private_key_path": str(credential_paths[1]),
-            "ca_certificate_path": str(credential_paths[2]),
+            "client_certificate_path": credential_paths[0],
+            "client_private_key_path": credential_paths[1],
+            "ca_certificate_path": credential_paths[2],
             "flow_cell_ids": None,
             "position_ids": None,
             "experiment_id": "experiment",
-            "run_id": "1",
             "kit": "SQK-RNA004",
             "reference_genome_path": None,
             "sampling_regions_path": None,
@@ -37,11 +36,11 @@ class BasecallingConfigurationTest(unittest.TestCase):
             "basecall_model": None,
             "min_qscore": None,
             "output_chunk_size": 4000,
-            "samples": [Sample(1, 1, root / "run" / "sample")],
+            "samples": [Sample("sample", "control", root / "run" / "sample")],
             "simulate_run": False,
         }
         values.update(overrides)
-        return RunConfig(**values)
+        return StartRunConfig(**values)
 
     def test_validation_accepts_model_discovery_and_rejects_legacy_config(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -103,7 +102,9 @@ class BasecallingConfigurationTest(unittest.TestCase):
                 adaptive_sampling_mode="enrich",
             )
             device_connection = MagicMock()
-            device_connection.protocol.start_protocol.return_value = "run-id"
+            device_connection.protocol.start_protocol.return_value = SimpleNamespace(
+                run_id="run-id"
+            )
             protocol = SimpleNamespace(identifier="protocol-id")
 
             with patch.object(
@@ -128,6 +129,12 @@ class BasecallingConfigurationTest(unittest.TestCase):
         self.assertEqual(arguments["read_until"].reference_files, [str(reference)])
         self.assertEqual(arguments["fastq_arguments"].reads_per_file, 4000)
         self.assertIsNone(arguments["fastq_arguments"].batch_duration)
+        self.assertEqual(
+            device_connection.protocol.start_protocol.call_args.kwargs[
+                "offload_location_info"
+            ].offload_location_path,
+            (root / "run" / "sample").as_posix(),
+        )
 
 
 if __name__ == "__main__":

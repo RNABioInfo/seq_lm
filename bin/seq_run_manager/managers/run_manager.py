@@ -7,7 +7,7 @@ from ..managers.connection_manager import ConnectionManager
 from ..managers.sequencing_protocol_manager import SequencingProtocolManager
 from ..models.acquisition import Acquisition
 from ..models.manager_error import ManagerError
-from ..models.run_config import RunConfig
+from ..models.start_run_config import StartRunConfig
 
 
 class RunManager:
@@ -41,7 +41,7 @@ class RunManager:
                 raise ManagerError("All flow cells must have the same product code")
         return product_code
 
-    def __start_acquisitions(self, run_config: RunConfig) -> list[Acquisition]:
+    def __start_acquisitions(self, run_config: StartRunConfig) -> list[Acquisition]:
         connections: list[mk.Connection] = self.connection_manager.connect_to_positions(
             run_config
         )
@@ -82,7 +82,7 @@ class RunManager:
                 connection,
                 protocol,
                 sample.id,
-                sample.replicate_dir,
+                sample.bam_dir,
                 run_config,
                 simplex_model,
                 min_qscore,
@@ -96,7 +96,7 @@ class RunManager:
 
     def __resolve_basecalling_settings(
         self,
-        run_config: RunConfig,
+        run_config: StartRunConfig,
         position_connection: mk.Connection,
         protocol: mk.protocol_pb2.ProtocolInfo,  # type: ignore
         product_code: str,
@@ -175,28 +175,28 @@ class RunManager:
 
             time.sleep(5)
 
-    def start_run_watcher(self, run_config: RunConfig) -> None:
+    def start_run_watcher(self, run_config: StartRunConfig) -> None:
         self.active_acquisitions = self.__start_acquisitions(run_config)
         self.__watch_acquisitions_status()
 
-        if run_config.simulate_run:
-            self.connection_manager.remove_all_simulated_positions()
-
-    def stop_run(self, run_id: str):
+    def stop_run(self, run_id: str) -> None:
         connections = self.connection_manager.connect_to_all_positions()
 
         for connection in connections:
-            response = SequencingProtocolManager.get_currently_active_protocol(connection)
+            response = SequencingProtocolManager.get_currently_active_protocol(
+                connection
+            )
 
             if not response or response.run_id != run_id:
                 continue
 
-            stop_response = SequencingProtocolManager.stop_sequencing_protocol(connection, run_id)
+            stop_response = SequencingProtocolManager.stop_sequencing_protocol(
+                connection, run_id
+            )
 
             if not stop_response:
-                raise ManagerError("Could not stop protocol")
+                raise ManagerError(f"Could not stop protocol with id {run_id}.")
 
             return
 
-        raise ManagerError(f"Did not find position with specified run_id: {run_id}")
-            
+        raise ManagerError(f"Did not find position with specified run ID: {run_id}")

@@ -3,7 +3,7 @@ from pathlib import Path
 
 
 @dataclass
-class CertificateSetupConfig:
+class CertificateConfig:
     output_directory: Path
     ca_certificate_source: Path | None
     minknow_client_certs_directory: Path | None

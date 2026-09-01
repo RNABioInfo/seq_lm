@@ -21,7 +21,7 @@ class Acquisition:
         self.start_date = datetime.now()  # noqa: DTZ005
 
     def should_stop(self) -> bool:
-        stop_file_path = self.sample.replicate_dir / "STOP"
+        stop_file_path = self.sample.bam_dir / "STOP"
 
         return bool(stop_file_path.exists())
 

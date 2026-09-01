@@ -4,10 +4,12 @@ from pathlib import Path
 
 @dataclass
 class Sample:
-    run_number: int
-    replicate_number: int
-    replicate_dir: Path
+    alias: str
+    group: str
+    bam_dir: Path
+    is_live: bool = True
+    order: int | None = None
 
     @property
-    def id(self):
-        return f"run_{self.run_number}_replicate_{self.replicate_number}"
+    def id(self) -> str:
+        return self.alias

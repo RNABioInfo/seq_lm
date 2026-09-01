@@ -20,9 +20,9 @@ class ConnectionManagerCredentialsTest(unittest.TestCase):
             config = SimpleNamespace(
                 host="127.0.0.1",
                 port=9501,
-                client_certificate_path=str(certificate),
-                client_private_key_path=str(private_key),
-                ca_certificate_path=str(ca_certificate),
+                client_certificate_path=certificate,
+                client_private_key_path=private_key,
+                ca_certificate_path=ca_certificate,
             )
 
             with patch(

@@ -7,8 +7,9 @@ from pprint import pprint
 import minknow_api as mk
 import minknow_api.manager as mk_manager
 
+from ..models.connection_config import ConnectionConfig
 from ..models.manager_error import ManagerError
-from ..models.run_config import RunConfig
+from ..models.start_run_config import StartRunConfig
 
 
 class ConnectionManager:
@@ -18,24 +19,24 @@ class ConnectionManager:
         self.manager = manager
 
     @classmethod
-    def connected_with(cls, run_config: RunConfig) -> "ConnectionManager":
-        manager = cls.__connect_to_minknow(run_config)
+    def connected_with(cls, config: ConnectionConfig) -> "ConnectionManager":
+        manager = cls.__connect_to_minknow(config)
         return cls(manager)
 
     @staticmethod
-    def __connect_to_minknow(run_config: RunConfig) -> mk_manager.Manager:
-        with open(run_config.client_certificate_path, "rb") as certificate:
+    def __connect_to_minknow(config: ConnectionConfig) -> mk_manager.Manager:
+        with config.client_certificate_path.open("rb") as certificate:
             client_certificate_bytes = certificate.read()
 
-        with open(run_config.client_private_key_path, "rb") as private_key:
+        with config.client_private_key_path.open("rb") as private_key:
             client_private_key_bytes = private_key.read()
 
-        with open(run_config.ca_certificate_path, "rb") as ca_certificate:
+        with config.ca_certificate_path.open("rb") as ca_certificate:
             ca_certificate_bytes = ca_certificate.read()
 
         return mk_manager.Manager(
-            host=run_config.host or "127.0.0.1",
-            port=run_config.port,
+            host=config.host,
+            port=config.port,
             client_certificate_chain=client_certificate_bytes,
             client_private_key=client_private_key_bytes,
             ca_certificate=ca_certificate_bytes,
@@ -92,7 +93,7 @@ class ConnectionManager:
             pprint(position)
 
     def get_sequencing_positions(
-        self, run_config: RunConfig
+        self, run_config: StartRunConfig
     ) -> list[mk_manager.FlowCellPosition]:
         if run_config.simulate_run:
             simulated_positions: list[mk_manager.FlowCellPosition] = []
@@ -182,7 +183,7 @@ class ConnectionManager:
         raise ManagerError(f"Position with id {flow_cell_id} not found")
 
     def connect_to_positions(
-        self, run_config: RunConfig, retries: int = 3
+        self, run_config: StartRunConfig, retries: int = 3
     ) -> list[mk.Connection]:
         positions = self.get_sequencing_positions(run_config)
 

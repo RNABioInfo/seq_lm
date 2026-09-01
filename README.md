@@ -99,7 +99,7 @@ certificate and private key, copy MinKNOW's root CA certificate, and optionally
 install the public client CA into a local MinKNOW installation:
 
 ```bash
-seq-run-manager setup-certificates \
+seq-run-manager cert \
     --minknow-client-certs-directory /path/to/minknow/conf/rpc-client-certs
 ```
 
@@ -112,7 +112,7 @@ The MinKNOW CA is auto-detected from its standard Linux, macOS, and WSL-mounted
 Windows locations. If MinKNOW uses a non-standard data directory, specify it:
 
 ```bash
-seq-run-manager setup-certificates \
+seq-run-manager cert \
     --ca-certificate-source /path/to/minknow/ca.crt \
     --minknow-client-certs-directory /path/to/minknow/conf/rpc-client-certs
 ```
@@ -127,6 +127,40 @@ MinKNOW installation is protected by Windows ACLs, the command opens a Windows
 User Account Control prompt and performs only the public-certificate copy with
 Administrator privileges. MinKNOW may need to be restarted after installing or
 replacing a client certificate.
+
+### Starting and stopping MinKNOW acquisitions
+
+The run manager uses dedicated commands for starting and stopping acquisitions.
+`start` consumes the same CSV sample sheet as the workflow. It starts one
+acquisition per row, uses `alias` as the MinKNOW sample ID, and uses `bam_dir`
+as that acquisition's output location:
+
+```bash
+seq-run-manager start \
+    --host host.docker.internal \
+    --client-certificate-path ~/.config/seq-run-manager/minknow/minknow_cert.pem \
+    --client-private-key-path ~/.config/seq-run-manager/minknow/minknow_key.pem \
+    --ca-certificate-path ~/.config/seq-run-manager/minknow/minknow_cert.crt \
+    --samplesheet samples.csv \
+    --experiment-id experiment-1 \
+    --kit SQK-RNA004
+```
+
+Use `--position-ids` or `--flow-cell-ids` followed by one or more identifiers
+to select devices explicitly. Their order must match the sample-sheet row order.
+Without either option, the number of available positions must equal the number
+of rows.
+
+Stop an active acquisition using the run ID returned by MinKNOW:
+
+```bash
+seq-run-manager stop \
+    --host host.docker.internal \
+    --client-certificate-path ~/.config/seq-run-manager/minknow/minknow_cert.pem \
+    --client-private-key-path ~/.config/seq-run-manager/minknow/minknow_key.pem \
+    --ca-certificate-path ~/.config/seq-run-manager/minknow/minknow_cert.crt \
+    --run-id 1bc8bbfb-3ebb-4f94-914a-a3c6ae1d11f1
+```
 
 **Workflow outputs**
 
