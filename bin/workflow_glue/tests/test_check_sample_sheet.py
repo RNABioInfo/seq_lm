@@ -42,7 +42,7 @@ def test_check_sample_sheet(
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
-    args = check_sample_sheet.argparser().parse_args([sample_sheet_path])
+    args = check_sample_sheet.argparser().parse_args([str(sample_sheet_path)])
     try:
         check_sample_sheet.main(args)
     except SystemExit:

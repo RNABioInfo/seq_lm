@@ -29,22 +29,28 @@ def main(arguments: Sequence[str] | None = None) -> None:
         check_server(config.host, config.port)
     except ManagerError as error:
         raise SystemExit(f"seq-run-manager failed: {error}") from error
+    
     connection_manager = ConnectionManager.connected_with(config)
+
     try:
         run_manager = RunManager(connection_manager)
         if isinstance(config, StartRunConfig):
             if config.simulate_run:
                 connection_manager.remove_all_simulated_positions()
             run_manager.start_run_watcher(config)
+
         elif isinstance(config, StopAcquisitionConfig):
             run_manager.stop_run(config.run_id)
             print(f"Stopped acquisition with run ID {config.run_id}")
+            
     except ManagerError as error:
         raise SystemExit(f"seq-run-manager failed: {error}") from error
     finally:
-        if isinstance(config, StartRunConfig) and config.simulate_run:
-            connection_manager.remove_all_simulated_positions()
-        connection_manager.disconnect()
+        try:
+            if isinstance(config, StartRunConfig) and config.simulate_run:
+                connection_manager.remove_all_simulated_positions()
+        finally:
+            connection_manager.disconnect()
 
 
 def setup_certificates(config: CertificateConfig) -> None:

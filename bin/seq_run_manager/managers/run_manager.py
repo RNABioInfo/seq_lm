@@ -182,10 +182,14 @@ class RunManager:
     def stop_run(self, run_id: str) -> None:
         connections = self.connection_manager.connect_to_all_positions()
 
+        detected_run_ids: list[str] = []
+
         for connection in connections:
             response = SequencingProtocolManager.get_currently_active_protocol(
                 connection
             )
+
+            detected_run_ids.append(response.run_id)
 
             if not response or response.run_id != run_id:
                 continue
@@ -199,4 +203,4 @@ class RunManager:
 
             return
 
-        raise ManagerError(f"Did not find position with specified run ID: {run_id}")
+        raise ManagerError(f"Did not find position with specified run ID: {run_id}. Available run IDs: {",".join(detected_run_ids)}.")
