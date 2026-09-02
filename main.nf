@@ -25,6 +25,7 @@ include {
 } from './modules/qc_report_helpers.nf'
 include { join_report_batches } from './modules/report_batches.nf'
 include { quality_control } from './subworkflows/quality_control.nf'
+include { quantification } from './subworkflows/quantification.nf'
 include { differential_expression } from './subworkflows/differential_expression.nf'
 include { order_batches } from './lib/util.nf'
 include {
@@ -39,38 +40,7 @@ include {
     sample_checkpoint_key ;
     write_sample_checkpoints
 } from './lib/sample_checkpoints.nf'
-
-
-process write_config {
-    label 'seq_lm'
-    cpus 1
-
-    exec:
-    log.info('Writing config file...')
-
-    // Writing experiment config file should only happen at the first run of the experiment
-    def configOut = new File("${params.out_dir}/experiment.config")
-
-    configOut.withWriter { w ->
-        w << 'params {\n'
-        params.each { k, v ->
-            if (k.startsWith('ex')) {
-                if (k == 'ex_run_number') {
-                    v = v + 1
-                }
-                def line = ''
-                if (v instanceof String) {
-                    line = "\t${k} = \"${v}\"\n"
-                }
-                else {
-                    line = "\t${k} = ${v}\n"
-                }
-                w << line
-            }
-        }
-        w << '}\n'
-    }
-}
+include { validate_parameters } from './lib/validation.nf'
 
 process make_report {
     label 'seq_lm'
@@ -201,6 +171,8 @@ process qc_report {
     input:
     qc_report_inputs: Map
     qc_results: Path
+    transcript_biotypes: Path
+    has_transcript_biotypes: Boolean
     differential_results: Path
     differential_analysis_note: String
     stability_results: Path
@@ -209,6 +181,7 @@ process qc_report {
 
     stage:
     stageAs qc_results, 'qc_results'
+    stageAs transcript_biotypes, 'transcript_biotypes.tsv'
     stageAs differential_results, 'differential_results'
     stageAs stability_results, 'stability_results.tsv'
 
@@ -222,6 +195,9 @@ process qc_report {
     def quoted_params_json: String = shell_quote(params_json)
     def differential_args: String = has_differential_results
         ? '--differential-results differential_results'
+        : ''
+    def transcript_biotype_args: String = has_transcript_biotypes
+        ? '--transcript-biotypes transcript_biotypes.tsv'
         : ''
     def gene_set_args: String = params.gene_set_enrichment && has_differential_results ? '--gene-set-enrichment' : ''
     def readiness_args: String = differential_analysis_note
@@ -246,6 +222,7 @@ process qc_report {
             --versions versions \
             --params params.json \
             --latest-batch ${qc_report_inputs.latest_batch_index} \
+            ${transcript_biotype_args} \
             ${differential_args} \
             ${gene_set_args} \
             ${readiness_args} \
@@ -267,6 +244,7 @@ workflow sample_pipeline {
     reference_genome: Path
     reference_annotation: Path
     gene_sets: Path
+    quantification_enabled: Boolean
     differential_expression_enabled: Boolean
     gene_set_enrichment_enabled: Boolean
     de_lfc_cutoff: Number
@@ -277,6 +255,7 @@ workflow sample_pipeline {
     stability_behavior: String
     stability_settings: Map
     initial_stability_state: Map
+    minknow_connection: Map
 
     main:
     /*
@@ -308,23 +287,17 @@ workflow sample_pipeline {
 
     merged_chunk_bam_ch = prepare_chunk_bam(sample_chunk_bam_group_ch)
     qc_result_ch = quality_control(merged_chunk_bam_ch)
-    if (differential_expression_enabled) {
-        differential_expression(
+    if (quantification_enabled) {
+        quantification(
             merged_chunk_bam_ch,
             sample_batch_size_ch,
             restored_quantifications,
-            first_analysis_index,
             reference_genome,
             reference_annotation,
-            gene_sets,
-            gene_set_enrichment_enabled,
-            de_lfc_cutoff,
-            min_read_count,
-            min_replicate_sample_count,
         )
-        quantified_samples_ch = differential_expression.out.quantifications
-        differential_results_ch = differential_expression.out.results
-        differential_report_batches_ch = differential_expression.out.report_batches
+        quantified_samples_ch = quantification.out.quantifications
+        quantified_sample_batches_ch = quantification.out.batches
+        quantification_report_batches_ch = quantification.out.report_batches
 
         quantification_output_ch = quantified_samples_ch.map { quantified_sample ->
             tuple(
@@ -333,65 +306,120 @@ workflow sample_pipeline {
             )
         }
         output(quantification_output_ch)
-        publish_differential_results(
-            differential_results_ch.map { result ->
-                tuple(result.batch_index, result.analysis_index, result.results)
-            }
-        )
-        if (stability_behavior != 'disabled') {
-            differential_stability(
-                differential_results_ch,
-                all_samples,
-                active_samples,
-                stability_behavior,
-                stability_settings,
-                initial_stability_state,
+
+        if (differential_expression_enabled) {
+            differential_expression(
+                quantified_sample_batches_ch,
+                first_analysis_index,
+                reference_annotation,
+                gene_sets,
+                gene_set_enrichment_enabled,
+                de_lfc_cutoff,
+                min_read_count,
+                min_replicate_sample_count,
             )
-            stability_audits_ch = differential_stability.out
-            differential_reports_with_stability_ch = differential_report_batches_ch
-                .filter { report_batch -> report_batch.has_differential_results }
-                .map { report_batch -> tuple(report_batch.batch_index, report_batch) }
-                .join(
-                    stability_audits_ch.map { audit ->
-                        tuple(audit.batch_index, audit.sample_stability)
-                    },
-                    by: 0,
+            differential_results_ch = differential_expression.out.results
+            differential_report_batches_ch = differential_expression.out.report_batches
+
+            publish_differential_results(
+                differential_results_ch.map { result ->
+                    tuple(result.batch_index, result.analysis_index, result.results)
+                }
+            )
+            if (stability_behavior != 'disabled') {
+                differential_stability(
+                    differential_results_ch,
+                    all_samples,
+                    active_samples,
+                    stability_behavior,
+                    stability_settings,
+                    initial_stability_state,
+                    minknow_connection,
                 )
-                .map { _batch_index: Integer, report_batch, sample_stability_path ->
+                stability_audits_ch = differential_stability.out
+                differential_reports_with_stability_ch = differential_report_batches_ch
+                    .filter { report_batch -> report_batch.has_differential_results }
+                    .map { report_batch -> tuple(report_batch.batch_index, report_batch) }
+                    .join(
+                        stability_audits_ch.map { audit ->
+                            tuple(audit.batch_index, audit.sample_stability)
+                        },
+                        by: 0,
+                    )
+                    .map { _batch_index: Integer, report_batch, sample_stability_path ->
+                        record(
+                            batch_index: report_batch.batch_index,
+                            report_sequence: report_batch.report_sequence,
+                            differential_analysis_note: report_batch.differential_analysis_note,
+                            has_differential_results: true,
+                            results: report_batch.results,
+                            stability_results: sample_stability_path,
+                            has_stability_results: true,
+                        )
+                    }
+                    .mix(
+                        differential_report_batches_ch
+                            .filter { report_batch -> !report_batch.has_differential_results }
+                            .map { report_batch ->
+                                record(
+                                    batch_index: report_batch.batch_index,
+                                    report_sequence: report_batch.report_sequence,
+                                    differential_analysis_note: report_batch.differential_analysis_note,
+                                    has_differential_results: false,
+                                    results: report_batch.results,
+                                    stability_results: optional_file(),
+                                    has_stability_results: false,
+                                )
+                            }
+                    )
+            }
+            else {
+                differential_reports_with_stability_ch = differential_report_batches_ch.map { report_batch ->
                     record(
                         batch_index: report_batch.batch_index,
                         report_sequence: report_batch.report_sequence,
                         differential_analysis_note: report_batch.differential_analysis_note,
-                        has_differential_results: true,
+                        has_differential_results: report_batch.has_differential_results,
                         results: report_batch.results,
-                        stability_results: sample_stability_path,
-                        has_stability_results: true,
+                        stability_results: optional_file(),
+                        has_stability_results: false,
                     )
                 }
-                .mix(
-                    differential_report_batches_ch
-                        .filter { report_batch -> !report_batch.has_differential_results }
-                        .map { report_batch ->
-                            record(
-                                batch_index: report_batch.batch_index,
-                                report_sequence: report_batch.report_sequence,
-                                differential_analysis_note: report_batch.differential_analysis_note,
-                                has_differential_results: false,
-                                results: report_batch.results,
-                                stability_results: optional_file(),
-                                has_stability_results: false,
-                            )
-                        }
+            }
+
+            analysis_report_batches_ch = quantification_report_batches_ch
+                .map { report_batch -> tuple(report_batch.batch_index, report_batch) }
+                .join(
+                    differential_reports_with_stability_ch.map { report_batch ->
+                        tuple(report_batch.batch_index, report_batch)
+                    },
+                    by: 0,
                 )
+                .map { batch_index: Integer, quantification_report, differential_report ->
+                    if (quantification_report.report_sequence != differential_report.report_sequence) {
+                        error("Inconsistent report sequence for batch ${batch_index}.")
+                    }
+                    record(
+                        batch_index: batch_index,
+                        report_sequence: quantification_report.report_sequence,
+                        biotypes: quantification_report.biotypes,
+                        differential_analysis_note: differential_report.differential_analysis_note,
+                        has_differential_results: differential_report.has_differential_results,
+                        results: differential_report.results,
+                        stability_results: differential_report.stability_results,
+                        has_stability_results: differential_report.has_stability_results,
+                    )
+                }
         }
         else {
-            differential_reports_with_stability_ch = differential_report_batches_ch.map { report_batch ->
+            analysis_report_batches_ch = quantification_report_batches_ch.map { report_batch ->
                 record(
                     batch_index: report_batch.batch_index,
                     report_sequence: report_batch.report_sequence,
-                    differential_analysis_note: report_batch.differential_analysis_note,
-                    has_differential_results: report_batch.has_differential_results,
-                    results: report_batch.results,
+                    biotypes: report_batch.biotypes,
+                    differential_analysis_note: '',
+                    has_differential_results: false,
+                    results: optional_file(),
                     stability_results: optional_file(),
                     has_stability_results: false,
                 )
@@ -399,7 +427,7 @@ workflow sample_pipeline {
         }
     }
 
-    if (differential_expression_enabled && fresh_sample_count > 0) {
+    if (quantification_enabled && fresh_sample_count > 0) {
         checkpoint_quantifications_ch = quantified_samples_ch
             .collect()
             .map { collected_quantifications ->
@@ -504,14 +532,16 @@ workflow sample_pipeline {
         qc_report_flagstat_inputs_ch,
     )
 
-    if (differential_expression_enabled) {
+    if (quantification_enabled) {
         qc_report_ready_ch = join_report_batches(
-            differential_reports_with_stability_ch,
+            analysis_report_batches_ch,
             qc_report_input_tree_ch,
         )
         qc_report(
             qc_report_ready_ch.map { result -> result.qc_report_inputs },
             qc_report_ready_ch.map { result -> result.qc_results },
+            qc_report_ready_ch.map { result -> result.transcript_biotypes },
+            true,
             qc_report_ready_ch.map { result -> result.differential_results },
             qc_report_ready_ch.map { result -> result.differential_analysis_note },
             qc_report_ready_ch.map { result -> result.stability_results },
@@ -524,6 +554,8 @@ workflow sample_pipeline {
             qc_report_input_tree_ch.map { result -> result.qc_report_inputs },
             qc_report_input_tree_ch.map { result -> result.qc_results },
             optional_file(),
+            false,
+            optional_file(),
             '',
             optional_file(),
             false,
@@ -532,116 +564,14 @@ workflow sample_pipeline {
     }
 }
 
-def prepare_run(experiment_dir: String, _run_number: Integer, replicate_count: Integer) -> Map {
-    def runName = "run_${params.ex_run_number}"
-    def runDir = file("${params.out_dir}/${runName}")
-
-    def metadataFile = new File("${experiment_dir}/metadata.tsv")
-
-    // Add header to metadata file if file is empty
-    if (metadataFile.length() == 0) {
-        metadataFile.withWriter { w ->
-            w << 'run_number\treplicate_number\treplicate_dir\n'
-        }
-    }
-
-    // Create run directories for each replicate
-    (1..replicate_count).each { count ->
-        def replicateName = "replicate_${count}"
-        def replicateDir = file("${runDir}/${replicateName}")
-        replicateDir.mkdirs()
-
-        metadataFile << "${params.ex_run_number}\t${count}\t${replicateDir}\n"
-    }
-
-    return [runName: runName, runDir: runDir]
-}
-
 // Entrypoint workflow
 workflow {
     main:
     WorkflowMain.initialise(workflow, params, log)
-
-    if (params.de_lfc_cutoff < 0) {
-        error('--de_lfc_cutoff must be nonnegative.')
-    }
-    if (params.de_padj_cutoff <= 0 || params.de_padj_cutoff > 1) {
-        error('--de_padj_cutoff must be greater than 0 and at most 1.')
-    }
-    if (params.min_read_count < 0) {
-        error('--min_read_count must be nonnegative.')
-    }
-    if (params.min_replicate_sample_count < 1) {
-        error('--min_replicate_sample_count must be at least 1.')
-    }
-    def stability_behaviors: Set<String> = ['disabled', 'log', 'terminate'].toSet()
-    if (!stability_behaviors.contains(params.stability_analysis_behavior as String)) {
-        error('--stability_analysis_behavior must be disabled, log, or terminate.')
-    }
-    if (params.stability_analysis_behavior != 'disabled' && !params.differential_expression) {
-        error('--stability_analysis_behavior requires --differential_expression.')
-    }
-    if (params.stability_analysis_behavior == 'terminate' && !params.live_analysis) {
-        error('--stability_analysis_behavior terminate requires --live_analysis.')
-    }
-    if (params.num_stable_batches < 1) {
-        error('--num_stable_batches must be at least 1.')
-    }
-    def fraction_stability_params: Map<String,Number> = [
-        stability_max_feature_diff_fraction: params.stability_max_feature_diff_fraction,
-        stability_min_jaccard_similarity: params.stability_min_jaccard_similarity,
-        stability_max_call_churn_fraction: params.stability_max_call_churn_fraction,
-        stability_max_lost_call_fraction: params.stability_max_lost_call_fraction,
-    ]
-    fraction_stability_params.each { name: String, value: Number ->
-        if (value < 0 || value > 1) {
-            error("--${name} must be between 0 and 1.")
-        }
-    }
-    if (params.stability_max_median_abs_lfc_delta < 0) {
-        error('--stability_max_median_abs_lfc_delta must be nonnegative.')
-    }
-    if (params.stability_min_de_calls_for_fraction_metrics < 1) {
-        error('--stability_min_de_calls_for_fraction_metrics must be at least 1.')
-    }
-    if (params.stability_max_small_set_call_changes < 0) {
-        error('--stability_max_small_set_call_changes must be nonnegative.')
-    }
+    validate_parameters(params)
 
     if (params.disable_ping == false) {
         Pinguscript.ping_post(workflow, 'start', 'none', params.out_dir, params)
-    }
-
-    // TODO: Implement parameter validation
-    // validate_experiment_dir(params.out_dir, params.ex_run_number)
-
-    // TODO: Implement sequencing setup checks
-
-    // Config is stored in order to fetch parameters in subsequent runs
-    // write_config()
-
-    // // Setup the run
-    // runInfo = prepare_run(params.out_dir, params.ex_run_number, params.ex_replicate_count)
-    // runDir = runInfo.runDir
-
-    // // Start the sequencing run
-    // metadataFile = channel.fromPath("${params.out_dir}/metadata.tsv")
-    // keyFile = channel.fromPath(params.ex_mk_key)
-    // certificateFile = channel.fromPath(params.ex_mk_cert)
-    // sequencingArgs = get_sequencing_arguments(runDir)
-    // startSequencing(sequencingArgs, keyFile, certificateFile, metadataFile)
-
-    if (params.gene_set_enrichment && !params.differential_expression) {
-        error('--gene_set_enrichment requires --differential_expression.')
-    }
-    if (params.differential_expression && !params.reference_genome) {
-        error('Differential expression requires --reference_genome.')
-    }
-    if (params.differential_expression && !params.reference_annotation) {
-        error('Differential expression requires --reference_annotation.')
-    }
-    if (params.gene_set_enrichment && !params.gene_sets) {
-        error('Gene-set enrichment requires --gene_sets.')
     }
 
     reference_genome = params.reference_genome
@@ -650,6 +580,10 @@ workflow {
     reference_annotation = params.reference_annotation
         ? file(params.reference_annotation, checkIfExists: true)
         : optional_file()
+    def quantification_enabled: Boolean = params.reference_genome != null &&
+        "${params.reference_genome}".trim() != '' &&
+        params.reference_annotation != null &&
+        "${params.reference_annotation}".trim() != ''
     gene_sets = params.gene_set_enrichment
         ? file(params.gene_sets, checkIfExists: true)
         : optional_file()
@@ -661,10 +595,11 @@ workflow {
         sample_sheet_path: params.sample_sheet ? file(params.sample_sheet) : null,
         bam_poll_interval_ms: (params.bam_poll_interval_seconds as Integer) * 1000,
         bam_stability_polls: params.bam_stability_polls as Integer,
+        termination_requested: params.stability_analysis_behavior == 'terminate',
     )
     all_samples = get_samples(ingress_args)
     validate_samples(all_samples)
-    checkpoint_state = params.differential_expression
+    checkpoint_state = quantification_enabled
         ? discover_sample_checkpoints(
             all_samples,
             output_root,
@@ -700,6 +635,20 @@ workflow {
             first_analysis_index,
             stability_parameter_values.config,
         )
+    minknow_connection = [
+        command: 'seq-run-manager',
+        host: params.minknow_host as String,
+        port: params.minknow_port as Integer,
+        client_certificate: params.minknow_client_certificate
+            ? file(params.minknow_client_certificate).toAbsolutePath().normalize()
+            : null,
+        client_private_key: params.minknow_client_private_key
+            ? file(params.minknow_client_private_key).toAbsolutePath().normalize()
+            : null,
+        ca_certificate: params.minknow_ca_certificate
+            ? file(params.minknow_ca_certificate).toAbsolutePath().normalize()
+            : null,
+    ]
 
     // Finalized samples are restored from the CLI output directory and never
     // enter BAM preparation, QC, collation, or Oarfish. Ingress polls only
@@ -719,6 +668,7 @@ workflow {
         reference_genome,
         reference_annotation,
         gene_sets,
+        quantification_enabled,
         params.differential_expression,
         params.gene_set_enrichment,
         params.de_lfc_cutoff,
@@ -729,6 +679,7 @@ workflow {
         params.stability_analysis_behavior,
         stability_parameter_values,
         initial_stability_state,
+        minknow_connection,
     )
 
     onComplete:

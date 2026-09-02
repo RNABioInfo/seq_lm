@@ -8,6 +8,7 @@ record BamIngressArgs {
     sample_sheet_path: Path?
     bam_poll_interval_ms: Integer
     bam_stability_polls: Integer
+    termination_requested: Boolean
 }
 
 record LiveSampleEvent {
@@ -56,7 +57,8 @@ def get_samples(ingress_args) -> List<Sample> {
         error("BAM ingress sample sheet is not a file: ${ingress_args.sample_sheet_path}")
     }
 
-    return parse_sample_sheet(ingress_args)
+    def samples: List<Sample> = parse_sample_sheet(ingress_args)
+    return attach_minknow_run_metadata(samples, ingress_args.termination_requested)
 }
 
 def parse_sample_sheet(ingress_args) -> List<Sample> {
@@ -82,6 +84,7 @@ def parse_sample_sheet(ingress_args) -> List<Sample> {
                 order: row.order ? row.order.toInteger() : null,
                 bam_dir: file(row.bam_dir),
                 is_live: parse_is_live(row.is_live, row.alias),
+                protocol_run_id: null,
             )
 
             if (!sample.name?.trim()) {
@@ -100,6 +103,121 @@ def parse_sample_sheet(ingress_args) -> List<Sample> {
 
             return sample
         }
+}
+
+def attach_minknow_run_metadata(samples: List<Sample>, termination_requested: Boolean) -> List<Sample> {
+    def sheets_by_parent: Map<String,Map> = [:]
+    return samples.collect { sample ->
+        def parent: Path = sample.bam_dir.toAbsolutePath().normalize().parent
+        def parent_key: String = parent == null ? '' : parent.toString()
+        def sheet_result: Map = sheets_by_parent.computeIfAbsent(parent_key) {
+            inspect_minknow_sample_sheet(parent)
+        }
+        def run_result: Map = protocol_run_id_for_sample(sample, sheet_result)
+        if (run_result.protocol_run_id == null && termination_requested) {
+            log.warn(
+                "Automatic MinKNOW run termination is disabled for sample '${sample_label(sample)}': " +
+                    "${run_result.reason}"
+            )
+        }
+        return record(
+            name: sample.name,
+            group: sample.group,
+            order: sample.order,
+            bam_dir: sample.bam_dir,
+            is_live: sample.is_live,
+            protocol_run_id: run_result.protocol_run_id,
+        ) as Sample
+    }
+}
+
+def inspect_minknow_sample_sheet(parent: Path?) -> Map {
+    if (parent == null || !java.nio.file.Files.isDirectory(parent)) {
+        return [rows: [], reason: "the BAM directory parent does not exist or is not a directory: ${parent}"]
+    }
+
+    def candidates: List<Path> = []
+    try {
+        java.nio.file.Files
+            .newDirectoryStream(parent)
+            .withCloseable { entries ->
+                entries.each { entry: Path ->
+                    def name: String = entry.fileName.toString()
+                    if (java.nio.file.Files.isRegularFile(entry) && name ==~ /.*sample_sheet.*\.csv/) {
+                        candidates.add(entry)
+                    }
+                }
+            }
+    }
+    catch (exception: Exception) {
+        return [rows: [], reason: "could not inspect ${parent} for a MinKNOW sample sheet: ${exception.message}"]
+    }
+
+    candidates = candidates.toSorted { left: Path, right: Path -> left.toString() <=> right.toString() }
+    if (candidates.empty) {
+        return [rows: [], reason: "no file matching '*sample_sheet*.csv' was found in ${parent}"]
+    }
+    if (candidates.size() != 1) {
+        return [rows: [], reason: "multiple files matching '*sample_sheet*.csv' were found in ${parent}: ${candidates*.fileName}"]
+    }
+
+    def sample_sheet: Path = candidates[0]
+    try {
+        def sample_sheet_text: String = java.nio.file.Files.readString(sample_sheet)
+        def quote_count: Integer = sample_sheet_text.count('"')
+        if (quote_count % 2 != 0) {
+            return [rows: [], reason: "could not parse MinKNOW sample sheet ${sample_sheet}: unmatched CSV quote"]
+        }
+        def rows: List<Map> = sample_sheet
+            .splitCsv(header: true, strip: true)
+            .collect { row ->
+                row.collectEntries { key, value ->
+                    def normalized_key: String = "${key}".replace('\uFEFF', '').trim()
+                    [(normalized_key): value == null ? '' : "${value}".trim()]
+                } as Map
+            }
+        if (rows.empty) {
+            return [rows: [], reason: "MinKNOW sample sheet ${sample_sheet} contains no sample rows"]
+        }
+        def fields: Set<String> = rows[0].keySet() as Set<String>
+        def missing_fields: Set<String> = ['sample_id', 'protocol_run_id'].toSet() - fields
+        if (!missing_fields.empty) {
+            return [rows: [], reason: "MinKNOW sample sheet ${sample_sheet} is missing required fields: ${missing_fields}"]
+        }
+        return [rows: rows, path: sample_sheet, reason: null]
+    }
+    catch (exception: Exception) {
+        return [rows: [], reason: "could not parse MinKNOW sample sheet ${sample_sheet}: ${exception.message}"]
+    }
+}
+
+def protocol_run_id_for_sample(sample, sheet_result: Map) -> Map {
+    if (sheet_result.reason != null) {
+        return [protocol_run_id: null, reason: sheet_result.reason]
+    }
+    def matching_rows: List<Map> = (sheet_result.rows as List<Map>).findAll { row: Map ->
+        "${row.sample_id}".trim() == sample.name.trim()
+    }
+    if (matching_rows.empty) {
+        return [
+            protocol_run_id: null,
+            reason: "MinKNOW sample sheet ${sheet_result.path} contains no sample_id matching alias '${sample.name}'",
+        ]
+    }
+    if (matching_rows.size() != 1) {
+        return [
+            protocol_run_id: null,
+            reason: "MinKNOW sample sheet ${sheet_result.path} contains multiple sample_id rows matching alias '${sample.name}'",
+        ]
+    }
+    def protocol_run_id: String = "${matching_rows[0].protocol_run_id}".trim()
+    if (!protocol_run_id) {
+        return [
+            protocol_run_id: null,
+            reason: "MinKNOW sample sheet ${sheet_result.path} has a blank protocol_run_id for alias '${sample.name}'",
+        ]
+    }
+    return [protocol_run_id: protocol_run_id, reason: null]
 }
 
 def validate_samples(samples: List<Sample>) {

@@ -15,7 +15,9 @@ The workflow currently runs two tabular QC steps:
   alignment summary.
 
 The main workflow publishes an EPI2ME-displayable HTML analysis report after
-both the QC and edgeR outputs for a synchronized batch are complete. During
+all enabled outputs for a synchronized batch are complete. With paired
+reference inputs, this includes the matching cumulative Oarfish biotype summary
+and, when enabled, edgeR readiness or results. During
 live analysis, raw NanoPlot and flagstat tables remain report inputs in
 Nextflow work directories. When the stream completes, they are also persisted
 with the sample's `FINAL` checkpoint under `--out_dir` so later invocations can
@@ -42,7 +44,10 @@ itself is not reloaded. Hidden Bokeh and ECharts views are resized when their
 tabs open. The report has three primary tabs:
 
 * **Quality Control** contains the existing read-flow, metrics, read-length,
-  read-quality, mapping-quality, and sample views.
+  read-quality, mapping-quality, and sample views. When both reference inputs
+  are present, Read flow also contains a cross-sample 100% stacked horizontal
+  bar chart of Oarfish abundance by transcript biotype beneath the sample
+  Sankey selector.
 * **Differential Analysis** separates its overview from contrasts, then uses
   contrast and plot-type subtabs for logFC-versus-logCPM, volcano, and top-gene
   heatmap plots.
@@ -96,9 +101,11 @@ drained, so other samples may continue independently. Only live samples require
 `STOP` files. The workflow treats `alias` as the
 sample name and requires at least two rows where `group` is `control`.
 
-QC-only startup batches are not published as incomplete reports. The first
-report appears once edgeR has a current quantification for every experiment
-sample; later reports are refreshed once per complete QC/edgeR batch pair.
+QC-only startup batches are not published as incomplete reports. Without
+references, reports follow the QC batch stream. With references, a report waits
+for the matching complete cumulative quantification/biotype batch; if
+differential expression is enabled it also waits for the matching readiness or
+result record. This prevents report figures from mixing live batches.
 
 Required local Docker images:
 
@@ -109,6 +116,7 @@ Required local Docker images:
 * `seq_lm/report`: provides ezCharts, Bokeh, pandas, and scikit-learn for the
   combined HTML report.
 
-The QC workflow intentionally does not consume the reference annotation. The
-previous `bamstats`-style annotation-aware QC path has been removed from the
-active chunk QC workflow.
+The chunk-level QC workflow intentionally does not consume the reference
+annotation. Transcript-biotype composition is produced by the standalone
+quantification workflow and routed into the Quality Control → Read flow report
+panel. See [Quantification and transcript-biotype QC](quantification.md).

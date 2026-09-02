@@ -34,6 +34,7 @@ workflow {
         sample_sheet_path: sample_sheet,
         bam_poll_interval_ms: 100,
         bam_stability_polls: 3,
+        termination_requested: false,
     )
     bam_ingress(ingress_args)
         .map { batch ->

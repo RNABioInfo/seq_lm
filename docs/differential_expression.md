@@ -1,23 +1,26 @@
 # Differential Expression Workflow
 
-Differential expression and gene-set enrichment are independently selectable:
+Quantification, differential expression, and gene-set enrichment have separate
+activation rules:
 
-* `--differential_expression` enables cumulative Oarfish quantification and
-  edgeR analysis. It requires `--reference_genome` and
-  `--reference_annotation`.
+* Supplying both `--reference_genome` and `--reference_annotation` enables
+  cumulative Oarfish quantification and transcript-biotype QC. Supplying only
+  one reference input is an error.
+* `--differential_expression` enables edgeR analysis of completed Oarfish
+  quantification batches and therefore requires both reference inputs.
 * `--gene_set_enrichment` enables fry and GSVA after edgeR. It requires both
   `--differential_expression` and `--gene_sets`.
 
-Both options default to `true`, preserving the complete analysis workflow.
-Set both to `false` for quality control only. Set
-`--gene_set_enrichment=false` while leaving differential expression enabled
-for quantification and edgeR without gene-set analysis. Reference inputs are
-optional for a quality-control-only run, and the GMT input is optional whenever
-gene-set enrichment is disabled.
+Both analysis switches default to `true`, preserving the complete analysis
+workflow when references are provided. Set both to `false` and omit both
+references for quality control only. Set `--differential_expression=false`
+while retaining both references for QC plus quantification and transcript-
+biotype composition. The GMT input is optional whenever gene-set enrichment is
+disabled.
 
-The differential-expression workflow refreshes after every complete live BAM
-batch. It uses the same chunk stream as quality control, but quantification
-is cumulative rather than chunk-local:
+The standalone quantification workflow refreshes after every complete live BAM
+batch. It uses the same chunk stream as quality control, but quantification is
+cumulative rather than chunk-local:
 
 1. BAMs belonging to the same sample chunk are concatenated without sorting or
    indexing. A single input BAM is reused directly.
@@ -31,9 +34,9 @@ is cumulative rather than chunk-local:
    rescue.
 5. The latest quantification is retained for every sample. Each live batch
    replaces entries for samples contributing a new chunk, reuses entries for
-   final or already stopped samples,
-   rebuilds the full count matrix, and reruns differential analysis for each
-   non-control group versus the control group.
+   final or already stopped samples, and emits a complete experiment batch.
+   If differential expression is enabled, edgeR rebuilds the full count matrix
+   from that batch and tests each non-control group versus the control group.
 
 The BAM sample sheet must contain `alias`, `group`, and `bam_dir`; `is_live` is
 optional. It accepts case-insensitive `true` or `false`, and missing or blank
@@ -62,9 +65,10 @@ modification times, reference identities, upstream container versions, and
 checksums for the derived files. On a later invocation, a valid finalized
 sample is restored from `--out_dir` and does not enter BAM concatenation, QC,
 collation, or Oarfish. New sample-sheet rows are processed normally, after
-which edgeR, fry, GSVA, and the integrated report are rebuilt using both the
-restored and new quantifications. This restoration is independent of
-Nextflow's `-resume` cache.
+which transcript-biotype QC and, when enabled, edgeR, fry, GSVA, and the
+integrated report are rebuilt using both the restored and new quantifications.
+This restoration is independent of Nextflow's `-resume` cache and remains
+active when differential expression is disabled.
 
 If any finalized BAM, reference identity, manifest field, or derived artifact
 has changed, the workflow stops rather than silently reuse stale results. To
@@ -95,9 +99,18 @@ which rebuilds the current count matrix for every complete live batch.
 
 `--stability_analysis_behavior` controls automatic depth decisions and defaults
 to `disabled`. `log` performs a dry run and records when a sample would stop.
-`terminate` records the same decision and atomically creates `STOP` in that
-sample's `bam_dir`. This release does not call MinKNOW; the action boundary is
-kept separate so MinKNOW termination can be added later.
+`terminate` uses the sample's discovered MinKNOW `protocol_run_id` to call
+`seq-run-manager stop`, then atomically creates `STOP` in that sample's
+`bam_dir`. It requires `--minknow_client_certificate`,
+`--minknow_client_private_key`, and `--minknow_ca_certificate`; the MinKNOW
+manager defaults to `host.docker.internal:9501` and can be changed with
+`--minknow_host` and `--minknow_port`.
+
+For every sample, startup discovery inspects the direct parent of `bam_dir` for
+exactly one `*sample_sheet*.csv` file and matches `alias` to its `sample_id`.
+Missing, ambiguous, malformed, or unmatched metadata disables termination only
+for that sample and produces a warning. Failed MinKNOW stop requests also warn,
+do not create `STOP`, and retry after the next stable batch.
 
 Every successful edgeR snapshot is compared with the previous successful
 snapshot. The checks cover filtered-feature identity, median absolute logFC
@@ -120,6 +133,9 @@ Immutable audit files are published for every analyzed snapshot:
   contrast_stability.tsv
   sample_stability.tsv
 ```
+
+`sample_stability.tsv` includes the optional `protocol_run_id` and the result
+of each attempted termination action.
 
 They contain metric values, individual checks, consecutive streaks, required
 sample contrasts, eligibility transitions, and action results. A compatible
@@ -155,11 +171,9 @@ does not infer operons, transcription start/termination sites, or untranslated
 regions. Use an experimentally curated transcript annotation when those units
 are required.
 
-Quantifications are published under:
-
-```text
-<ex_dir>/<group>/<alias>/quantification/
-```
+Quantification behavior and annotation-driven biotype classification are
+documented separately in
+[Quantification and transcript-biotype QC](quantification.md).
 
 Differential-expression checkpoints are published exclusively under the
 CLI-selected output directory:

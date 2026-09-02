@@ -117,26 +117,79 @@ def write_stability_tsv(path: Path, columns: List<String>, rows: List<Map>) -> P
     return path
 }
 
-/**
- * The action boundary intentionally owns both logging and STOP creation. A
- * future MinKNOW API call belongs here, before the STOP marker is written.
- */
-def apply_stability_action(sample_row: Map, behavior: String) -> String {
-    if (!parse_stability_boolean(sample_row.newly_eligible)) {
-        return 'none'
+def run_seq_run_manager_stop(sample_row: Map, minknow_connection: Map) -> Boolean {
+    def command: List<String> = [
+        (minknow_connection.command ?: 'seq-run-manager') as String,
+        'stop',
+        '--host',
+        minknow_connection.host as String,
+        '--port',
+        "${minknow_connection.port}",
+        '--client-certificate-path',
+        "${minknow_connection.client_certificate}",
+        '--client-private-key-path',
+        "${minknow_connection.client_private_key}",
+        '--ca-certificate-path',
+        "${minknow_connection.ca_certificate}",
+        '--run-id',
+        sample_row.protocol_run_id as String,
+    ]
+    try {
+        def process: Process = new ProcessBuilder(command).redirectErrorStream(true).start()
+        def command_output: String = process.inputStream.getText('UTF-8').trim()
+        def exit_code: Integer = process.waitFor()
+        if (exit_code == 0) {
+            if (command_output) {
+                log.info("seq-run-manager stop for run '${sample_row.protocol_run_id}': ${command_output}")
+            }
+            return true
+        }
+        log.warn(
+            "Automatic MinKNOW run termination failed for sample '${sample_row.group}/${sample_row.sample}' " +
+                "(run '${sample_row.protocol_run_id}', exit code ${exit_code}). " +
+                "The workflow will retry after the next stable batch.${command_output ? " Output: ${command_output}" : ''}"
+        )
+        return false
     }
+    catch (exception: Exception) {
+        log.warn(
+            "Automatic MinKNOW run termination failed for sample '${sample_row.group}/${sample_row.sample}' " +
+                "(run '${sample_row.protocol_run_id}'): ${exception.message}. " +
+                'The workflow will retry after the next stable batch.'
+        )
+        return false
+    }
+}
+
+def apply_stability_action(sample_row: Map, behavior: String, minknow_connection: Map) -> String {
     def label: String = "${sample_row.group}/${sample_row.sample}"
     if (behavior == 'log') {
+        if (!parse_stability_boolean(sample_row.newly_eligible)) {
+            return 'none'
+        }
         log.info("DE stability: sample '${label}' reached the configured stability threshold and would be stopped.")
         return 'logged'
     }
-    if (behavior != 'terminate') {
+    if (behavior != 'terminate' || !parse_stability_boolean(sample_row.eligible)) {
         return 'none'
     }
     def stop_path: Path = Path.of(sample_row.bam_dir as String).resolve('STOP')
+    if (java.nio.file.Files.exists(stop_path)) {
+        log.info("DE stability: STOP already exists for sample '${label}' at ${stop_path}.")
+        return 'stop_exists'
+    }
+    if (!(sample_row.protocol_run_id as String)) {
+        return 'termination_disabled_no_run_id'
+    }
+    if (!run_seq_run_manager_stop(sample_row, minknow_connection)) {
+        return 'stop_failed'
+    }
     try {
         java.nio.file.Files.createFile(stop_path)
-        log.info("DE stability: created STOP for sample '${label}' at ${stop_path}.")
+        log.info(
+            "DE stability: stopped MinKNOW run '${sample_row.protocol_run_id}' for sample '${label}' " +
+                "and created STOP at ${stop_path}."
+        )
         return 'stop_created'
     }
     catch (java.nio.file.FileAlreadyExistsException _ignored) {
@@ -153,6 +206,7 @@ workflow differential_stability {
     behavior: String
     settings: Map
     initial_state: Map
+    minknow_connection: Map
 
     main:
     def previous_result: Path = initial_state.previous_results
@@ -229,6 +283,7 @@ workflow differential_stability {
                 group: sample.group,
                 sample: sample.name,
                 bam_dir: sample.bam_dir.toAbsolutePath().normalize(),
+                protocol_run_id: sample.protocol_run_id,
                 effectively_live: effectively_live,
                 required_contrasts: required.join(','),
                 consecutive_stable_batches: consecutive_stable_batches,
@@ -247,7 +302,7 @@ workflow differential_stability {
             config: settings.config,
         ) as StabilityAudit
     }
-    finalize_stability_audit(audits_ch)
+    finalize_stability_audit(audits_ch, minknow_connection)
 
     emit:
     finalize_stability_audit.out
@@ -319,6 +374,7 @@ process finalize_stability_audit {
 
     input:
     audit: StabilityAudit
+    minknow_connection: Map
 
     output:
     record(
@@ -331,7 +387,11 @@ process finalize_stability_audit {
 
     exec:
     audit.sample_rows.each { sample_row: Map ->
-        sample_row.action_result = apply_stability_action(sample_row, audit.behavior)
+        sample_row.action_result = apply_stability_action(
+            sample_row,
+            audit.behavior,
+            minknow_connection,
+        )
     }
     def contrast_columns: List<String> = [
         'analysis_index', 'batch_index', 'baseline', 'contrast_id', 'target_group', 'reference_group',
@@ -341,7 +401,7 @@ process finalize_stability_audit {
         'de_calls_stable', 'stable', 'consecutive_stable_batches', 'reason',
     ]
     def sample_columns: List<String> = [
-        'analysis_index', 'batch_index', 'group', 'sample', 'bam_dir', 'effectively_live',
+        'analysis_index', 'batch_index', 'group', 'sample', 'bam_dir', 'protocol_run_id', 'effectively_live',
         'required_contrasts', 'consecutive_stable_batches', 'eligible', 'newly_eligible',
         'behavior', 'action_result',
     ]

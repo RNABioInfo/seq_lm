@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+- Run cumulative Oarfish quantification whenever paired genome and GTF/GFF3
+  references are available, independently of differential expression, and add
+  annotation-based transcript-biotype composition to Quality Control → Read
+  flow for every matching report batch.
+- Discover optional MinKNOW protocol run IDs beside sample BAM directories and
+  stop stable acquisitions through `seq-run-manager`, with nonfatal retryable
+  failures and conditional credential validation.
 - Persist final per-sample Oarfish and QC artifacts with a validated `FINAL`
   manifest and restore them on later invocations without relying on `-resume`.
 - Continue differential snapshot numbering across invocations and publish both

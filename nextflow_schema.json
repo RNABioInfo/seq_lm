@@ -51,8 +51,8 @@
           "type": "boolean",
           "default": true,
           "fa_icon": "fas fa-chart-line",
-          "description": "Quantify transcripts and run differential-expression analysis.",
-          "help_text": "Disable this option to run quality control only. Reference genome and annotation inputs are required only when this option is enabled."
+          "description": "Run differential-expression analysis from Oarfish transcript quantifications.",
+          "help_text": "Disable this option to omit differential analysis. Oarfish quantification still runs when both reference genome and annotation inputs are supplied."
         },
         "gene_set_enrichment": {
           "type": "boolean",
@@ -76,13 +76,15 @@
           "type": "string",
           "format": "path",
           "fa_icon": "fas fa-dna",
-          "description": "Reference genome FASTA used by Oarfish for soft-clip rescue."
+          "description": "Reference genome FASTA used by Oarfish for soft-clip rescue.",
+          "help_text": "Supply this together with reference_annotation to enable transcript quantification, including when differential expression is disabled."
         },
         "reference_annotation": {
           "type": "string",
           "format": "path",
           "fa_icon": "fas fa-file-alt",
-          "description": "Reference transcript annotation in GTF or GFF format used by Oarfish."
+          "description": "Reference transcript annotation in GTF or GFF3 format used by Oarfish and transcript-biotype QC.",
+          "help_text": "Supply this together with reference_genome to enable transcript quantification and the transcript-biotype composition figure. Biotypes use transcript_biotype, transcript_type, or biotype first, then linked gene_biotype, gene_type, or biotype; missing or conflicting annotations are shown as Unknown."
         },
         "gene_sets": {
           "type": "string",
@@ -128,7 +130,7 @@
           "type": "string",
           "enum": ["disabled", "log", "terminate"],
           "default": "disabled",
-          "description": "Response when every contrast involving a live sample has remained stable: disable assessment, log a dry-run event, or create a STOP marker."
+          "description": "Response when every contrast involving a live sample has remained stable: disable assessment, log a dry-run event, or stop the corresponding MinKNOW run and create a STOP marker."
         },
         "num_stable_batches": {
           "type": "integer",
@@ -206,6 +208,42 @@
         }
       }
     },
+    "minknow_options": {
+      "title": "MinKNOW Connection Options",
+      "type": "object",
+      "fa_icon": "fas fa-stop-circle",
+      "description": "Connection and credential settings used to terminate stable sequencing runs through seq-run-manager.",
+      "properties": {
+        "minknow_host": {
+          "type": "string",
+          "minLength": 1,
+          "default": "host.docker.internal",
+          "description": "Host name or address of the MinKNOW manager service."
+        },
+        "minknow_port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535,
+          "default": 9501,
+          "description": "Port of the MinKNOW manager service."
+        },
+        "minknow_client_certificate": {
+          "type": "string",
+          "format": "path",
+          "description": "PEM-encoded client certificate chain used by seq-run-manager."
+        },
+        "minknow_client_private_key": {
+          "type": "string",
+          "format": "path",
+          "description": "PEM-encoded client private key used by seq-run-manager."
+        },
+        "minknow_ca_certificate": {
+          "type": "string",
+          "format": "path",
+          "description": "PEM-encoded MinKNOW root CA certificate used by seq-run-manager."
+        }
+      }
+    },
     "resource_options": {
       "title": "Resource Options",
       "type": "object",
@@ -256,18 +294,6 @@
           "description": "AWS Batch queue used by an AWS execution profile.",
           "hidden": true
         },
-        "ex_mk_cert": {
-          "type": "string",
-          "format": "path",
-          "description": "Reserved path to a MinKNOW client certificate for sequencing-control integration.",
-          "hidden": true
-        },
-        "ex_mk_key": {
-          "type": "string",
-          "format": "path",
-          "description": "Reserved path to a MinKNOW client private key for sequencing-control integration.",
-          "hidden": true
-        },
         "process_label": {
           "type": "string",
           "default": "seq_lm",
@@ -309,6 +335,9 @@
     },
     {
       "$ref": "#/definitions/output_options"
+    },
+    {
+      "$ref": "#/definitions/minknow_options"
     },
     {
       "$ref": "#/definitions/resource_options"
@@ -383,6 +412,11 @@
         "required": ["stability_analysis_behavior"]
       },
       "then": {
+        "required": [
+          "minknow_client_certificate",
+          "minknow_client_private_key",
+          "minknow_ca_certificate"
+        ],
         "properties": {
           "live_analysis": {
             "const": true

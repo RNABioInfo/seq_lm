@@ -1,5 +1,6 @@
 import time
 
+import grpc
 import minknow_api as mk
 from minknow_api.tools import protocols
 
@@ -185,9 +186,14 @@ class RunManager:
         detected_run_ids: list[str] = []
 
         for connection in connections:
-            response = SequencingProtocolManager.get_currently_active_protocol(
+            try:
+                response = SequencingProtocolManager.get_currently_active_protocol(
                 connection
             )
+            except grpc.RpcError as error:
+                if error.code() == grpc.StatusCode.FAILED_PRECONDITION:
+                    continue  # Expected: this position has no active protocol
+                raise  # Preserve connection, authentication, and unexpected errors
 
             detected_run_ids.append(response.run_id)
 

@@ -10,6 +10,7 @@ pd = pytest.importorskip("pandas")
 
 from workflow_glue import qc_report  # noqa: E402
 from workflow_glue.qc_report_types import histogram_plots, kde_plots  # noqa: E402
+from workflow_glue.transcript_biotypes import BIOTYPE_ORDER  # noqa: E402
 
 
 def test_write_report_uses_live_shell_and_versioned_snapshot(tmp_path):
@@ -146,6 +147,29 @@ def write_nanoplot(path, rows):
 def nanoplot_df(rows):
     """Build a NanoPlot-like DataFrame for focused report tests."""
     return pd.DataFrame(rows)
+
+
+def write_transcript_biotypes(path):
+    """Write a complete fixed-category composition table for two samples."""
+    rows = []
+    for name, group, protein_fraction in (
+        ("control_1", "control", 0.75),
+        ("treatment_1", "time_point_1", 0.5),
+    ):
+        for biotype in BIOTYPE_ORDER:
+            fraction = protein_fraction if biotype == "Protein-coding" else 0.0
+            if biotype == "Unknown":
+                fraction = 1.0 - protein_fraction
+            rows.append(
+                {
+                    "name": name,
+                    "group": group,
+                    "biotype": biotype,
+                    "num_reads": fraction * 100,
+                    "fraction": fraction,
+                }
+            )
+    pd.DataFrame(rows).to_csv(path, sep="\t", index=False)
 
 
 def write_differential_results(path):
@@ -359,6 +383,8 @@ def test_qc_report_writes_html(tmp_path):
     write_differential_results(differential_results)
     stability_results = tmp_path / "sample_stability.tsv"
     write_stability_results(stability_results)
+    transcript_biotypes = tmp_path / "transcript_biotypes.tsv"
+    write_transcript_biotypes(transcript_biotypes)
 
     versions = tmp_path / "versions"
     versions.mkdir()
@@ -385,6 +411,8 @@ def test_qc_report_writes_html(tmp_path):
             str(stability_results),
             "--stability-behavior",
             "log",
+            "--transcript-biotypes",
+            str(transcript_biotypes),
             "--gene-set-enrichment",
             "--refresh-seconds",
             "0",
@@ -417,6 +445,10 @@ def test_qc_report_writes_html(tmp_path):
     assert "window.PlotlyConfig" not in html
     assert "updatemenus" not in html
     assert "'type': 'sankey'" in html
+    assert "Transcript biotype composition" in html
+    assert "EM-estimated Oarfish abundance" in html
+    assert "Protein-coding" in html
+    assert "Unknown" in html
     assert "Read length vs Read quality" in html
     assert "PCA of log2(CPM + 1)" in html
     assert "edgeR MDS of leading logFC" in html
@@ -505,7 +537,32 @@ def test_qc_report_writes_html(tmp_path):
     assert ">Quality Control<" in qc_only_html
     assert ">Differential Analysis<" not in qc_only_html
     assert ">Gene Set Enrichment<" not in qc_only_html
+    assert "Transcript biotype composition" not in qc_only_html
     assert "For DEA, the required read depth is not yet satisfied." in qc_only_html
+
+    biotype_only_report = tmp_path / "qc_report_biotype_only.html"
+    biotype_only_args = qc_report.argparser().parse_args(
+        [
+            str(biotype_only_report),
+            "--samples",
+            str(samples),
+            "--versions",
+            str(versions),
+            "--params",
+            str(params),
+            "--transcript-biotypes",
+            str(transcript_biotypes),
+            "--refresh-seconds",
+            "0",
+        ]
+    )
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.chdir(tmp_path)
+        qc_report.main(biotype_only_args)
+    biotype_only_html = biotype_only_report.read_text()
+    assert ">Quality Control<" in biotype_only_html
+    assert ">Differential Analysis<" not in biotype_only_html
+    assert "Transcript biotype composition" in biotype_only_html
 
 
 def test_gene_set_report_requires_differential_results():

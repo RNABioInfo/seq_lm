@@ -33,6 +33,7 @@ workflow {
         order: null,
         bam_dir: bam_dir,
         is_live: true,
+        protocol_run_id: null,
     )
     def old_quantified: QuantifiedSample = record(batch_index: 2, sample: sample, counts: old_quant)
     def quantified: QuantifiedSample = record(batch_index: 3, sample: sample, counts: quant)

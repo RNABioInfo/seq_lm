@@ -1,22 +1,23 @@
 nextflow.enable.types = true
 
 /**
- * Join ordered DEA readiness/results records to matching QC report inputs.
+ * Join ordered quantification/analysis records to matching QC report inputs.
  *
- * A readiness record exists for every batch considered for DEA, including
- * batches that do not run edgeR. Its preassigned sequence preserves batch order
- * even when a fast failed precondition overtakes an earlier edgeR execution.
+ * Every reference-enabled report batch contains a transcript-biotype summary;
+ * it may also carry matching DEA readiness/results and stability output. The
+ * preassigned sequence preserves batch order when process runtimes differ.
  */
 workflow join_report_batches {
     take:
-    differential_reports: Channel
+    analysis_reports: Channel
     qc_report_trees: Channel
 
     main:
-    sequenced_differential_results_ch = differential_reports.map { result ->
+    sequenced_analysis_results_ch = analysis_reports.map { result ->
         tuple(
             result.batch_index,
             result.report_sequence,
+            result.biotypes,
             result.differential_analysis_note,
             result.has_differential_results,
             result.results,
@@ -25,7 +26,7 @@ workflow join_report_batches {
         )
     }
 
-    joined_report_batches_ch = sequenced_differential_results_ch
+    joined_report_batches_ch = sequenced_analysis_results_ch
         .join(
             qc_report_trees.map { result ->
                 tuple(
@@ -36,12 +37,13 @@ workflow join_report_batches {
             },
             by: 0
         )
-        .map { batch_index: Integer, report_sequence: Integer, differential_analysis_note: String, has_differential_results: Boolean, differential_results_path, stability_results_path, has_stability_results: Boolean, report_inputs: Map, qc_results_path ->
+        .map { batch_index: Integer, report_sequence: Integer, transcript_biotypes_path, differential_analysis_note: String, has_differential_results: Boolean, differential_results_path, stability_results_path, has_stability_results: Boolean, report_inputs: Map, qc_results_path ->
             record(
                 batch_index: batch_index,
                 report_sequence: report_sequence,
                 qc_report_inputs: report_inputs,
                 qc_results: qc_results_path,
+                transcript_biotypes: transcript_biotypes_path,
                 differential_analysis_note: differential_analysis_note,
                 has_differential_results: has_differential_results,
                 differential_results: differential_results_path,

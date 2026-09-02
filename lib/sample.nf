@@ -6,6 +6,7 @@ record Sample {
     order: Integer?
     bam_dir: Path
     is_live: Boolean
+    protocol_run_id: String?
 }
 
 record SampleChunk {
@@ -74,6 +75,12 @@ record QuantifiedSample {
 }
 
 record QuantifiedSampleBatch {
+    batch_index: Integer
+    report_sequence: Integer
+    samples: List<QuantifiedSample>
+}
+
+record DifferentialExpressionBatch {
     batch_index: Integer
     analysis_index: Integer
     report_sequence: Integer

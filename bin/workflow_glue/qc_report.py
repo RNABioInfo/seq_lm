@@ -35,6 +35,7 @@ from .qc_report_types.parse_inputs import load_qc_samples
 from .qc_report_types.kde_plots import add_sample_2d_kdes, create_2d_kde_html
 from .qc_report_types.base_metrics import create_nanoplot_metrics_table
 from .qc_report_types.histogram_plots import add_sample_hists
+from .qc_report_types.biotype_plot import add_transcript_biotype_composition
 from .qc_report_types.result_types import FlagstatResult, SampleQCResult
 
 __all__ = [
@@ -331,6 +332,7 @@ def main(args):
     stability_results = None
     fry_results = None
     gsva_results = None
+    transcript_biotypes = args.transcript_biotypes
     if args.differential_results is not None:
         differential = load_differential_results(
             args.differential_results,
@@ -366,6 +368,11 @@ def main(args):
             qc_tabs = Tabs()
             with qc_tabs.add_tab("Read flow"):
                 add_sample_read_fate_sankeys(samples.sample_results)
+                if transcript_biotypes is not None:
+                    add_transcript_biotype_composition(
+                        transcript_biotypes,
+                        samples.sample_results,
+                    )
             with qc_tabs.add_tab("Metrics"):
                 DataTable.from_pandas(
                     create_nanoplot_metrics_table(samples.sample_results),
@@ -469,6 +476,13 @@ def argparser():
         help=(
             "Differential-expression batch directory containing edgeR, fry, "
             "and GSVA outputs."
+        ),
+    )
+    parser.add_argument(
+        "--transcript-biotypes",
+        help=(
+            "TSV containing Oarfish estimated-read fractions for canonical "
+            "transcript biotypes."
         ),
     )
     parser.add_argument(

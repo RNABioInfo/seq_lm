@@ -34,6 +34,7 @@ workflow {
         order: null,
         bam_dir: cached_bam_dir,
         is_live: true,
+        protocol_run_id: null,
     )
     def active: Sample = record(
         name: 'active',
@@ -41,6 +42,7 @@ workflow {
         order: null,
         bam_dir: active_bam_dir,
         is_live: true,
+        protocol_run_id: null,
     )
 
     def cached_output: Path = output_root.resolve('control/cached')
