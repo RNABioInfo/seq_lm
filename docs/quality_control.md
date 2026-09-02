@@ -41,13 +41,14 @@ only its internal report frame when a complete snapshot becomes available.
 Active Bootstrap tabs, dropdown selections, and scroll position are restored
 after the frame update using hierarchy-based tab keys, so the browser page
 itself is not reloaded. Hidden Bokeh and ECharts views are resized when their
-tabs open. The report has three primary tabs:
+tabs open. After successful workflow completion, `qc_report.html` is replaced
+atomically by the latest self-contained snapshot, so the finalized report has
+no live-update status or polling behavior. The report has three primary tabs:
 
-* **Quality Control** contains the existing read-flow, metrics, read-length,
-  read-quality, mapping-quality, and sample views. When both reference inputs
-  are present, Read flow also contains a cross-sample 100% stacked horizontal
-  bar chart of Oarfish abundance by transcript biotype beneath the sample
-  Sankey selector.
+* **Quality Control** contains read-flow, metrics, read-length, read-quality,
+  mapping-quality, and sample views. When both reference inputs are present, a
+  separate **Transcript biotypes** tab contains a cross-sample 100% stacked
+  horizontal bar chart of Oarfish abundance by transcript biotype.
 * **Differential Analysis** separates its overview from contrasts, then uses
   contrast and plot-type subtabs for logFC-versus-logCPM, volcano, and top-gene
   heatmap plots.
@@ -118,5 +119,6 @@ Required local Docker images:
 
 The chunk-level QC workflow intentionally does not consume the reference
 annotation. Transcript-biotype composition is produced by the standalone
-quantification workflow and routed into the Quality Control → Read flow report
-panel. See [Quantification and transcript-biotype QC](quantification.md).
+quantification workflow and routed into its own Quality Control → Transcript
+biotypes tab. See
+[Quantification and transcript-biotype QC](quantification.md).

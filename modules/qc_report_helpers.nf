@@ -1,5 +1,52 @@
 nextflow.enable.types = true
 
+/** Replace the completed live shell with its latest self-contained snapshot. */
+def finalize_qc_report(output_root: Path) -> Void {
+    def normalized_root: Path = output_root.toAbsolutePath().normalize()
+    def state_path: Path = normalized_root.resolve('qc_report_state.json')
+    if (!java.nio.file.Files.isRegularFile(state_path)) {
+        return null
+    }
+
+    def state: Map = new groovy.json.JsonSlurper().parse(state_path.toFile()) as Map
+    def snapshot_name: String = state.snapshot == null ? '' : "${state.snapshot}"
+    if (!snapshot_name || Path.of(snapshot_name).fileName.toString() != snapshot_name) {
+        error("Invalid finalized QC report snapshot path '${snapshot_name}'.")
+    }
+    def snapshot_path: Path = normalized_root.resolve(snapshot_name).normalize()
+    if (!snapshot_path.startsWith(normalized_root) || !java.nio.file.Files.isRegularFile(snapshot_path)) {
+        error("Finalized QC report snapshot is missing or outside the output directory: ${snapshot_path}")
+    }
+
+    def final_report: Path = normalized_root.resolve('qc_report.html')
+    def temporary_report: Path = java.nio.file.Files.createTempFile(
+        normalized_root,
+        '.qc_report-final-',
+        '.html',
+    )
+    java.nio.file.Files.copy(
+        snapshot_path,
+        temporary_report,
+        java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+    )
+    try {
+        java.nio.file.Files.move(
+            temporary_report,
+            final_report,
+            java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+            java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+        )
+    }
+    catch (_exception: java.nio.file.AtomicMoveNotSupportedException) {
+        java.nio.file.Files.move(
+            temporary_report,
+            final_report,
+            java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+        )
+    }
+    return null
+}
+
 include { ChunkQCResult } from '../lib/sample.nf'
 include { shell_quote ; safe_name } from './generic_helpers.nf'
 

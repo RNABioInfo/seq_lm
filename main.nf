@@ -21,7 +21,8 @@ include {
     qc_report_copy_commands ;
     qc_report_root_dir ;
     accumulate_qc_report_chunk_state ;
-    qc_report_inputs_from_state
+    qc_report_inputs_from_state ;
+    finalize_qc_report
 } from './modules/qc_report_helpers.nf'
 include { join_report_batches } from './modules/report_batches.nf'
 include { quality_control } from './subworkflows/quality_control.nf'
@@ -683,6 +684,9 @@ workflow {
     )
 
     onComplete:
+    if (workflow.success) {
+        finalize_qc_report(file(params.out_dir).toAbsolutePath().normalize())
+    }
     if (params.disable_ping == false) {
         Pinguscript.ping_post(workflow, 'end', 'none', params.out_dir, params)
     }

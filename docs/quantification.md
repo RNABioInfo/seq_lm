@@ -5,8 +5,8 @@ Oarfish quantification is enabled automatically when both
 reference inputs form a pair: supplying only one is an error. Quantification
 does not depend on `--differential_expression`; with differential expression
 disabled, the workflow still publishes per-sample quantifications, persists
-and restores final-sample checkpoints, and adds transcript-biotype composition
-to the Quality Control report.
+and restores final-sample checkpoints, and adds a Transcript biotypes tab to
+the Quality Control report.
 
 For each complete live batch, the workflow name-collates each new BAM chunk,
 assembles each sample's cumulative alignment stream, and runs Oarfish once for

@@ -42,6 +42,8 @@ def test_write_report_uses_live_shell_and_versioned_snapshot(tmp_path):
     assert "stateIsOlder" in shell
     assert "fetch(requestUrl" in shell
     assert 'method: "HEAD"' in shell
+    assert "Waiting for update." in shell
+    assert "Waiting for the next complete report update" not in shell
 
 
 def test_write_report_rebrands_labs_header(tmp_path):
@@ -64,6 +66,7 @@ def test_write_report_rebrands_labs_header(tmp_path):
     qc_report.write_report(Report(), report_path, "2", 0)
 
     html = report_path.read_text()
+    assert "Waiting for update." not in html
     assert "https://labs.epi2me.io/" not in html
     assert "EPI2ME Labs Logo" not in html
     assert 'alt="RNA BioInfo AUCG logo"' in html
@@ -446,9 +449,15 @@ def test_qc_report_writes_html(tmp_path):
     assert "updatemenus" not in html
     assert "'type': 'sankey'" in html
     assert "Transcript biotype composition" in html
-    assert "EM-estimated Oarfish abundance" in html
+    assert "Unknown denotes targets without one unambiguous annotation biotype." in html
+    assert "Fractions are EM-estimated Oarfish abundance" not in html
     assert "Protein-coding" in html
     assert "Unknown" in html
+    assert (
+        html.find(">Read flow<")
+        < html.find(">Transcript biotypes<")
+        < html.find(">Metrics<")
+    )
     assert "Read length vs Read quality" in html
     assert "PCA of log2(CPM + 1)" in html
     assert "edgeR MDS of leading logFC" in html
@@ -563,6 +572,7 @@ def test_qc_report_writes_html(tmp_path):
     assert ">Quality Control<" in biotype_only_html
     assert ">Differential Analysis<" not in biotype_only_html
     assert "Transcript biotype composition" in biotype_only_html
+    assert ">Transcript biotypes<" in biotype_only_html
 
 
 def test_gene_set_report_requires_differential_results():

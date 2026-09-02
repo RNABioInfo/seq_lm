@@ -201,7 +201,7 @@ def _live_report_shell(
           pendingBatch = null;
         }}
         showStatus(
-          frameReady ? "" : "Waiting for the next complete report update…"
+          frameReady ? "" : "Waiting for update."
         );
       }});
 
@@ -228,7 +228,7 @@ def _live_report_shell(
             (nextBatch === displayedBatch && frameReady)
           ) {{
             showStatus(
-              frameReady ? "" : "Waiting for the next complete report update…"
+              frameReady ? "" : "Waiting for update."
             );
             return;
           }}
@@ -262,7 +262,7 @@ def _live_report_shell(
           pendingBatch = nextBatch;
           frame.src = snapshotUrl.href;
         }} catch (error) {{
-          showStatus("Waiting for the next complete report update…");
+          showStatus("Waiting for update.");
           console.warn("Live report refresh deferred.", error);
         }}
       }};
@@ -368,7 +368,8 @@ def main(args):
             qc_tabs = Tabs()
             with qc_tabs.add_tab("Read flow"):
                 add_sample_read_fate_sankeys(samples.sample_results)
-                if transcript_biotypes is not None:
+            if transcript_biotypes is not None:
+                with qc_tabs.add_tab("Transcript biotypes"):
                     add_transcript_biotype_composition(
                         transcript_biotypes,
                         samples.sample_results,

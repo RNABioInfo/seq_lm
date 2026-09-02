@@ -25,11 +25,7 @@ BIOTYPE_COLORS = {
     "Other": "#999999",
     "Unknown": "#4D4D4D",
 }
-CAPTION = (
-    "Fractions are EM-estimated Oarfish abundance among transcript-assigned "
-    "reads, not all sequenced or mapped reads. Unknown denotes targets without "
-    "one unambiguous annotation biotype."
-)
+CAPTION = "Unknown denotes targets without one unambiguous annotation biotype."
 
 
 def load_transcript_biotypes(path: Path | str) -> pd.DataFrame:
