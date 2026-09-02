@@ -230,17 +230,17 @@
         "minknow_client_certificate": {
           "type": "string",
           "format": "path",
-          "description": "PEM-encoded client certificate chain used by seq-run-manager."
+          "description": "PEM-encoded client certificate chain used by seq-run-manager. Required only when stability_analysis_behavior is terminate."
         },
         "minknow_client_private_key": {
           "type": "string",
           "format": "path",
-          "description": "PEM-encoded client private key used by seq-run-manager."
+          "description": "PEM-encoded client private key used by seq-run-manager. Required only when stability_analysis_behavior is terminate."
         },
         "minknow_ca_certificate": {
           "type": "string",
           "format": "path",
-          "description": "PEM-encoded MinKNOW root CA certificate used by seq-run-manager."
+          "description": "PEM-encoded MinKNOW root CA certificate used by seq-run-manager. Required only when stability_analysis_behavior is terminate."
         }
       }
     },
@@ -412,11 +412,6 @@
         "required": ["stability_analysis_behavior"]
       },
       "then": {
-        "required": [
-          "minknow_client_certificate",
-          "minknow_client_private_key",
-          "minknow_ca_certificate"
-        ],
         "properties": {
           "live_analysis": {
             "const": true
