@@ -64,3 +64,36 @@ def test_aggregate_nanoplot_rejects_nonempty_malformed_chunk(tmp_path):
 
     with pytest.raises(ValueError, match="NanoPlot data table is missing columns"):
         parse_inputs.aggregate_nanoplot([malformed])
+
+
+def test_load_qc_samples_preserves_optional_elapsed_minutes(tmp_path, monkeypatch):
+    """The report exposes order metadata without requiring it in legacy TSVs."""
+    samples = tmp_path / "samples.tsv"
+    samples.write_text(
+        "name\tgroup\torder\tchunks_seen\tlatest_batch_index\tqc_dir\n"
+        "rep_1\tcontrol\t-5\t1\t0\tqc\n"
+    )
+    monkeypatch.setattr(
+        parse_inputs,
+        "retrieve_flagstat_paths",
+        lambda *_args: [tmp_path / "flagstat.tsv"],
+    )
+    monkeypatch.setattr(
+        parse_inputs,
+        "retrieve_nanoplot_paths",
+        lambda *_args: [tmp_path / "nanoplot.tsv.gz"],
+    )
+    monkeypatch.setattr(
+        parse_inputs,
+        "aggregate_flagstat",
+        lambda _paths: parse_inputs.FlagstatResult(1, 1, 0, 0, 1, 1),
+    )
+    monkeypatch.setattr(
+        parse_inputs,
+        "aggregate_nanoplot",
+        lambda _paths: pd.DataFrame(columns=parse_inputs.NANOPLOT_COLUMNS),
+    )
+
+    result = parse_inputs.load_qc_samples(samples)
+
+    assert result.samples_df["Time (min)"].tolist() == ["-5"]

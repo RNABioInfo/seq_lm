@@ -45,6 +45,7 @@ workflow {
         stability_min_de_calls_for_fraction_metrics: 20,
         stability_max_small_set_call_changes: 2,
         gene_set_enrichment: false,
+        timeline_analysis: false,
         reference_genome: root.resolve('genome.fa'),
         reference_annotation: root.resolve('annotation.gtf'),
         gene_sets: null,
@@ -73,6 +74,10 @@ workflow {
     assert_validation_error(
         base + [differential_expression: false, monitoring_behavior: 'disabled', reference_genome: null],
         '--reference_genome and --reference_annotation must be supplied together',
+    )
+    assert_validation_error(
+        base + [timeline_analysis: true],
+        '--timeline_analysis requires --gene_set_enrichment',
     )
 
     channel.of('MinKNOW termination parameters are conditionally validated').view()

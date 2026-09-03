@@ -74,6 +74,9 @@ def validate_parameters(params_map: Map) -> Void {
     if (params_map.gene_set_enrichment && !params_map.differential_expression) {
         error('--gene_set_enrichment requires --differential_expression.')
     }
+    if (params_map.timeline_analysis && !params_map.gene_set_enrichment) {
+        error('--timeline_analysis requires --gene_set_enrichment.')
+    }
     def reference_genome_provided: Boolean = params_map.reference_genome != null && "${params_map.reference_genome}".trim() != ''
     def reference_annotation_provided: Boolean = params_map.reference_annotation != null && "${params_map.reference_annotation}".trim() != ''
     if (reference_genome_provided != reference_annotation_provided) {

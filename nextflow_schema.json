@@ -44,8 +44,8 @@
           "type": "boolean",
           "default": false,
           "fa_icon": "fas fa-stream",
-          "description": "Process samples according to the order values in the sample sheet.",
-          "help_text": "When enabled, every sample-sheet row must provide an order value."
+          "description": "Add descriptive temporal gene-set trajectories using elapsed-minute sample order values.",
+          "help_text": "Requires gene_set_enrichment. Every sample-sheet row must provide a signed integer order value in elapsed minutes; groups represent independent-replicate time points along one trajectory."
         }
       },
       "required": [

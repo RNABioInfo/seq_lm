@@ -5,9 +5,11 @@ EXPECTED_COLUMNS = [
     "latest_batch_index",
     "qc_dir",
 ]
+OPTIONAL_COLUMNS = ["order"]
 DISPLAY_COLUMNS = {
     "name": "Name",
     "group": "Group",
+    "order": "Time (min)",
     "chunks_seen": "QC chunks seen",
     "latest_batch_index": "Latest batch index",
     "qc_dir": "QC input directory",

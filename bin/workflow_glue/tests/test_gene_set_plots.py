@@ -17,11 +17,10 @@ from bokeh.models import (  # noqa: E402
     Select,
     Span,
 )
-from bokeh.palettes import RdBu11  # noqa: E402
-
 from workflow_glue.qc_report_types import differential_plots as dp  # noqa: E402
 from workflow_glue.qc_report_types import gene_set_plots as gp  # noqa: E402
 from workflow_glue.qc_report_types import gsva_plots as gsp  # noqa: E402
+from workflow_glue.qc_report_types import temporal_plots as tp  # noqa: E402
 
 
 def write_gene_set_tree(path: Path):
@@ -40,6 +39,31 @@ def write_gene_set_tree(path: Path):
             "treated_1": [30, 4, 9, 20],
         }
     ).to_csv(path / "feature_counts.tsv", sep="\t", index=False)
+    pd.DataFrame(
+        {
+            "feature_id": feature_ids,
+            "average_log_cpm": [3.0, 4.0, 5.0, 6.0],
+            "tagwise_dispersion": [0.16, 0.09, 0.04, 0.01],
+            "tagwise_bcv": [0.4, 0.3, 0.2, 0.1],
+            "trended_dispersion": [0.1225, 0.09, 0.0625, 0.04],
+            "trended_bcv": [0.35, 0.3, 0.25, 0.2],
+            "common_dispersion": [0.09] * 4,
+            "common_bcv": [0.3] * 4,
+        }
+    ).to_csv(path / "edgeR_bcv_data.tsv", sep="\t", index=False)
+    pd.DataFrame(
+        {
+            "sample": ["control_1", "treated_1"],
+            "group": ["control", "treated"],
+            "dimension_1": [-1.0, 1.0],
+            "dimension_2": [0.5, -0.5],
+            "dimension_1_variance": [0.7, 0.7],
+            "dimension_2_variance": [0.2, 0.2],
+            "axis_label": ["Leading logFC dim"] * 2,
+            "top_features": [4, 4],
+            "gene_selection": ["pairwise", "pairwise"],
+        }
+    ).to_csv(path / "edgeR_mds_data.tsv", sep="\t", index=False)
 
     contrast_dir = path / "group_treated_vs_control"
     contrast_dir.mkdir()
@@ -207,6 +231,51 @@ def test_load_gsva_results_aligns_scores_coverage_and_limma(tmp_path):
     assert set(differential.condition_colors) == {"control", "treated"}
 
 
+def test_load_temporal_results_reconstructs_gsva_scored_members(tmp_path):
+    """Temporal inputs retain only variable members actually used by GSVA."""
+    metadata = write_gene_set_tree(tmp_path)
+    metadata["Time (min)"] = [0, 15]
+    differential = dp.load_differential_results(tmp_path, metadata)
+    gsva = gsp.load_gsva_results(tmp_path, differential)
+
+    temporal = tp.load_temporal_results(
+        tmp_path,
+        metadata,
+        differential,
+        gsva,
+    )
+
+    assert temporal.metadata["time_minutes"].tolist() == [0, 15]
+    assert temporal.members["set_up"] == ("feature_a", "feature_d")
+    assert temporal.members["set_down"] == ("feature_b", "feature_c")
+    assert temporal.feature_labels["feature_a"] == "gene_a"
+
+
+def test_load_temporal_results_rejects_member_count_mismatch(tmp_path):
+    """Temporal membership must reproduce the genes used for GSVA scoring."""
+    metadata = write_gene_set_tree(tmp_path)
+    metadata["Time (min)"] = [0, 15]
+    resolution_path = tmp_path / "gene_set_resolution.tsv"
+    resolution = pd.read_csv(resolution_path, sep="\t")
+    resolution = resolution.loc[
+        ~(
+            resolution["gene_set"].eq("set_up")
+            & resolution["feature_id"].eq("feature_d")
+        )
+    ]
+    resolution.to_csv(resolution_path, sep="\t", index=False)
+    differential = dp.load_differential_results(tmp_path, metadata)
+    gsva = gsp.load_gsva_results(tmp_path, differential)
+
+    with pytest.raises(ValueError, match="reconstructed temporal members"):
+        tp.load_temporal_results(
+            tmp_path,
+            metadata,
+            differential,
+            gsva,
+        )
+
+
 def test_gsva_plots_use_score_differences_and_adjusted_p_values(tmp_path):
     """Limma visuals use GSVA score units rather than fold-change labels."""
     differential, gsva = load_gsva_tree(tmp_path)
@@ -274,8 +343,7 @@ def test_gsva_raw_and_differential_heatmaps_render(tmp_path):
     assert ["set_up", "set_down"] in differential_factor_ranges
     for score_plot in (raw_heatmap, differential_heatmap, summary):
         mapper = next(iter(score_plot._fig.select({"type": LinearColorMapper})))
-        assert mapper.palette[0] == RdBu11[0]
-        assert mapper.palette[-1] == RdBu11[-1]
+        assert len(mapper.palette) == 256
 
 
 def test_gsva_heatmaps_preserve_non_alphabetical_metadata_sample_order(tmp_path):

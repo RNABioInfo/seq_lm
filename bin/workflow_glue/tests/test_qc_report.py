@@ -183,7 +183,7 @@ def write_differential_results(path):
         "gene_1\t2\t32\n"
         "gene_2\t40\t4\n"
         "gene_3\t10\t12\n"
-        "gene_4\t8\t8\n"
+        "gene_4\t8\t9\n"
     )
     (path / "edgeR_bcv_data.tsv").write_text(
         "feature_id\taverage_log_cpm\ttagwise_dispersion\ttagwise_bcv\t"
@@ -378,9 +378,9 @@ def test_qc_report_writes_html(tmp_path):
     )
     samples = tmp_path / "qc_report_samples.tsv"
     samples.write_text(
-        "name\tgroup\tchunks_seen\tlatest_batch_index\tqc_dir\n"
-        "control_1\tcontrol\t2\t2\tqc_results\n"
-        "treatment_1\ttime_point_1\t1\t1\tqc_results\n"
+        "name\tgroup\torder\tchunks_seen\tlatest_batch_index\tqc_dir\n"
+        "control_1\tcontrol\t0\t2\t2\tqc_results\n"
+        "treatment_1\ttime_point_1\t15\t1\t1\tqc_results\n"
     )
     differential_results = tmp_path / "differential_results"
     write_differential_results(differential_results)
@@ -417,6 +417,7 @@ def test_qc_report_writes_html(tmp_path):
             "--transcript-biotypes",
             str(transcript_biotypes),
             "--gene-set-enrichment",
+            "--temporal-analysis",
             "--refresh-seconds",
             "0",
         ]
@@ -432,6 +433,7 @@ def test_qc_report_writes_html(tmp_path):
         html.find("Quality Control")
         < html.find("Differential Analysis")
         < html.find("Gene Set Enrichment")
+        < html.find("Temporal Analysis")
     )
     assert "control/control_1" in html
     assert "time_point_1/treatment_1" in html
@@ -475,6 +477,11 @@ def test_qc_report_writes_html(tmp_path):
     assert "GSVA score difference" in html
     assert "GSVA limma across contrasts" in html
     assert "Differential GSVA scores" in html
+    assert "GSVA score over time" in html
+    assert "Gene expression over time" in html
+    assert "log2(TMM-normalized CPM + 1)" in html
+    assert "Descriptive temporal view" in html
+    assert "Time (min)" in html
     assert "Carbon response" in html
     assert "Mixed response" in html
     assert "Relative local enrichment" in html
@@ -522,6 +529,7 @@ def test_qc_report_writes_html(tmp_path):
     differential_only_html = differential_only_report.read_text()
     assert ">Differential Analysis<" in differential_only_html
     assert ">Gene Set Enrichment<" not in differential_only_html
+    assert ">Temporal Analysis<" not in differential_only_html
 
     qc_only_report = tmp_path / "qc_report_qc_only.html"
     qc_only_args = qc_report.argparser().parse_args(
@@ -546,6 +554,7 @@ def test_qc_report_writes_html(tmp_path):
     assert ">Quality Control<" in qc_only_html
     assert ">Differential Analysis<" not in qc_only_html
     assert ">Gene Set Enrichment<" not in qc_only_html
+    assert ">Temporal Analysis<" not in qc_only_html
     assert "Transcript biotype composition" not in qc_only_html
     assert "For DEA, the required read depth is not yet satisfied." in qc_only_html
 
@@ -593,6 +602,28 @@ def test_gene_set_report_requires_differential_results():
     with pytest.raises(
         ValueError,
         match="--gene-set-enrichment requires --differential-results",
+    ):
+        qc_report.main(args)
+
+
+def test_temporal_report_requires_gene_set_enrichment():
+    """Temporal plots cannot be requested without their GSVA inputs."""
+    args = qc_report.argparser().parse_args(
+        [
+            "report.html",
+            "--samples",
+            "samples.tsv",
+            "--versions",
+            "versions",
+            "--params",
+            "params.json",
+            "--temporal-analysis",
+        ]
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="--temporal-analysis requires --gene-set-enrichment",
     ):
         qc_report.main(args)
 

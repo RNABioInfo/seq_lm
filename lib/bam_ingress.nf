@@ -58,6 +58,9 @@ def get_samples(ingress_args) -> List<Sample> {
     }
 
     def samples: List<Sample> = parse_sample_sheet(ingress_args)
+    if (ingress_args.timeline_analysis) {
+        validate_timeline_samples(samples)
+    }
     return attach_minknow_run_metadata(samples, ingress_args.termination_requested)
 }
 
@@ -81,7 +84,7 @@ def parse_sample_sheet(ingress_args) -> List<Sample> {
             def sample: Sample = record(
                 name: row.alias,
                 group: row.group,
-                order: row.order ? row.order.toInteger() : null,
+                order: parse_sample_order(row.order, row.alias),
                 bam_dir: file(row.bam_dir),
                 is_live: parse_is_live(row.is_live, row.alias),
                 protocol_run_id: null,
@@ -97,12 +100,73 @@ def parse_sample_sheet(ingress_args) -> List<Sample> {
                 error("Sample sheet contains a row with an empty bam_dir for sample '${sample_label(sample)}'.")
             }
 
-            if (ingress_args.timeline_analysis && sample.order == null) {
-                error("You need to provide a sample order when running in timeline mode.")
-            }
-
             return sample
         }
+}
+
+def parse_sample_order(value: Object, alias: Object) -> Integer? {
+    def normalized: String = value == null ? '' : "${value}".trim()
+    if (!normalized) {
+        return null
+    }
+    try {
+        return normalized.toInteger()
+    }
+    catch (_exception: NumberFormatException) {
+        error(
+            "Invalid order value '${value}' for sample '${alias}'. " +
+                'Expected elapsed minutes as a signed integer.'
+        )
+    }
+}
+
+/** Validate the single group-per-minute trajectory used by temporal plots. */
+def validate_timeline_samples(samples: List) -> Void {
+    def missing_order: List<String> = samples
+        .findAll { sample -> sample.order == null }
+        .collect { sample -> "${sample.group}/${sample.name}" }
+    if (missing_order) {
+        error(
+            'Timeline analysis requires an order value for every sample. Missing: ' +
+                missing_order.join(', ')
+        )
+    }
+
+    def inconsistent_groups: List<String> = samples
+        .groupBy { sample -> sample.group }
+        .findAll { _group: String, group_samples: List ->
+            group_samples*.order.unique().size() != 1
+        }
+        .keySet()
+        .toList()
+        .sort()
+    if (inconsistent_groups) {
+        error(
+            'Timeline analysis requires every group to use one elapsed minute. ' +
+                'Inconsistent groups: ' + inconsistent_groups.join(', ')
+        )
+    }
+
+    def ambiguous_minutes: List<Integer> = samples
+        .groupBy { sample -> sample.order }
+        .findAll { _order: Integer, time_samples: List ->
+            time_samples*.group.unique().size() != 1
+        }
+        .keySet()
+        .toList()
+        .sort()
+    if (ambiguous_minutes) {
+        error(
+            'Timeline analysis requires every elapsed minute to identify one group. ' +
+                'Ambiguous minute(s): ' + ambiguous_minutes.join(', ')
+        )
+    }
+
+    def time_points: List<Integer> = samples*.order.unique().sort()
+    if (time_points.size() < 2) {
+        error('Timeline analysis requires at least two distinct elapsed minutes.')
+    }
+    return null
 }
 
 def attach_minknow_run_metadata(samples: List<Sample>, termination_requested: Boolean) -> List<Sample> {

@@ -201,6 +201,9 @@ process qc_report {
         ? '--transcript-biotypes transcript_biotypes.tsv'
         : ''
     def gene_set_args: String = params.gene_set_enrichment && has_differential_results ? '--gene-set-enrichment' : ''
+    def temporal_args: String = params.timeline_analysis && params.gene_set_enrichment && has_differential_results
+        ? '--temporal-analysis'
+        : ''
     def readiness_args: String = differential_analysis_note
         ? "--dea-readiness-notice ${shell_quote(differential_analysis_note)}"
         : ''
@@ -208,7 +211,7 @@ process qc_report {
         ? '--stability-results stability_results.tsv'
         : ''
     """
-        printf 'name\\tgroup\\tchunks_seen\\tlatest_batch_index\\tqc_dir\\n' > report_samples.tsv
+        printf 'name\\tgroup\\torder\\tchunks_seen\\tlatest_batch_index\\tqc_dir\\n' > report_samples.tsv
         printf '%s\\n' ${quoted_rows} >> report_samples.tsv
 
         mkdir versions
@@ -226,6 +229,7 @@ process qc_report {
             ${transcript_biotype_args} \
             ${differential_args} \
             ${gene_set_args} \
+            ${temporal_args} \
             ${readiness_args} \
             ${stability_args} \
             --stability-behavior ${params.monitoring_behavior} \

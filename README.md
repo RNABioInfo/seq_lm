@@ -145,7 +145,7 @@ treated_2,treated,/data/bams/treated_2,true,1
 | `group` | Yes | Experimental condition. At least two rows must use `control`, matched case-insensitively. Each other group is contrasted separately with the control group. |
 | `bam_dir` | Yes | Existing directory searched recursively for `.bam` files. The path must be visible to the selected container runtime. |
 | `is_live` | No | `true`, `false`, or blank, case-insensitively. Blank or missing values default to `true`. A row is watched only when this value and `--live_analysis` are both true. |
-| `order` | No | Integer timeline position. Every row must provide it when `--timeline_analysis` is enabled. |
+| `order` | No | Signed integer elapsed time in minutes. Every row must provide it when `--timeline_analysis` is enabled. In temporal mode, each group is one independent-replicate time point: a group must have one order value and an order value must identify one group. |
 
 Effectively live samples may start with an empty `bam_dir`. Samples that are not
 live are processed once and must contain at least one BAM when the workflow
@@ -328,8 +328,10 @@ execution/
 the newest complete immutable snapshot without reloading the outer page. After
 successful completion it is atomically replaced by the latest self-contained
 snapshot. Depending on the selected analysis mode, the report contains Quality
-Control, Transcript biotypes, Differential Analysis, Result Stability, and Gene
-Set Enrichment views.
+Control, Transcript biotypes, Differential Analysis, Result Stability, Gene Set
+Enrichment, and Temporal Analysis views. Temporal Analysis is enabled with
+`--timeline_analysis`, requires gene-set enrichment, and summarizes a single
+trajectory over the sample-sheet `order` values.
 
 When a sample finishes, `seq_lm` persists its quantification and raw QC inputs
 and writes `FINAL` last. A later invocation using the same `--out_dir` validates
@@ -367,6 +369,12 @@ tested organism, conditions, and sampling design. They do not establish causal
 drivers, biochemical pathway activity, or biological mechanism. Results from
 live batches may change as sequencing depth and statistical power increase;
 use the final checkpoint for downstream interpretation.
+
+Temporal figures are descriptive summaries of independent biological
+replicates, not time-course significance tests. Their lines connect measured
+minutes but do not estimate unobserved intermediate states. Time-associated
+bulk-expression patterns may also reflect composition, batch, or other
+variables confounded with sampling time.
 
 ## License and links
 

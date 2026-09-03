@@ -15,7 +15,8 @@ from bokeh.models import (
     LinearColorMapper,
     Span,
 )
-from bokeh.palettes import RdBu11, Turbo256
+from bokeh.palettes import Turbo256
+import colorcet as cc
 from ezcharts.components.ezchart import EZChart
 from ezcharts.layout.snippets import Tabs
 from ezcharts.layout.snippets.table import DataTable
@@ -1047,7 +1048,7 @@ def create_heatmap_plot(
 
     z_limit = max(float(melted["z_score"].abs().max()), 1.0)
     mapper = LinearColorMapper(
-        palette=RdBu11,
+        palette=cc.b_diverging_bwr_20_95_c54,
         low=-z_limit,
         high=z_limit,
     )

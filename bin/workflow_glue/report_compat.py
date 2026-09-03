@@ -155,7 +155,8 @@ _REPORT_NAVIGATION_SCRIPT = r"""
             const primaryLabels = new Set([
               "Quality Control",
               "Differential Analysis",
-              "Gene Set Enrichment"
+              "Gene Set Enrichment",
+              "Temporal Analysis"
             ]);
             const isPrimary = labels.includes("Quality Control") &&
               labels.every((label) => primaryLabels.has(label));

@@ -376,6 +376,30 @@ control the report significance threshold. The across-contrast score-difference
 scale follows the same convention: negative/low values are blue and
 positive/high values are red.
 
+## Temporal gene-set analysis
+
+Enable `--timeline_analysis` to add the primary **Temporal Analysis** report
+tab. This mode requires differential expression, gene-set enrichment, and a
+signed integer `order` value for every sample-sheet row. `order` is elapsed
+time in minutes. The first version represents one trajectory: samples in the
+same group are independent biological replicates at one minute, every group
+has one minute, and every minute has one group.
+
+The gene-set dropdown controls two stacked figures. The upper figure connects
+mean raw GSVA scores and shows one-sample-SD whiskers plus the individual
+sample scores. The lower figure shows, for every retained variable member used
+to score that set, mean `log2(TMM-normalized CPM + 1)` and one-sample-SD
+whiskers. SD is omitted where a time point has only one replicate. Gene legends
+are clickable for sets with at most 20 scored members; larger sets use hover
+identification without an oversized legend.
+
+These figures are descriptive and do not perform temporal regression,
+smoothing, repeated-measures modeling, or a treatment-by-time test. Connecting
+lines do not estimate unmeasured intermediate states. GSVA is a dataset-relative
+expression summary rather than a biochemical pathway-activity assay, and bulk
+temporal patterns can reflect composition, batch, or another variable
+confounded with time.
+
 The workflow uses `rnabioinfo/seq_lm_gsva:v1.1.0`. Build and publish that image
 before deploying this workflow version:
 

@@ -43,7 +43,8 @@ after the frame update using hierarchy-based tab keys, so the browser page
 itself is not reloaded. Hidden Bokeh and ECharts views are resized when their
 tabs open. After successful workflow completion, `qc_report.html` is replaced
 atomically by the latest self-contained snapshot, so the finalized report has
-no live-update status or polling behavior. The report has three primary tabs:
+no live-update status or polling behavior. The report has four possible primary
+tabs:
 
 * **Quality Control** contains read-flow, metrics, read-length, read-quality,
   mapping-quality, and sample views. When both reference inputs are present, a
@@ -62,6 +63,10 @@ no live-update status or polling behavior. The report has three primary tabs:
   the gene-set dropdown used for barcode plots. Concise
   identifiers appear in long dropdowns, while barcode views expose complete
   labels and statistics in **Gene-set details**.
+* **Temporal Analysis**, shown when timeline and gene-set analysis are enabled
+  and a complete differential result is available, provides one gene-set
+  dropdown controlling a GSVA mean/SD/raw-point trajectory and a scored-gene
+  mean/SD log-CPM trajectory over elapsed minutes.
 
 Nested tab content uses reduced padding, while the primary tab bar uses the
 workflow brand color to remain visually distinct from analysis, contrast, and
@@ -70,8 +75,8 @@ plot-type subtabs.
 The report sample TSV uses this shape:
 
 ```text
-name	group	chunks_seen	latest_batch_index	qc_dir
-rep_1	control	2	2	qc_results
+name	group	order	chunks_seen	latest_batch_index	qc_dir
+rep_1	control	0	2	2	qc_results
 ```
 
 Inside the report work directory, `qc_results` contains the raw QC tables for
@@ -92,7 +97,10 @@ qc_results/
 The BAM sample sheet uses `alias`, `group`, and `bam_dir` columns, plus optional
 `is_live` and `order` columns. `is_live` accepts case-insensitive `true` or
 `false`; a missing or blank value defaults to `true`. A sample is watched only
-when both `--live_analysis` and its row-level `is_live` value are true.
+when both `--live_analysis` and its row-level `is_live` value are true. When
+`--timeline_analysis` is enabled, `order` is required and is interpreted as a
+signed integer elapsed time in minutes. Each group must map to one minute and
+each minute to one group for the single supported trajectory.
 
 Final samples are processed once from all BAMs present at startup and must have
 at least one BAM. Later QC checkpoints wait for one new BAM from every currently

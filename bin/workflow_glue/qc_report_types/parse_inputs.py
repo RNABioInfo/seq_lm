@@ -6,7 +6,12 @@ from functools import reduce
 import re
 
 from .result_types import FlagstatResult, QCResult, SampleQCResult
-from .constants import NANOPLOT_COLUMNS, EXPECTED_COLUMNS, DISPLAY_COLUMNS
+from .constants import (
+    DISPLAY_COLUMNS,
+    EXPECTED_COLUMNS,
+    NANOPLOT_COLUMNS,
+    OPTIONAL_COLUMNS,
+)
 
 
 def safe_name(value: str) -> str:
@@ -71,7 +76,10 @@ def load_qc_samples(samples_path) -> QCResult:
         raise ValueError(
             "QC report samples table is missing columns: " + ", ".join(missing_columns)
         )
-    samples = samples[EXPECTED_COLUMNS].rename(columns=DISPLAY_COLUMNS)
+    columns = EXPECTED_COLUMNS + [
+        column for column in OPTIONAL_COLUMNS if column in samples
+    ]
+    samples = samples[columns].rename(columns=DISPLAY_COLUMNS)
 
     qc_results: list[SampleQCResult] = []
 

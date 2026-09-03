@@ -13,8 +13,6 @@ from bokeh.models import (  # noqa: E402
     LinearColorMapper,
     Span,
 )
-from bokeh.palettes import RdBu11  # noqa: E402
-
 from workflow_glue.qc_report_types import differential_plots as dp  # noqa: E402
 
 
@@ -442,8 +440,7 @@ def test_heatmap_contains_only_compared_conditions(tmp_path):
     assert not any(sample.startswith("rescue") for sample in samples)
 
     mapper = next(iter(heatmap._fig.select({"type": LinearColorMapper})))
-    assert mapper.palette[0] == RdBu11[0]
-    assert mapper.palette[-1] == RdBu11[-1]
+    assert len(mapper.palette) == 256
 
 
 def test_heatmap_row_clustering_groups_similar_profiles():

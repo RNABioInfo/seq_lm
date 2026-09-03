@@ -81,6 +81,7 @@ def qc_report_rows(report_inputs_list: List) -> String {
             [
             qc_report_field(report_inputs.sample.name), 
             qc_report_field(report_inputs.sample.group), 
+            report_inputs.sample.order == null ? '' : "${report_inputs.sample.order}",
             "${report_inputs.chunks.size()}", 
             "${report_inputs.latest_batch_index}", 
             qc_report_field(qc_report_root_dir())
@@ -137,7 +138,7 @@ def qc_report_inputs_from_state(latest_batch_index: Integer, state: Map<String,L
             left.batch_index <=> right.batch_index
         }
 
-        [latest_batch_index: latest_batch_index, sample: [name: first.sample.name, group: first.sample.group], chunks: sorted_chunks.collect { result ->
+        [latest_batch_index: latest_batch_index, sample: [name: first.sample.name, group: first.sample.group, order: first.sample.order], chunks: sorted_chunks.collect { result ->
             [batch_index: result.batch_index, nanoplot_name: "nanoplot_data_chunk_${result.batch_index}.tsv.gz", flagstat_name: "flagstat_data_chunk_${result.batch_index}.tsv"]
         }]
     }

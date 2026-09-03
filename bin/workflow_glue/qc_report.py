@@ -26,6 +26,10 @@ from .qc_report_types.gsva_plots import (
     add_gsva_scores,
     load_gsva_results,
 )
+from .qc_report_types.temporal_plots import (
+    add_temporal_analysis,
+    load_temporal_results,
+)
 from .qc_report_types.sankey_plot import (
     add_sample_read_fate_sankeys,
     create_read_fate_sankey_html,
@@ -325,6 +329,10 @@ def main(args):
         raise ValueError(
             "--gene-set-enrichment requires --differential-results."
         )
+    if args.temporal_analysis and not args.gene_set_enrichment:
+        raise ValueError(
+            "--temporal-analysis requires --gene-set-enrichment."
+        )
 
     logger = get_named_logger("SeqLMReport")
     samples = load_qc_samples(args.samples)
@@ -332,6 +340,7 @@ def main(args):
     stability_results = None
     fry_results = None
     gsva_results = None
+    temporal_results = None
     transcript_biotypes = args.transcript_biotypes
     if args.differential_results is not None:
         differential = load_differential_results(
@@ -352,6 +361,13 @@ def main(args):
                 args.differential_results,
                 differential,
             )
+            if args.temporal_analysis:
+                temporal_results = load_temporal_results(
+                    args.differential_results,
+                    samples.samples_df,
+                    differential,
+                    gsva_results,
+                )
 
     report = labs_report(
         labs,
@@ -438,6 +454,13 @@ def main(args):
                             args.padj_cutoff,
                         )
 
+                if args.temporal_analysis:
+                    with primary_tabs.add_tab("Temporal Analysis"):
+                        add_temporal_analysis(
+                            temporal_results,
+                            differential.condition_colors,
+                        )
+
     write_report(  # type: ignore
         report,
         args.report,
@@ -500,6 +523,14 @@ def argparser():
         "--gene-set-enrichment",
         action="store_true",
         help="Include fry and GSVA gene-set results in the report.",
+    )
+    parser.add_argument(
+        "--temporal-analysis",
+        action="store_true",
+        help=(
+            "Include descriptive elapsed-minute gene-set trajectories; requires "
+            "--gene-set-enrichment and sample order metadata."
+        ),
     )
     parser.add_argument(
         "--dea-readiness-notice",

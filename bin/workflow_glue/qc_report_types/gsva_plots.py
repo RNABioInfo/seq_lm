@@ -14,7 +14,7 @@ from bokeh.models import (
     LinearColorMapper,
     Span,
 )
-from bokeh.palettes import RdBu11
+import colorcet as cc
 from ezcharts.components.ezchart import EZChart
 from ezcharts.layout.snippets import Tabs
 from ezcharts.layout.snippets.table import DataTable
@@ -304,7 +304,11 @@ def create_score_heatmap(
     metadata = data.scores_long.drop_duplicates("sample").set_index("sample")
     sample_order = matrix.columns.tolist()
     limit = max(float(melted["z_score"].abs().max()), 1.0)
-    mapper = LinearColorMapper(palette=RdBu11, low=-limit, high=limit)
+    mapper = LinearColorMapper(
+        palette=cc.b_diverging_bwr_20_95_c54,
+        low=-limit,
+        high=limit,
+    )
     suffix = f" (top {len(selected)} by variance)" if len(data.gene_set_order) > len(selected) else ""
     heatmap = BokehPlot(
         title=f"GSVA scores across samples{suffix}",
@@ -604,7 +608,11 @@ def create_limma_heatmap(
     )
     melted["display_label"] = melted["gene_set"].map(labels)
     limit = max(float(melted["z_score"].abs().max()), 1.0)
-    mapper = LinearColorMapper(palette=RdBu11, low=-limit, high=limit)
+    mapper = LinearColorMapper(
+        palette=cc.b_diverging_bwr_20_95_c54,
+        low=-limit,
+        high=limit,
+    )
     heatmap = BokehPlot(
         title=f"Differential GSVA scores — {analysis.label}",
         x_range=sample_order,
@@ -683,7 +691,11 @@ def create_multi_contrast_dot_plot(
     prepared["point_size"] = 7 + 11 * significance.clip(upper=20) / 20
     prepared["significance_label"] = significance
     limit = max(float(prepared["effect_size"].abs().max()), 0.1)
-    mapper = LinearColorMapper(palette=RdBu11, low=-limit, high=limit)
+    mapper = LinearColorMapper(
+        palette=cc.b_diverging_bwr_20_95_c54,
+        low=-limit,
+        high=limit,
+    )
     plot_height = max(460, 24 * len(order) + 160)
     plot = BokehPlot(
         title=(
