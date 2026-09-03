@@ -8,7 +8,7 @@ import pytest
 pytest.importorskip("ezcharts")
 pd = pytest.importorskip("pandas")
 
-from bokeh.models import HoverTool, Legend  # noqa: E402
+from bokeh.models import ColorBar, HoverTool, Legend  # noqa: E402
 from ezcharts.components.reports import labs  # noqa: E402
 from ezcharts.layout.snippets import Tabs  # noqa: E402
 
@@ -159,8 +159,8 @@ def test_temporal_score_summary_uses_sample_sd_and_stable_jitter():
     assert raw.loc[raw["time_minutes"].eq(45), "plot_time"].iloc[0] == 45
 
 
-def test_temporal_gene_summary_and_plots_include_sd_and_hover():
-    """Gene lines use time-point mean log CPM, SD, labels, and interactive legends."""
+def test_temporal_gene_summary_and_heatmap_include_z_scores_and_hover():
+    """Gene heatmaps retain absolute summaries beside row-standardized values."""
     data = make_temporal_result()
     summary = tp.prepare_temporal_gene_expression(data, "set_a")
     feature_a = summary.loc[summary["feature_id"].eq("feature_a")]
@@ -171,6 +171,8 @@ def test_temporal_gene_summary_and_plots_include_sd_and_hover():
         [np.sqrt(2), np.sqrt(2)]
     )
     assert feature_a["sd_label"].iloc[2] == "unavailable (n=1)"
+    assert feature_a["z_score"].mean() == pytest.approx(0.0)
+    assert feature_a["z_score"].std(ddof=1) == pytest.approx(1.0)
 
     score_plot = tp.create_temporal_score_plot(
         data,
@@ -181,16 +183,62 @@ def test_temporal_gene_summary_and_plots_include_sd_and_hover():
 
     assert score_plot._fig.title.text == "GSVA score over time — set_a"
     assert gene_plot._fig.title.text == "Gene expression over time — set_a"
-    assert gene_plot._fig.yaxis[0].axis_label == "log2(TMM-normalized CPM + 1)"
-    assert any("Sample" in dict(tool.tooltips) for tool in score_plot._fig.select({"type": HoverTool}))
-    legends = list(gene_plot._fig.select({"type": Legend}))
-    assert len(legends) == 1
-    assert legends[0].click_policy == "hide"
-    assert [item.label["value"] for item in legends[0].items] == ["gene_a", "gene_b"]
+    assert gene_plot._fig.x_range.factors == ["0", "15", "45"]
+    assert gene_plot._fig.yaxis[0].axis_label == "Gene"
+    assert any(
+        "Sample" in dict(tool.tooltips)
+        for tool in score_plot._fig.select({"type": HoverTool})
+    )
+    heatmap_hover = next(iter(gene_plot._fig.select({"type": HoverTool})))
+    hover_labels = dict(heatmap_hover.tooltips)
+    assert "Gene z-score" in hover_labels
+    assert "Mean log CPM" in hover_labels
+    assert "SD" in hover_labels
+    assert "Replicates" in hover_labels
+    assert len(heatmap_hover.renderers[0].data_source.data["z_score"]) == 6
+    color_bar = next(iter(gene_plot._fig.select({"type": ColorBar})))
+    assert color_bar.color_mapper.low == pytest.approx(-color_bar.color_mapper.high)
+    assert list(gene_plot._fig.select({"type": Legend})) == []
 
 
-def test_large_gene_set_omits_oversized_legend():
-    """Large temporal line plots remain hover-driven instead of adding huge legends."""
+def test_temporal_gene_heatmap_assigns_zero_to_constant_profiles():
+    """A flat time-point profile has neutral color instead of undefined z-scores."""
+    data = make_temporal_result()
+    data.members["set_a"] = (*data.members["set_a"], "feature_constant")
+    data.log_cpm.loc["feature_constant"] = 4.0
+    data.feature_labels["feature_constant"] = "gene_constant"
+
+    summary = tp.prepare_temporal_gene_expression(data, "set_a")
+    constant = summary.loc[summary["feature_id"].eq("feature_constant")]
+
+    assert constant["z_score"].tolist() == [0.0, 0.0, 0.0]
+
+
+def test_temporal_gene_heatmap_clusters_similar_profiles_together():
+    """Standardized increasing and decreasing profiles form adjacent row groups."""
+    data = make_temporal_result()
+    members = ("increase_a", "decrease_a", "increase_b", "decrease_b")
+    data.members["set_a"] = members
+    data.log_cpm = pd.DataFrame(
+        [
+            [0.0, 0.0, 1.0, 1.0, 2.0],
+            [2.0, 2.0, 1.0, 1.0, 0.0],
+            [0.1, 0.1, 1.1, 1.1, 2.1],
+            [2.1, 2.1, 1.1, 1.1, 0.1],
+        ],
+        index=members,
+        columns=data.metadata["sample"],
+    )
+    data.feature_labels = {feature_id: feature_id for feature_id in members}
+
+    _, order = tp.prepare_temporal_gene_heatmap(data, "set_a")
+
+    assert abs(order.index("increase_a") - order.index("increase_b")) == 1
+    assert abs(order.index("decrease_a") - order.index("decrease_b")) == 1
+
+
+def test_large_gene_set_heatmap_is_complete_and_height_is_bounded():
+    """Large heatmaps retain every cell without creating an oversized canvas."""
     data = make_temporal_result()
     members = tuple(f"feature_{index}" for index in range(21))
     data.members["set_a"] = members
@@ -202,7 +250,11 @@ def test_large_gene_set_omits_oversized_legend():
     data.feature_labels = {feature_id: feature_id for feature_id in members}
 
     plot = tp.create_temporal_gene_plot(data, "set_a")
+    hover = next(iter(plot._fig.select({"type": HoverTool})))
 
+    assert len(hover.renderers[0].data_source.data["z_score"]) == 21 * 3
+    assert len(plot._fig.y_range.factors) == 21
+    assert 420 <= plot._fig.height <= 1200
     assert list(plot._fig.select({"type": Legend})) == []
 
 
@@ -236,4 +288,5 @@ def test_temporal_analysis_writes_one_shared_gene_set_dropdown(tmp_path):
     assert html.count(">Gene set<") == 1
     assert "GSVA score over time" in html
     assert "Gene expression over time" in html
-    assert "Descriptive temporal view" in html
+    assert "Descriptive only. Heatmap colors are gene-wise z-scores." in html
+    assert "Gene z-score" in html

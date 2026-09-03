@@ -66,7 +66,7 @@ tabs:
 * **Temporal Analysis**, shown when timeline and gene-set analysis are enabled
   and a complete differential result is available, provides one gene-set
   dropdown controlling a GSVA mean/SD/raw-point trajectory and a scored-gene
-  mean/SD log-CPM trajectory over elapsed minutes.
+  clustered row-z-score heatmap over elapsed minutes.
 
 Nested tab content uses reduced padding, while the primary tab bar uses the
 workflow brand color to remain visually distinct from analysis, contrast, and

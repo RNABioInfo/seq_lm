@@ -331,7 +331,14 @@ snapshot. Depending on the selected analysis mode, the report contains Quality
 Control, Transcript biotypes, Differential Analysis, Result Stability, Gene Set
 Enrichment, and Temporal Analysis views. Temporal Analysis is enabled with
 `--timeline_analysis`, requires gene-set enrichment, and summarizes a single
-trajectory over the sample-sheet `order` values.
+trajectory over the sample-sheet `order` values. For a selected gene set, the
+report shows its raw GSVA-score trajectory and a gene-by-time heatmap. Heatmap
+cells are gene-wise z-scores of the replicate-mean
+`log2(TMM-normalized CPM + 1)` values, and average-linkage clustering groups
+genes with similar temporal profiles. Hovering retains each cell's absolute
+mean logCPM, SD, group, and replicate count. This view is descriptive: row
+standardization removes between-gene abundance differences, and clustering
+does not establish co-regulation or a statistically significant time effect.
 
 When a sample finishes, `seq_lm` persists its quantification and raw QC inputs
 and writes `FINAL` last. A later invocation using the same `--out_dir` validates

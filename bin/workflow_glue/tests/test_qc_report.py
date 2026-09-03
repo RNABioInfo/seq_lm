@@ -479,8 +479,8 @@ def test_qc_report_writes_html(tmp_path):
     assert "Differential GSVA scores" in html
     assert "GSVA score over time" in html
     assert "Gene expression over time" in html
-    assert "log2(TMM-normalized CPM + 1)" in html
-    assert "Descriptive temporal view" in html
+    assert "Gene z-score" in html
+    assert "Descriptive only. Heatmap colors are gene-wise z-scores." in html
     assert "Time (min)" in html
     assert "Carbon response" in html
     assert "Mixed response" in html

@@ -387,11 +387,11 @@ has one minute, and every minute has one group.
 
 The gene-set dropdown controls two stacked figures. The upper figure connects
 mean raw GSVA scores and shows one-sample-SD whiskers plus the individual
-sample scores. The lower figure shows, for every retained variable member used
-to score that set, mean `log2(TMM-normalized CPM + 1)` and one-sample-SD
-whiskers. SD is omitted where a time point has only one replicate. Gene legends
-are clickable for sets with at most 20 scored members; larger sets use hover
-identification without an oversized legend.
+sample scores. The lower figure is a gene-by-time heatmap of gene-wise z-scores
+calculated from mean `log2(TMM-normalized CPM + 1)` at each time point. Genes
+with similar standardized trajectories are adjacent after average-linkage
+clustering. Hover fields retain the absolute mean logCPM, SD, group, and
+replicate count; SD is unavailable where a time point has one replicate.
 
 These figures are descriptive and do not perform temporal regression,
 smoothing, repeated-measures modeling, or a treatment-by-time test. Connecting

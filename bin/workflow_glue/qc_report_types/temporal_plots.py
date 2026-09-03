@@ -3,37 +3,33 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from html import escape
 from pathlib import Path
 
 from bokeh.layouts import column
 from bokeh.models import (
+    ColorBar,
     ColumnDataSource,
     Div,
     HoverTool,
-    Legend,
-    LegendItem,
+    LinearColorMapper,
 )
-from bokeh.palettes import Turbo256
+import colorcet as cc
 from ezcharts.components.ezchart import EZChart
 from ezcharts.layout.snippets import Tabs
 from ezcharts.plots import BokehPlot
 import numpy as np
 import pandas as pd
 
-from .differential_plots import DifferentialResult, _display_labels
+from .differential_plots import (
+    DifferentialResult,
+    _display_labels,
+    cluster_heatmap_rows,
+)
 from .gsva_plots import GSVAResult
 
 
 GENE_SET_RESOLUTION_FILE = "gene_set_resolution.tsv"
-MAX_GENE_LEGEND_MEMBERS = 20
-TEMPORAL_CAVEAT = (
-    "This is a descriptive summary of independent biological replicates. "
-    "Lines connect sampled minutes but do not estimate expression between them. "
-    "GSVA enrichment is relative to this dataset and does not establish pathway "
-    "activity or causality; bulk-expression trends may reflect composition, batch, "
-    "or other variables confounded with time."
-)
+TEMPORAL_CAVEAT = "Descriptive only. Heatmap colors are gene-wise z-scores."
 
 
 @dataclass
@@ -407,7 +403,7 @@ def prepare_temporal_gene_expression(
     data: TemporalResult,
     gene_set: str,
 ) -> pd.DataFrame:
-    """Summarize each scored member's log CPM at every elapsed minute."""
+    """Summarize and row-standardize each member's temporal log-CPM profile."""
     if gene_set not in data.members:
         raise ValueError(f"Unknown temporal gene set: {gene_set}")
     rows = []
@@ -417,7 +413,9 @@ def prepare_temporal_gene_expression(
         ):
             samples = time_rows["sample"].tolist()
             values = data.log_cpm.loc[feature_id, samples].to_numpy(dtype=float)
-            standard_deviation = float(np.std(values, ddof=1)) if len(values) > 1 else np.nan
+            standard_deviation = (
+                float(np.std(values, ddof=1)) if len(values) > 1 else np.nan
+            )
             rows.append(
                 {
                     "feature_id": feature_id,
@@ -435,102 +433,114 @@ def prepare_temporal_gene_expression(
     summary["sd_label"] = summary["sd_log_cpm"].map(
         lambda value: "unavailable (n=1)" if pd.isna(value) else f"{value:.3f}"
     )
+    gene_means = summary.groupby("feature_id", sort=False)["mean_log_cpm"].transform(
+        "mean"
+    )
+    gene_standard_deviations = summary.groupby("feature_id", sort=False)[
+        "mean_log_cpm"
+    ].transform("std")
+    summary["z_score"] = (
+        summary["mean_log_cpm"]
+        .sub(gene_means)
+        .div(gene_standard_deviations.replace(0, np.nan))
+        .fillna(0.0)
+    )
+    summary["time_label"] = summary["time_minutes"].astype(str)
     return summary
 
 
-def _member_colors(members: tuple[str, ...]) -> dict[str, str]:
-    if len(members) == 1:
-        return {members[0]: Turbo256[128]}
-    return {
-        feature_id: Turbo256[index * 255 // (len(members) - 1)]
-        for index, feature_id in enumerate(members)
-    }
+def prepare_temporal_gene_heatmap(
+    data: TemporalResult,
+    gene_set: str,
+) -> tuple[pd.DataFrame, list[str]]:
+    """Prepare hover data and cluster genes by standardized temporal profile."""
+    summary = prepare_temporal_gene_expression(data, gene_set)
+    members = list(data.members[gene_set])
+    times = sorted(summary["time_minutes"].unique())
+    z_scores = (
+        summary.pivot(index="feature_id", columns="time_minutes", values="z_score")
+        .loc[members, times]
+        .fillna(0.0)
+    )
+    feature_order = cluster_heatmap_rows(z_scores)
+
+    labels = summary.drop_duplicates("feature_id").set_index("feature_id")[
+        "display_label"
+    ]
+    duplicate_labels = labels.duplicated(keep=False)
+    row_labels = labels.astype(str).to_dict()
+    for feature_id in labels.index[duplicate_labels]:
+        row_labels[feature_id] = f"{labels.at[feature_id]} ({feature_id})"
+    summary["row_label"] = summary["feature_id"].map(row_labels)
+    summary["cluster_order"] = summary["feature_id"].map(
+        {feature_id: index for index, feature_id in enumerate(feature_order)}
+    )
+    summary = summary.sort_values(
+        ["cluster_order", "time_minutes"], kind="mergesort"
+    ).reset_index(drop=True)
+    return summary, feature_order
 
 
 def create_temporal_gene_plot(
     data: TemporalResult,
     gene_set: str,
 ) -> BokehPlot:
-    """Create per-gene mean log-CPM trajectories with SD whiskers."""
-    summary = prepare_temporal_gene_expression(data, gene_set)
-    members = data.members[gene_set]
-    colors = _member_colors(members)
+    """Create a clustered gene-by-time heatmap of temporal expression profiles."""
+    summary, feature_order = prepare_temporal_gene_heatmap(data, gene_set)
+    row_labels = (
+        summary.drop_duplicates("feature_id")
+        .set_index("feature_id")["row_label"]
+        .to_dict()
+    )
+    time_order = [str(value) for value in sorted(summary["time_minutes"].unique())]
+    z_limit = max(float(summary["z_score"].abs().max()), 1.0)
+    mapper = LinearColorMapper(
+        palette=cc.b_diverging_bwr_20_95_c54,
+        low=-z_limit,
+        high=z_limit,
+    )
+    plot_height = max(420, min(1200, 20 * len(feature_order) + 120))
     plot = BokehPlot(
         title=f"Gene expression over time — {gene_set}",
+        x_range=time_order,
+        y_range=list(
+            reversed([row_labels[feature_id] for feature_id in feature_order])
+        ),
+        x_axis_location="above",
         x_axis_label="Elapsed time (min)",
-        y_axis_label="log2(TMM-normalized CPM + 1)",
-        height=560,
+        y_axis_label="Gene",
+        height=plot_height,
         sizing_mode="stretch_width",
         tools="pan,wheel_zoom,box_zoom,save,reset",
     )
-    times = np.sort(summary["time_minutes"].unique())
-    cap_width = float(np.diff(times).min()) * 0.02
-    hover_renderers = []
-    legend_items = []
-    for feature_id in members:
-        feature_rows = summary.loc[
-            summary["feature_id"].eq(feature_id)
-        ].sort_values("time_minutes", kind="mergesort")
-        source = ColumnDataSource(feature_rows)
-        color = colors[feature_id]
-        line = plot._fig.line(
-            "time_minutes",
-            "mean_log_cpm",
-            source=source,
-            line_color=color,
-            line_width=2,
-            line_alpha=0.75,
-            muted_alpha=0.08,
-            hover_line_width=4,
-            hover_line_alpha=1,
-        )
-        points = plot._fig.scatter(
-            "time_minutes",
-            "mean_log_cpm",
-            source=source,
-            size=7,
-            fill_color=color,
-            fill_alpha=0.85,
-            line_color="white",
-            muted_alpha=0.08,
-        )
-        finite = feature_rows.loc[feature_rows["sd_log_cpm"].notna()].copy()
-        finite["cap_left"] = finite["time_minutes"] - cap_width
-        finite["cap_right"] = finite["time_minutes"] + cap_width
-        error_renderers = _add_error_bars(
-            plot._fig,
-            ColumnDataSource(finite),
-            color=color,
-        )
-        hover_renderers.extend([line, points])
-        if len(members) <= MAX_GENE_LEGEND_MEMBERS:
-            legend_items.append(
-                LegendItem(
-                    label=data.feature_labels.get(feature_id, feature_id),
-                    renderers=[line, points, *error_renderers],
-                )
-            )
-
+    source = ColumnDataSource(summary)
+    cells = plot._fig.rect(
+        x="time_label",
+        y="row_label",
+        width=0.98,
+        height=0.98,
+        source=source,
+        fill_color={"field": "z_score", "transform": mapper},
+        line_color=None,
+    )
     plot._fig.add_tools(
         HoverTool(
-            renderers=hover_renderers,
-            line_policy="nearest",
+            renderers=[cells],
             tooltips=[
                 ("Gene", "@display_label"),
                 ("Feature ID", "@feature_id"),
                 ("Group", "@group"),
                 ("Time", "@time_minutes min"),
+                ("Gene z-score", "@z_score{0.000}"),
                 ("Mean log CPM", "@mean_log_cpm{0.000}"),
                 ("SD", "@sd_label"),
                 ("Replicates", "@n"),
             ],
         )
     )
-    if legend_items:
-        legend = Legend(items=legend_items, title="Gene", click_policy="hide")
-        plot._fig.add_layout(legend, "right")
-    plot._fig.grid.grid_line_alpha = 0.15
-    plot.report_height = 600
+    plot._fig.add_layout(ColorBar(color_mapper=mapper, title="Gene z-score"), "right")
+    plot._fig.grid.grid_line_color = None
+    plot.report_height = plot_height
     return plot
 
 
@@ -542,24 +552,8 @@ def create_temporal_view(
     """Stack the pathway- and gene-level temporal figures with interpretation."""
     score_plot = create_temporal_score_plot(data, gene_set, condition_colors)
     gene_plot = create_temporal_gene_plot(data, gene_set)
-    has_singletons = data.metadata.groupby("time_minutes").size().eq(1).any()
-    singleton_note = (
-        " SD is unavailable and omitted for time points with one replicate."
-        if has_singletons
-        else ""
-    )
-    large_set_note = (
-        " This gene set has more than 20 scored genes, so its oversized legend "
-        "is omitted; hover over a line or point to identify it."
-        if len(data.members[gene_set]) > MAX_GENE_LEGEND_MEMBERS
-        else ""
-    )
     note = Div(
-        text=(
-            "<p><strong>Descriptive temporal view.</strong> "
-            + escape(TEMPORAL_CAVEAT + singleton_note + large_set_note)
-            + "</p>"
-        ),
+        text=f"<p>{TEMPORAL_CAVEAT}</p>",
         sizing_mode="stretch_width",
     )
     combined = BokehPlot()
@@ -569,7 +563,7 @@ def create_temporal_view(
         gene_plot._fig,
         sizing_mode="stretch_width",
     )
-    combined.report_height = 1160
+    combined.report_height = score_plot.report_height + gene_plot.report_height + 80
     return combined
 
 
