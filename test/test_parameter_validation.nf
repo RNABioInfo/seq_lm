@@ -30,7 +30,7 @@ workflow {
         de_padj_cutoff: 0.05,
         min_read_count: 10000,
         min_replicate_sample_count: 2,
-        stability_analysis_behavior: 'terminate',
+        monitoring_behavior: 'terminate',
         differential_expression: true,
         live_analysis: true,
         minknow_host: 'minknow.local',
@@ -41,8 +41,6 @@ workflow {
         num_stable_batches: 3,
         stability_max_feature_diff_fraction: 0.05,
         stability_min_jaccard_similarity: 0.95,
-        stability_max_call_churn_fraction: 0.05,
-        stability_max_lost_call_fraction: 0.05,
         stability_max_median_abs_lfc_delta: 0.05,
         stability_min_de_calls_for_fraction_metrics: 20,
         stability_max_small_set_call_changes: 2,
@@ -53,10 +51,10 @@ workflow {
     ]
 
     validate_parameters(base)
-    validate_parameters(base + [stability_analysis_behavior: 'disabled', minknow_client_certificate: null, minknow_client_private_key: null, minknow_ca_certificate: null])
-    validate_parameters(base + [stability_analysis_behavior: 'log', minknow_client_certificate: null, minknow_client_private_key: null, minknow_ca_certificate: null])
-    validate_parameters(base + [differential_expression: false, stability_analysis_behavior: 'disabled'])
-    validate_parameters(base + [differential_expression: false, stability_analysis_behavior: 'disabled', reference_genome: null, reference_annotation: null])
+    validate_parameters(base + [monitoring_behavior: 'disabled', minknow_client_certificate: null, minknow_client_private_key: null, minknow_ca_certificate: null])
+    validate_parameters(base + [monitoring_behavior: 'log', minknow_client_certificate: null, minknow_client_private_key: null, minknow_ca_certificate: null])
+    validate_parameters(base + [differential_expression: false, monitoring_behavior: 'disabled'])
+    validate_parameters(base + [differential_expression: false, monitoring_behavior: 'disabled', reference_genome: null, reference_annotation: null])
 
     assert_validation_error(base + [minknow_host: '  '], 'non-empty --minknow_host')
     assert_validation_error(base + [minknow_port: 0], '--minknow_port must be between')
@@ -69,11 +67,11 @@ workflow {
         '--minknow_client_certificate must point to an existing regular file',
     )
     assert_validation_error(
-        base + [differential_expression: false, stability_analysis_behavior: 'disabled', reference_annotation: null],
+        base + [differential_expression: false, monitoring_behavior: 'disabled', reference_annotation: null],
         '--reference_genome and --reference_annotation must be supplied together',
     )
     assert_validation_error(
-        base + [differential_expression: false, stability_analysis_behavior: 'disabled', reference_genome: null],
+        base + [differential_expression: false, monitoring_behavior: 'disabled', reference_genome: null],
         '--reference_genome and --reference_annotation must be supplied together',
     )
 

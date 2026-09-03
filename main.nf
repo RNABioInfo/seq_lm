@@ -228,7 +228,7 @@ process qc_report {
             ${gene_set_args} \
             ${readiness_args} \
             ${stability_args} \
-            --stability-behavior ${params.stability_analysis_behavior} \
+            --stability-behavior ${params.monitoring_behavior} \
             --lfc-cutoff ${params.de_lfc_cutoff} \
             --padj-cutoff ${params.de_padj_cutoff}
         """
@@ -288,6 +288,7 @@ workflow sample_pipeline {
 
     merged_chunk_bam_ch = prepare_chunk_bam(sample_chunk_bam_group_ch)
     qc_result_ch = quality_control(merged_chunk_bam_ch)
+    
     if (quantification_enabled) {
         quantification(
             merged_chunk_bam_ch,
@@ -596,7 +597,7 @@ workflow {
         sample_sheet_path: params.sample_sheet ? file(params.sample_sheet) : null,
         bam_poll_interval_ms: (params.bam_poll_interval_seconds as Integer) * 1000,
         bam_stability_polls: params.bam_stability_polls as Integer,
-        termination_requested: params.stability_analysis_behavior == 'terminate',
+        termination_requested: params.monitoring_behavior == 'terminate',
     )
     all_samples = get_samples(ingress_args)
     validate_samples(all_samples)
@@ -616,20 +617,18 @@ workflow {
         ? next_analysis_snapshot_index(output_root)
         : 0
     stability_parameter_values = [
-        behavior: params.stability_analysis_behavior as String,
+        behavior: params.monitoring_behavior as String,
         num_stable_batches: params.num_stable_batches as Integer,
         max_feature_diff_fraction: params.stability_max_feature_diff_fraction,
         max_median_abs_lfc_delta: params.stability_max_median_abs_lfc_delta,
         min_jaccard_similarity: params.stability_min_jaccard_similarity,
-        max_call_churn_fraction: params.stability_max_call_churn_fraction,
-        max_lost_call_fraction: params.stability_max_lost_call_fraction,
         max_fdr: params.de_padj_cutoff,
         min_abs_lfc: params.de_lfc_cutoff,
         min_de_calls_for_fraction_metrics: params.stability_min_de_calls_for_fraction_metrics as Integer,
         max_small_set_call_changes: params.stability_max_small_set_call_changes as Integer,
     ]
     stability_parameter_values.config = stability_config(stability_parameter_values, all_samples)
-    initial_stability_state = params.stability_analysis_behavior == 'disabled'
+    initial_stability_state = params.monitoring_behavior == 'disabled'
         ? [previous_results: optional_file(), streaks: [:], eligible: [:]]
         : discover_stability_state(
             output_root,
@@ -677,7 +676,7 @@ workflow {
         params.min_replicate_sample_count,
         all_samples,
         checkpoint_state.active,
-        params.stability_analysis_behavior,
+        params.monitoring_behavior,
         stability_parameter_values,
         initial_stability_state,
         minknow_connection,

@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema",
   "$id": "https://raw.githubusercontent.com/RNABioInfo/seq_lm/master/nextflow_schema.json",
   "title": "RNABioInfo/seq_lm",
-  "description": "Live quality-control and differential-expression analysis of Oxford Nanopore BAM data.",
+  "description": "Live QC and differential-expression analysis of ONT transcriptome sequencing data.",
   "url": "https://github.com/RNABioInfo/seq_lm",
   "type": "object",
   "definitions": {
@@ -46,20 +46,6 @@
           "fa_icon": "fas fa-stream",
           "description": "Process samples according to the order values in the sample sheet.",
           "help_text": "When enabled, every sample-sheet row must provide an order value."
-        },
-        "differential_expression": {
-          "type": "boolean",
-          "default": true,
-          "fa_icon": "fas fa-chart-line",
-          "description": "Run differential-expression analysis from Oarfish transcript quantifications.",
-          "help_text": "Disable this option to omit differential analysis. Oarfish quantification still runs when both reference genome and annotation inputs are supplied."
-        },
-        "gene_set_enrichment": {
-          "type": "boolean",
-          "default": true,
-          "fa_icon": "fas fa-project-diagram",
-          "description": "Run fry and GSVA gene-set enrichment after differential expression.",
-          "help_text": "This option requires differential_expression. The gene_sets input is required only when this option is enabled."
         }
       },
       "required": [
@@ -101,6 +87,32 @@
       "fa_icon": "fas fa-chart-line",
       "description": "Significance thresholds used by edgeR and the differential-analysis report.",
       "properties": {
+        "differential_expression": {
+          "type": "boolean",
+          "default": true,
+          "fa_icon": "fas fa-chart-line",
+          "description": "Run differential-expression analysis from Oarfish transcript quantifications.",
+          "help_text": "Disable this option to omit differential analysis. Oarfish quantification still runs when both reference genome and annotation inputs are supplied."
+        },
+        "gene_set_enrichment": {
+          "type": "boolean",
+          "default": true,
+          "fa_icon": "fas fa-project-diagram",
+          "description": "Run fry and GSVA gene-set enrichment after differential expression.",
+          "help_text": "This option requires differential_expression. The gene_sets input is required only when this option is enabled."
+        },
+        "min_read_count": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 10000,
+          "description": "Precondition of minimum total assigned reads required for a sample to run a DEA analysis."
+        },
+        "min_replicate_sample_count": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 2,
+          "description": " Precondition of minimum number of samples per group that must satisfy the DEA read-count threshold."
+        },
         "de_lfc_cutoff": {
           "type": "number",
           "minimum": 0,
@@ -113,30 +125,26 @@
           "maximum": 1,
           "default": 0.05,
           "description": "Maximum edgeR false-discovery rate used to classify significant results."
-        },
-        "min_read_count": {
-          "type": "integer",
-          "minimum": 0,
-          "default": 10000,
-          "description": "Minimum total assigned reads required for a sample to count toward DEA readiness."
-        },
-        "min_replicate_sample_count": {
-          "type": "integer",
-          "minimum": 1,
-          "default": 2,
-          "description": "Minimum number of samples per group that must satisfy the DEA read-count threshold."
-        },
-        "stability_analysis_behavior": {
+        }
+      }
+    },
+    "run_monitoring_options": {
+      "title": "Run Monitoring Options",
+      "type": "object",
+      "fa_icon": "fas fa-chart-line",
+      "description": "Run monitoring allows to automatically terminate a run, after sufficient sequencing depth is reached.",
+      "properties": {
+        "monitoring_behavior": {
           "type": "string",
           "enum": ["disabled", "log", "terminate"],
           "default": "disabled",
-          "description": "Response when every contrast involving a live sample has remained stable: disable assessment, log a dry-run event, or stop the corresponding MinKNOW run and create a STOP marker."
+          "description": "Action when for a live sample all given contrasts are stable. Options: disabled = No action, log = Log to the console when an acquisition whould be terminated, stop = acquisition is terminated (requires Minknow credentials)"
         },
         "num_stable_batches": {
           "type": "integer",
           "minimum": 1,
           "default": 3,
-          "description": "Number of consecutive stable DE snapshot comparisons required before a sample is eligible to stop."
+          "description": "Number of consecutive stable snapshots required before a sample is eligible to stop."
         },
         "stability_max_feature_diff_fraction": {
           "type": "number",
@@ -148,40 +156,26 @@
         "stability_max_median_abs_lfc_delta": {
           "type": "number",
           "minimum": 0,
-          "default": 0.1,
+          "default": 0.05,
           "description": "Maximum median absolute change in log2 fold change between DE snapshots."
         },
         "stability_min_jaccard_similarity": {
           "type": "number",
           "minimum": 0,
           "maximum": 1,
-          "default": 0.9,
+          "default": 0.95,
           "description": "Minimum Jaccard similarity of sufficiently large DE-call sets."
-        },
-        "stability_max_call_churn_fraction": {
-          "type": "number",
-          "minimum": 0,
-          "maximum": 1,
-          "default": 0.1,
-          "description": "Maximum fraction of DE calls added or lost between snapshots."
-        },
-        "stability_max_lost_call_fraction": {
-          "type": "number",
-          "minimum": 0,
-          "maximum": 1,
-          "default": 0.1,
-          "description": "Maximum fraction of prior DE calls absent from the current snapshot."
         },
         "stability_min_de_calls_for_fraction_metrics": {
           "type": "integer",
           "minimum": 1,
           "default": 20,
-          "description": "DE-call union size at which fractional set-stability metrics replace the small-set absolute-change rule."
+          "description": "DE-call union size at which fractional set-stability metrics replace the stability_max_small_set_call_changes rule."
         },
         "stability_max_small_set_call_changes": {
           "type": "integer",
           "minimum": 0,
-          "default": 2,
+          "default": 1,
           "description": "Maximum absolute DE-call transitions allowed when the call union is small."
         }
       }
@@ -230,17 +224,17 @@
         "minknow_client_certificate": {
           "type": "string",
           "format": "path",
-          "description": "PEM-encoded client certificate chain used by seq-run-manager. Required only when stability_analysis_behavior is terminate."
+          "description": "PEM-encoded client certificate chain used by seq-run-manager. Required only when monitoring_behavior is terminate."
         },
         "minknow_client_private_key": {
           "type": "string",
           "format": "path",
-          "description": "PEM-encoded client private key used by seq-run-manager. Required only when stability_analysis_behavior is terminate."
+          "description": "PEM-encoded client private key used by seq-run-manager. Required only when monitoring_behavior is terminate."
         },
         "minknow_ca_certificate": {
           "type": "string",
           "format": "path",
-          "description": "PEM-encoded MinKNOW root CA certificate used by seq-run-manager. Required only when stability_analysis_behavior is terminate."
+          "description": "PEM-encoded MinKNOW root CA certificate used by seq-run-manager. Required only when monitoring_behavior is terminate."
         }
       }
     },
@@ -388,11 +382,11 @@
     {
       "if": {
         "properties": {
-          "stability_analysis_behavior": {
+          "monitoring_behavior": {
             "enum": ["log", "terminate"]
           }
         },
-        "required": ["stability_analysis_behavior"]
+        "required": ["monitoring_behavior"]
       },
       "then": {
         "properties": {
@@ -405,11 +399,11 @@
     {
       "if": {
         "properties": {
-          "stability_analysis_behavior": {
+          "monitoring_behavior": {
             "const": "terminate"
           }
         },
-        "required": ["stability_analysis_behavior"]
+        "required": ["monitoring_behavior"]
       },
       "then": {
         "properties": {

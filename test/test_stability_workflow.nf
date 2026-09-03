@@ -57,8 +57,6 @@ workflow {
         max_feature_diff_fraction: 0.05,
         max_median_abs_lfc_delta: 0.1,
         min_jaccard_similarity: 0.9,
-        max_call_churn_fraction: 0.1,
-        max_lost_call_fraction: 0.1,
         max_fdr: 0.05,
         min_abs_lfc: 1.0,
         min_de_calls_for_fraction_metrics: 20,

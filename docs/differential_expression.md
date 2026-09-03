@@ -45,7 +45,7 @@ its `is_live` value are true. Consequently, `--live_analysis=false` processes
 every sample once and exits. Every final sample must have at least one BAM at
 startup, while live samples may begin empty.
 
-### Extending an experiment across workflow invocations
+## Extending an experiment across workflow invocations
 
 Completed sample-level work is persisted below the directory supplied through
 `--out_dir`. After a sample's input stream closes normally (including a
@@ -97,7 +97,7 @@ which rebuilds the current count matrix for every complete live batch.
 
 ### Differential-expression stability
 
-`--stability_analysis_behavior` controls automatic depth decisions and defaults
+`--monitoring_behavior` controls automatic depth decisions and defaults
 to `disabled`. `log` performs a dry run and records when a sample would stop.
 `terminate` uses the sample's discovered MinKNOW `protocol_run_id` to call
 `seq-run-manager stop`, then atomically creates `STOP` in that sample's
@@ -114,7 +114,7 @@ do not create `STOP`, and retry after the next stable batch.
 
 Every successful edgeR snapshot is compared with the previous successful
 snapshot. The checks cover filtered-feature identity, median absolute logFC
-change, and DE-call similarity, churn, and loss. Deferred DEA-readiness batches
+change, and DE-call Jaccard similarity. Deferred DEA-readiness batches
 neither increment nor reset stability. The first successful snapshot is only a
 baseline. With the default `--num_stable_batches 3`, at least four successful
 edgeR snapshots are therefore required.

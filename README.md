@@ -1,64 +1,135 @@
-# Workflow template
+# seq_lm
 
-This repository contains a [nextflow](https://www.nextflow.io/) workflow
-template that can be used as the basis for creating new workflows.
+`seq_lm` is a Nextflow workflow for live or one-shot analysis of aligned Oxford
+Nanopore transcriptome sequencing data. It watches per-sample BAM directories,
+updates quality-control and expression analyses as stable BAM files arrive, and
+publishes a single interactive HTML report throughout the experiment.
 
-> This workflow is not intended to be used by end users.
+The workflow supports:
 
-## Introduction
+- chunk-level read and alignment quality control with NanoGet and `samtools`;
+- cumulative transcript quantification with Oarfish;
+- annotation-based transcript-biotype composition;
+- differential-expression analysis with edgeR;
+- directional gene-set testing with edgeR `fry` and sample-level scoring with
+  GSVA; and
+- optional monitoring that records when results stabilize or asks MinKNOW to
+  stop eligible acquisitions.
 
-This section of documentation typically contains an overview of the workflow in terms of motivation
-and bioinformatics methods, listing any key tools or algorithms employed, whilst also describing its
-range of use-cases and what a suitable input dataset should look like.
+The input BAMs must already be aligned to the genome represented by the supplied
+reference FASTA and annotation. Live results are provisional: expression and
+enrichment statistics are recalculated as additional reads arrive.
+
+## Analysis modes
+
+Reference inputs and analysis switches determine which parts of the workflow
+run. `--differential_expression` and `--gene_set_enrichment` both default to
+`true`.
+
+| Mode | Required inputs and options | Main results |
+| --- | --- | --- |
+| Quality control only | Sample sheet; set `--differential_expression=false --gene_set_enrichment=false` and omit both references | Per-chunk QC and the integrated report |
+| QC, quantification, and biotypes | Sample sheet, reference FASTA, and GTF/GFF3; set `--differential_expression=false --gene_set_enrichment=false` | QC, cumulative Oarfish quantification, and transcript-biotype composition |
+| Differential expression | Sample sheet, reference FASTA, and GTF/GFF3; set `--gene_set_enrichment=false` | QC, quantification, biotypes, and edgeR contrasts |
+| Full analysis | Sample sheet, reference FASTA, GTF/GFF3, and GMT gene sets | QC, quantification, edgeR, fry, and GSVA |
+
+`--reference_genome` and `--reference_annotation` must always be supplied
+together. Gene-set enrichment requires differential expression and a
+`--gene_sets` GMT file.
 
 ## Quickstart
 
-The workflow uses [nextflow](https://www.nextflow.io/) to manage compute and
-software resources, as such nextflow will need to be installed before attempting
-to run the workflow.
+### Requirements and platform support
 
-Create the host environment with Conda or Mamba:
+- [Nextflow](https://www.nextflow.io/) **26.04.3 or newer** and Java 17.
+- [Docker](https://www.docker.com/products/docker-desktop/) for the default
+  `standard` profile, or
+  [Singularity/Apptainer](https://docs.sylabs.io/guides/latest/user-guide/) for
+  the `singularity` profile.
+- Linux, macOS, or Windows through WSL2.
+
+Nextflow 26 is required because the workflow uses Nextflow's static type system
+and strict syntax. On Windows, this workflow must be launched from a Nextflow 26
+installation inside **WSL2**; launching it from the EPI2ME Desktop UI on Windows
+is not supported. Use Linux paths in WSL, for example `/mnt/c/data/experiment`,
+and enable Docker Desktop's WSL integration when using Docker.
+
+On Linux and macOS, the workflow can be launched either from the command line or
+through EPI2ME Desktop. The repository's Conda environment installs the required
+host-side Nextflow, Java, OpenSSL, MinKNOW API, and utility dependencies. The
+analysis programs themselves remain isolated in versioned Docker or Singularity
+containers.
+
+### 1. Install the host environment
+
+Clone the canonical repository and create the environment with Conda or Mamba:
 
 ```bash
+git clone https://github.com/RNABioInfo/seq_lm.git
+cd seq_lm
 conda env create --file environment.yml
 conda activate seq-lm
 ```
 
-To update an existing installation after `environment.yml` changes:
+Update an existing environment after `environment.yml` changes with:
 
 ```bash
 conda env update --file environment.yml --prune
+conda activate seq-lm
 ```
 
-The environment supports Linux, macOS, and Windows through WSL. It installs
-Nextflow, Java, OpenSSL, the MinKNOW Python API, and host-side test utilities.
-Workflow analysis processes still require Docker or Singularity/Apptainer;
-their specialized Python, R, and bioinformatics dependencies remain in the
-versioned process containers.
+Confirm the runtime and container engine before starting an analysis:
 
-The workflow can currently be run using either
-[Docker](https://www.docker.com/products/docker-desktop) or
-[Singularity](https://docs.sylabs.io/guides/latest/user-guide/) to provide isolation of
-the required software. Both methods are automated out-of-the-box provided
-either Docker or Singularity is installed.
-
-It is not required to clone or download the git repository in order to run the workflow.
-For more information on running EPI2ME Labs workflows [visit out website](https://labs.epi2me.io/wfindex).
-
-**Workflow options**
-
-To obtain the workflow, having installed `nextflow`, users can run:
-
-```
-nextflow run epi2me-labs/wf-template --help
+```bash
+nextflow -version
+docker run --rm hello-world
+nextflow run . --help
 ```
 
-to see the options for the workflow.
+The reported Nextflow version must be at least `26.04.3`. If using
+Singularity/Apptainer, verify that runtime instead of Docker and select
+`-profile singularity` in the commands below.
 
-### Sample sheet
+### 2. Use Nextflow 26 in EPI2ME Desktop on Linux or macOS
 
-Pass a comma-separated sample sheet with `--sample_sheet`. The header names are
-case-sensitive. A sheet containing every supported field looks like this:
+EPI2ME Desktop may bundle an older Nextflow release. Fully quit EPI2ME, activate
+the `seq-lm` environment, and launch the application with `LABS_NXF_PATH`
+pointing to the Nextflow 26 executable.
+
+Linux:
+
+```bash
+conda activate seq-lm
+LABS_NXF_PATH="$(command -v nextflow)" /usr/lib/epi2me/EPI2ME
+```
+
+macOS:
+
+```bash
+conda activate seq-lm
+LABS_NXF_PATH="$(command -v nextflow)" /Applications/EPI2ME.app/Contents/MacOS/EPI2ME
+```
+
+Keep the terminal open while EPI2ME is running. Repeat this launch method after
+restarting the application so that it continues to use Nextflow 26.
+
+In EPI2ME:
+
+1. Open **Workflows**, choose **Import workflow**, and enter
+   `https://github.com/RNABioInfo/seq_lm`.
+2. Open `seq_lm` from **Installed workflows** and select **Run this workflow**.
+3. Complete the required input, reference, analysis, and output fields.
+4. Select **Launch workflow**, then monitor the run and open `qc_report.html`
+   from the results view.
+
+See the official
+[EPI2ME workflow import and launch guide](https://epi2me.nanoporetech.com/epi2me-docs/quickstart/)
+for general UI instructions.
+
+### 3. Prepare the sample sheet
+
+Pass a comma-separated sample sheet through `--sample_sheet`. Header names are
+case-sensitive.
 
 ```csv
 alias,group,bam_dir,is_live,order
@@ -68,153 +139,241 @@ treated_1,treated,/data/bams/treated_1,true,1
 treated_2,treated,/data/bams/treated_2,true,1
 ```
 
-| Field | Required | Accepted values | Meaning |
-| --- | --- | --- | --- |
-| `alias` | Yes | Non-empty text | Sample name used in reports and output paths. An alias must be unique within its `group`; the same alias may be used in different groups. |
-| `group` | Yes | Non-empty text | Experimental condition used for comparisons. At least two rows must belong to the `control` group (matched case-insensitively). Each non-control group is tested separately against the control group during differential-expression analysis. |
-| `bam_dir` | Yes | Path to an existing directory | Directory containing the sample's BAM files. BAMs ending in `.bam` are discovered recursively. The directory must exist when the workflow starts. |
-| `is_live` | No | `true`, `false`, or blank (case-insensitive) | Controls whether the directory is eligible to be watched for new BAMs. A missing or blank value defaults to `true`. A sample is watched only when both this value and `--live_analysis` are true. |
-| `order` | No | Integer | Timeline position for the sample. It may be omitted during normal analysis, but every row must provide it when `--timeline_analysis` is enabled. |
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `alias` | Yes | Sample name used in reports and output paths. It must be unique within its group. |
+| `group` | Yes | Experimental condition. At least two rows must use `control`, matched case-insensitively. Each other group is contrasted separately with the control group. |
+| `bam_dir` | Yes | Existing directory searched recursively for `.bam` files. The path must be visible to the selected container runtime. |
+| `is_live` | No | `true`, `false`, or blank, case-insensitively. Blank or missing values default to `true`. A row is watched only when this value and `--live_analysis` are both true. |
+| `order` | No | Integer timeline position. Every row must provide it when `--timeline_analysis` is enabled. |
 
-Samples that are watched may start with an empty `bam_dir`. Samples that are
-not effectively live, either because `is_live` is `false` or because
-`--live_analysis=false`, are processed once and must have at least one BAM at
-startup. Live directories are rescanned every `--bam_poll_interval_seconds`
-seconds. A new BAM is accepted only after its size and modification time remain
-unchanged for `--bam_stability_polls` consecutive scans (three by default).
-This polling approach also detects files written by Windows applications below
-WSL-mounted paths such as `/mnt/c`. The sample sheet must contain at least one
-row.
+Effectively live samples may start with an empty `bam_dir`. Samples that are not
+live are processed once and must contain at least one BAM when the workflow
+starts. A new live BAM is accepted only after its size and modification time are
+unchanged for `--bam_stability_polls` consecutive scans; the default is three
+polls at five-second intervals.
 
-At startup, the workflow also looks directly in each `bam_dir` parent for one
-file matching `*sample_sheet*.csv`. It matches the workflow `alias` to the
-MinKNOW sheet's `sample_id` and carries the corresponding `protocol_run_id`
-with that sample. Missing, ambiguous, or malformed MinKNOW sheets are nonfatal;
-when automatic termination is requested, the affected sample is reported as
-having termination disabled.
+Read identifiers must be globally unique across BAM chunks belonging to the
+same sample. Standard Nanopore UUID read identifiers normally satisfy this
+requirement.
 
-For example, run the workflow with:
+### 4. Run the workflow
 
-```bash
-nextflow run epi2me-labs/wf-template --sample_sheet samples.csv
-```
+The following commands use Docker through the default `standard` profile and
+place Nextflow intermediates and published results in explicit directories.
 
-### MinKNOW client certificates
-
-The sequencing run manager can generate a private client CA, a signed client
-certificate and private key, copy MinKNOW's root CA certificate, and optionally
-install the public client CA into a local MinKNOW installation:
-
-```bash
-seq-run-manager cert \
-    --minknow-client-certs-directory /path/to/minknow/conf/rpc-client-certs
-```
-
-Credentials are written to
-`~/.config/seq-run-manager/minknow` by default. Existing credentials are never
-replaced unless `--force` is supplied. The command requires `openssl`, supports
-Linux and macOS, and supports Windows-hosted MinKNOW when run inside WSL.
-
-The MinKNOW CA is auto-detected from its standard Linux, macOS, and WSL-mounted
-Windows locations. If MinKNOW uses a non-standard data directory, specify it:
-
-```bash
-seq-run-manager cert \
-    --ca-certificate-source /path/to/minknow/ca.crt \
-    --minknow-client-certs-directory /path/to/minknow/conf/rpc-client-certs
-```
-
-Under WSL, both Windows paths must be expressed as mounted Linux paths, for
-example `/mnt/c/data/rpc-certs/minknow/ca.crt` and the corresponding
-`/mnt/c/.../conf/rpc-client-certs` directory. Only the public client certificate
-is installed into MinKNOW; the generated client certificate chain and its
-private key remain in the credential output directory. Run the command as the
-normal WSL user, not with `sudo`. When the
-MinKNOW installation is protected by Windows ACLs, the command opens a Windows
-User Account Control prompt and performs only the public-certificate copy with
-Administrator privileges. MinKNOW may need to be restarted after installing or
-replacing a client certificate.
-
-### Starting and stopping MinKNOW acquisitions
-
-The run manager uses dedicated commands for starting and stopping acquisitions.
-`start` consumes the same CSV sample sheet as the workflow. It starts one
-acquisition per row, uses `alias` as the MinKNOW sample ID, and uses `bam_dir`
-as that acquisition's output location:
-
-```bash
-seq-run-manager start \
-    --host host.docker.internal \
-    --client-certificate-path ~/.config/seq-run-manager/minknow/minknow_cert.pem \
-    --client-private-key-path ~/.config/seq-run-manager/minknow/minknow_key.pem \
-    --ca-certificate-path ~/.config/seq-run-manager/minknow/minknow_cert.crt \
-    --samplesheet samples.csv \
-    --experiment-id experiment-1 \
-    --kit SQK-RNA004
-```
-
-Use `--position-ids` or `--flow-cell-ids` followed by one or more identifiers
-to select devices explicitly. Their order must match the sample-sheet row order.
-Without either option, the number of available positions must equal the number
-of rows.
-
-Stop an active acquisition using the run ID returned by MinKNOW:
-
-```bash
-seq-run-manager stop \
-    --host host.docker.internal \
-    --client-certificate-path ~/.config/seq-run-manager/minknow/minknow_cert.pem \
-    --client-private-key-path ~/.config/seq-run-manager/minknow/minknow_key.pem \
-    --ca-certificate-path ~/.config/seq-run-manager/minknow/minknow_cert.crt \
-    --run-id 1bc8bbfb-3ebb-4f94-914a-a3c6ae1d11f1
-```
-
-The workflow uses the same stop command when
-`--stability_analysis_behavior terminate` is selected. Supply all three
-credentials generated by `seq-run-manager cert`:
+#### Full live analysis
 
 ```bash
 nextflow run . \
-    --sample_sheet samples.csv \
-    --stability_analysis_behavior terminate \
+    -profile standard \
+    -w /path/to/seq_lm_work \
+    --sample_sheet /path/to/samples.csv \
+    --reference_genome /path/to/reference.fa \
+    --reference_annotation /path/to/annotation.gtf \
+    --gene_sets /path/to/pathways.gmt \
+    --out_dir /path/to/seq_lm_output
+```
+
+#### One-shot full analysis
+
+Process all BAMs present at startup and exit without watching for new files:
+
+```bash
+nextflow run . \
+    -profile standard \
+    -w /path/to/seq_lm_work \
+    --sample_sheet /path/to/samples.csv \
+    --live_analysis=false \
+    --reference_genome /path/to/reference.fa \
+    --reference_annotation /path/to/annotation.gtf \
+    --gene_sets /path/to/pathways.gmt \
+    --out_dir /path/to/seq_lm_output
+```
+
+#### Quality control only
+
+```bash
+nextflow run . \
+    -profile standard \
+    -w /path/to/seq_lm_qc_work \
+    --sample_sheet /path/to/samples.csv \
+    --differential_expression=false \
+    --gene_set_enrichment=false \
+    --out_dir /path/to/seq_lm_qc_output
+```
+
+#### Quantification and transcript-biotype QC
+
+```bash
+nextflow run . \
+    -profile standard \
+    -w /path/to/seq_lm_quant_work \
+    --sample_sheet /path/to/samples.csv \
+    --reference_genome /path/to/reference.fa \
+    --reference_annotation /path/to/annotation.gtf \
+    --differential_expression=false \
+    --gene_set_enrichment=false \
+    --out_dir /path/to/seq_lm_quant_output
+```
+
+#### Differential expression without gene-set enrichment
+
+```bash
+nextflow run . \
+    -profile standard \
+    -w /path/to/seq_lm_de_work \
+    --sample_sheet /path/to/samples.csv \
+    --reference_genome /path/to/reference.fa \
+    --reference_annotation /path/to/annotation.gtf \
+    --gene_set_enrichment=false \
+    --out_dir /path/to/seq_lm_de_output
+```
+
+The GitHub-hosted workflow can also be launched without a local clone by
+replacing `.` with `RNABioInfo/seq_lm`. Pin a release or revision with
+Nextflow's `-r` option when reproducibility across future workflow updates is
+required.
+
+### 5. Finish a live analysis
+
+When no more BAMs will arrive for a live sample, create a `STOP` marker inside
+that sample's `bam_dir`:
+
+```bash
+touch /data/bams/treated_1/STOP
+```
+
+The workflow drains any pending stable BAMs, finalizes the sample, and removes
+it from later synchronization barriers. Create a marker for every remaining
+live sample so the workflow can complete normally and replace the live report
+shell with the final self-contained report.
+
+## Stability monitoring and MinKNOW termination
+
+`--monitoring_behavior` controls actions based on differential-expression
+stability:
+
+- `disabled` performs no stability action and is the default;
+- `log` records when each sample would become eligible to stop; and
+- `terminate` sends a stop request to the corresponding MinKNOW acquisition and
+  creates the local `STOP` marker only after MinKNOW confirms the request.
+
+Stability is assessed independently for every non-control-versus-control
+contrast. With the default `--num_stable_batches 3`, the first successful edgeR
+snapshot establishes a baseline, so at least four successful snapshots are
+needed before a sample can become eligible.
+
+Termination requires a client certificate, private key, and MinKNOW root CA.
+After activating the host environment, generate credentials with:
+
+```bash
+seq-run-manager cert \
+    --minknow-client-certs-directory /path/to/minknow/conf/rpc-client-certs
+```
+
+Then provide the generated files when launching the workflow:
+
+```bash
+nextflow run . \
+    -profile standard \
+    -w /path/to/seq_lm_work \
+    --sample_sheet /path/to/samples.csv \
+    --reference_genome /path/to/reference.fa \
+    --reference_annotation /path/to/annotation.gtf \
+    --gene_sets /path/to/pathways.gmt \
+    --monitoring_behavior terminate \
     --minknow_host host.docker.internal \
     --minknow_port 9501 \
     --minknow_client_certificate ~/.config/seq-run-manager/minknow/minknow_cert.pem \
     --minknow_client_private_key ~/.config/seq-run-manager/minknow/minknow_key.pem \
-    --minknow_ca_certificate ~/.config/seq-run-manager/minknow/minknow_cert.crt
+    --minknow_ca_certificate ~/.config/seq-run-manager/minknow/minknow_cert.crt \
+    --out_dir /path/to/seq_lm_output
 ```
 
-After MinKNOW confirms the stop request, the workflow creates the sample's
-local `STOP` marker. A failed stop request is warned about and retried after the
-next stable differential-expression batch; it does not create a marker.
+For termination, the direct parent of each `bam_dir` should contain exactly one
+file matching `*sample_sheet*.csv`. The workflow matches its `alias` to the
+MinKNOW sheet's `sample_id` to discover the `protocol_run_id`. Missing or
+ambiguous metadata disables termination for that sample without stopping the
+analysis. Failed stop requests are warned about and retried after the next
+stable batch.
 
-**Workflow outputs**
+See [Differential Expression Workflow](docs/differential_expression.md#differential-expression-stability)
+for stability metrics, audit fields, and certificate behavior.
 
-The primary outputs of the workflow include:
+## Outputs and continuing an experiment
 
-* a simple text file providing a summary of sequencing reads,
-* an HTML report document detailing the primary findings of the workflow.
+The main published results under `--out_dir` include:
 
-See [Quality Control Workflow](docs/quality_control.md) for the live QC report.
-See [Quantification and Transcript-biotype QC](docs/quantification.md) for
-automatic reference-enabled Oarfish quantification and annotation-based
-composition classification.
-See [Differential Expression Workflow](docs/differential_expression.md) for
-cumulative per-batch edgeR, fry, and GSVA refreshes. The reference genome and
-annotation must be supplied together. Their presence enables quantification
-and transcript-biotype QC even when differential expression is disabled;
-omitting both retains the current QC-only path. Gene-set enrichment requires
-differential expression, while its GMT input is optional whenever enrichment
-is disabled.
-Optional DE-stability monitoring can log sample-level stopping decisions or
-stop the corresponding MinKNOW acquisitions after every relevant contrast
-remains stable.
+```text
+qc_report.html
+qc_report_state.json
+qc_report_snapshot_<batch_index>.html
+<group>/<alias>/
+  FINAL
+  quantification/
+  qc/
+differential_expression/
+  batch_<batch_index>/
+  latest/
+stability/
+  batch_<analysis_index>/
+execution/
+  report.html
+  timeline.html
+  trace.txt
+```
 
+`qc_report.html` is the stable EPI2ME entry point. During live analysis it loads
+the newest complete immutable snapshot without reloading the outer page. After
+successful completion it is atomically replaced by the latest self-contained
+snapshot. Depending on the selected analysis mode, the report contains Quality
+Control, Transcript biotypes, Differential Analysis, Result Stability, and Gene
+Set Enrichment views.
 
+When a sample finishes, `seq_lm` persists its quantification and raw QC inputs
+and writes `FINAL` last. A later invocation using the same `--out_dir` validates
+and restores finalized samples, allowing new samples to extend an experiment
+without rerunning completed sample-level work. This mechanism is independent of
+Nextflow `-resume`. Changed BAMs, references, manifests, or derived artifacts
+cause validation to stop rather than silently reuse stale results. To recompute
+a finalized sample, remove its complete `<out_dir>/<group>/<alias>/` directory
+before launching a new run.
 
+See the detailed documentation for output contracts and interpretation:
 
-## Useful links
+- [Analysis report and quality control](docs/quality_control.md)
+- [Quantification and transcript-biotype QC](docs/quantification.md)
+- [Differential expression, fry, GSVA, stability, and checkpoints](docs/differential_expression.md)
 
-* [nextflow](https://www.nextflow.io/)
-* [docker](https://www.docker.com/products/docker-desktop)
-* [singularity](https://docs.sylabs.io/guides/latest/user-guide/)
+## Prokaryotic annotations
+
+NCBI prokaryotic GTF files often omit the transcript and exon records Oarfish
+needs for protein-coding targets. Convert such an annotation before using it:
+
+```bash
+bin/oarfish-gtf-convert genomic.gtf genomic.oarfish.gtf
+```
+
+The converter preserves declared RNA models and creates one gene-sized,
+single-exon transcript for each eligible protein-coding gene. It does not infer
+operons, transcript boundaries, or untranslated regions. Prefer an
+experimentally curated transcript annotation when those units matter.
+
+## Interpretation
+
+Differential-expression, fry, and GSVA results describe associations in the
+tested organism, conditions, and sampling design. They do not establish causal
+drivers, biochemical pathway activity, or biological mechanism. Results from
+live batches may change as sequencing depth and statistical power increase;
+use the final checkpoint for downstream interpretation.
+
+## License and links
+
+This project is distributed under the terms in [LICENSE](LICENSE).
+
+- [Workflow repository](https://github.com/RNABioInfo/seq_lm)
+- [Nextflow documentation](https://www.nextflow.io/docs/latest/)
+- [EPI2ME Desktop documentation](https://epi2me.nanoporetech.com/epi2me-docs/)
+- [Docker documentation](https://docs.docker.com/)
+- [SingularityCE user guide](https://docs.sylabs.io/guides/latest/user-guide/)

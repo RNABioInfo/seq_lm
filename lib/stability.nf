@@ -20,8 +20,6 @@ def stability_config(params_map: Map, samples: List<Sample>) -> Map {
         max_feature_diff_fraction: params_map.max_feature_diff_fraction,
         max_median_abs_lfc_delta: params_map.max_median_abs_lfc_delta,
         min_jaccard_similarity: params_map.min_jaccard_similarity,
-        max_call_churn_fraction: params_map.max_call_churn_fraction,
-        max_lost_call_fraction: params_map.max_lost_call_fraction,
         max_fdr: params_map.max_fdr,
         min_abs_lfc: params_map.min_abs_lfc,
         min_de_calls_for_fraction_metrics: params_map.min_de_calls_for_fraction_metrics,
@@ -228,8 +226,6 @@ workflow differential_stability {
         settings.max_feature_diff_fraction,
         settings.max_median_abs_lfc_delta,
         settings.min_jaccard_similarity,
-        settings.max_call_churn_fraction,
-        settings.max_lost_call_fraction,
         settings.max_fdr,
         settings.min_abs_lfc,
         settings.min_de_calls_for_fraction_metrics,
@@ -320,8 +316,6 @@ process assess_differential_stability {
     max_feature_diff_fraction: Number
     max_median_abs_lfc_delta: Number
     min_jaccard_similarity: Number
-    max_call_churn_fraction: Number
-    max_lost_call_fraction: Number
     max_fdr: Number
     min_abs_lfc: Number
     min_de_calls_for_fraction_metrics: Integer
@@ -354,8 +348,6 @@ process assess_differential_stability {
             --max-feature-diff-fraction ${max_feature_diff_fraction} \\
             --max-median-abs-lfc-delta ${max_median_abs_lfc_delta} \\
             --min-jaccard-similarity ${min_jaccard_similarity} \\
-            --max-call-churn-fraction ${max_call_churn_fraction} \\
-            --max-lost-call-fraction ${max_lost_call_fraction} \\
             --max-fdr ${max_fdr} \\
             --min-abs-lfc ${min_abs_lfc} \\
             --min-de-calls-for-fraction-metrics ${min_de_calls_for_fraction_metrics} \\
@@ -397,8 +389,8 @@ process finalize_stability_audit {
         'analysis_index', 'batch_index', 'baseline', 'contrast_id', 'target_group', 'reference_group',
         'current_de_call_count', 'previous_de_call_count', 'de_call_union_count', 'changed_de_call_count',
         'added_feature_fraction', 'dropped_feature_fraction', 'median_abs_lfc_delta', 'jaccard_similarity',
-        'call_churn_fraction', 'lost_call_fraction', 'feature_identity_stable', 'effect_size_stable',
-        'de_calls_stable', 'stable', 'consecutive_stable_batches', 'reason',
+        'feature_identity_stable', 'effect_size_stable', 'de_calls_stable', 'stable',
+        'consecutive_stable_batches', 'reason',
     ]
     def sample_columns: List<String> = [
         'analysis_index', 'batch_index', 'group', 'sample', 'bam_dir', 'protocol_run_id', 'effectively_live',

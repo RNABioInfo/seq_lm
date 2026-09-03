@@ -15,18 +15,18 @@ def validate_parameters(params_map: Map) -> Void {
     }
 
     def stability_behaviors: Set<String> = ['disabled', 'log', 'terminate'].toSet()
-    if (!stability_behaviors.contains(params_map.stability_analysis_behavior as String)) {
-        error('--stability_analysis_behavior must be disabled, log, or terminate.')
+    if (!stability_behaviors.contains(params_map.monitoring_behavior as String)) {
+        error('--monitoring_behavior must be disabled, log, or terminate.')
     }
-    if (params_map.stability_analysis_behavior != 'disabled' && !params_map.differential_expression) {
-        error('--stability_analysis_behavior requires --differential_expression.')
+    if (params_map.monitoring_behavior != 'disabled' && !params_map.differential_expression) {
+        error('--monitoring_behavior requires --differential_expression.')
     }
-    if (params_map.stability_analysis_behavior == 'terminate' && !params_map.live_analysis) {
-        error('--stability_analysis_behavior terminate requires --live_analysis.')
+    if (params_map.monitoring_behavior == 'terminate' && !params_map.live_analysis) {
+        error('--monitoring_behavior terminate requires --live_analysis.')
     }
-    if (params_map.stability_analysis_behavior == 'terminate') {
+    if (params_map.monitoring_behavior == 'terminate') {
         if (!params_map.minknow_host || !(params_map.minknow_host as String).trim()) {
-            error('--stability_analysis_behavior terminate requires a non-empty --minknow_host.')
+            error('--monitoring_behavior terminate requires a non-empty --minknow_host.')
         }
         def minknow_port: Integer = params_map.minknow_port as Integer
         if (minknow_port < 1 || minknow_port > 65535) {
@@ -40,7 +40,7 @@ def validate_parameters(params_map: Map) -> Void {
         credential_parameters.each { parameter_name: String ->
             def value: Object = params_map[parameter_name]
             if (!value || !"${value}".trim()) {
-                error("--stability_analysis_behavior terminate requires --${parameter_name}.")
+                error("--monitoring_behavior terminate requires --${parameter_name}.")
             }
             def credential_path: Path = file(value)
             if (!credential_path.exists() || !credential_path.isFile()) {
@@ -55,8 +55,6 @@ def validate_parameters(params_map: Map) -> Void {
     def fraction_stability_params: Map<String,Float> = [
         stability_max_feature_diff_fraction: params_map.stability_max_feature_diff_fraction,
         stability_min_jaccard_similarity: params_map.stability_min_jaccard_similarity,
-        stability_max_call_churn_fraction: params_map.stability_max_call_churn_fraction,
-        stability_max_lost_call_fraction: params_map.stability_max_lost_call_fraction,
     ]
     fraction_stability_params.each { name: String, value: Float ->
         if (value < 0 || value > 1) {

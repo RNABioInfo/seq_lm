@@ -68,8 +68,6 @@ class ContrastMetrics:
     dropped_feature_fraction: float
     median_abs_lfc_delta: float
     jaccard_similarity: float
-    call_churn_fraction: float
-    lost_call_fraction: float
     feature_identity_stable: bool
     effect_size_stable: bool
     de_calls_stable: bool
@@ -148,8 +146,6 @@ def argparser() -> ap.ArgumentParser:
     thresholds.add_argument("--max-feature-diff-fraction", required=True, type=_fraction_argument)
     thresholds.add_argument("--max-median-abs-lfc-delta", required=True, type=_nonnegative_float_argument)
     thresholds.add_argument("--min-jaccard-similarity", required=True, type=_fraction_argument)
-    thresholds.add_argument("--max-call-churn-fraction", required=True, type=_fraction_argument)
-    thresholds.add_argument("--max-lost-call-fraction", required=True, type=_fraction_argument)
     thresholds.add_argument("--max-fdr", required=True, type=_positive_fraction_argument)
     thresholds.add_argument("--min-abs-lfc", required=True, type=_nonnegative_float_argument)
     thresholds.add_argument("--min-de-calls-for-fraction-metrics", required=True, type=_positive_integer_argument)
@@ -209,38 +205,28 @@ def _significant_feature_ids(results: pd.DataFrame, max_fdr: float, min_abs_lfc:
     return set(results.loc[(fdr <= max_fdr) & (log_fc.abs() >= min_abs_lfc), "feature_id"])
 
 
-def call_metrics(max_fdr: float, min_abs_lfc: float, de_results: DEResults) -> tuple[set[str], set[str], int, int, float, float, float]:
+def call_metrics(max_fdr: float, min_abs_lfc: float, de_results: DEResults) -> tuple[set[str], set[str], int, int, float]:
     current = _significant_feature_ids(de_results.current_results, max_fdr, min_abs_lfc, "Current DE results")
     previous = _significant_feature_ids(de_results.previous_results, max_fdr, min_abs_lfc, "Previous DE results")
     union = current | previous
     changed = current ^ previous
     shared = current & previous
-    lost = previous - current
     return (
         current, previous, len(union), len(changed),
         len(shared) / len(union) if union else 1.0,
-        len(changed) / len(union) if union else 0.0,
-        len(lost) / len(previous) if previous else 0.0,
     )
 
 
 def de_calls_are_stable(
     min_jaccard_similarity: float,
-    max_call_churn_fraction: float,
-    max_lost_call_fraction: float,
     max_fdr: float,
     min_abs_lfc: float,
     min_de_calls_for_fraction_metrics: int,
     max_small_set_call_changes: int,
     de_results: DEResults,
 ) -> bool:
-    for name, value in {
-        "min_jaccard_similarity": min_jaccard_similarity,
-        "max_call_churn_fraction": max_call_churn_fraction,
-        "max_lost_call_fraction": max_lost_call_fraction,
-    }.items():
-        if not math.isfinite(value) or not 0 <= value <= 1:
-            raise ValueError(f"{name} must be finite and between 0 and 1.")
+    if not math.isfinite(min_jaccard_similarity) or not 0 <= min_jaccard_similarity <= 1:
+        raise ValueError("min_jaccard_similarity must be finite and between 0 and 1.")
     if not math.isfinite(max_fdr) or not 0 < max_fdr <= 1:
         raise ValueError("max_fdr must be finite, greater than 0, and at most 1.")
     if not math.isfinite(min_abs_lfc) or min_abs_lfc < 0:
@@ -249,10 +235,10 @@ def de_calls_are_stable(
         raise ValueError("min_de_calls_for_fraction_metrics must be at least 1.")
     if max_small_set_call_changes < 0:
         raise ValueError("max_small_set_call_changes must be nonnegative.")
-    _, _, union_count, changed_count, jaccard, churn, lost = call_metrics(max_fdr, min_abs_lfc, de_results)
+    _, _, union_count, changed_count, jaccard = call_metrics(max_fdr, min_abs_lfc, de_results)
     if union_count < min_de_calls_for_fraction_metrics:
         return changed_count <= max_small_set_call_changes
-    return jaccard >= min_jaccard_similarity and churn <= max_call_churn_fraction and lost <= max_lost_call_fraction
+    return jaccard >= min_jaccard_similarity
 
 
 def _safe_name(value: str) -> str:
@@ -316,7 +302,7 @@ def assess_results(previous_dir: pl.Path, current_dir: pl.Path, args: ap.Namespa
         target_group, reference_group = _contrast_groups(contrast_id, current_groups)
         de_results = DEResults.from_paths(current_paths[contrast_id], previous_paths[contrast_id])
         median_delta = effect_size_metrics(de_results)
-        current_calls, previous_calls, union_count, changed_count, jaccard, churn, lost = call_metrics(
+        current_calls, previous_calls, union_count, changed_count, jaccard = call_metrics(
             args.max_fdr, args.min_abs_lfc, de_results
         )
         effect_stable = math.isfinite(median_delta) and median_delta <= args.max_median_abs_lfc_delta
@@ -324,8 +310,6 @@ def assess_results(previous_dir: pl.Path, current_dir: pl.Path, args: ap.Namespa
             changed_count <= args.max_small_set_call_changes
             if union_count < args.min_de_calls_for_fraction_metrics
             else jaccard >= args.min_jaccard_similarity
-            and churn <= args.max_call_churn_fraction
-            and lost <= args.max_lost_call_fraction
         )
         checks = {
             "feature_identity": features.feature_identity_stable,
@@ -335,7 +319,7 @@ def assess_results(previous_dir: pl.Path, current_dir: pl.Path, args: ap.Namespa
         assessments.append(ContrastMetrics(
             contrast_id, target_group, reference_group, len(current_calls), len(previous_calls),
             union_count, changed_count, features.added_feature_fraction, features.dropped_feature_fraction,
-            median_delta, jaccard, churn, lost, checks["feature_identity"], checks["effect_size"],
+            median_delta, jaccard, checks["feature_identity"], checks["effect_size"],
             checks["de_calls"], all(checks.values()),
             "stable" if all(checks.values()) else ",".join(name for name, passed in checks.items() if not passed),
         ))
