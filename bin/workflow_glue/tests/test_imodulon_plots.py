@@ -398,6 +398,9 @@ def test_qc_report_adds_active_ica_timecourse_main_tab(tmp_path, monkeypatch):
     assert "Time course" in html
     assert "Differential activity" in html
     assert "Elapsed time (min)" in html
+    # The active ICA overview must contain a plot; plots in inactive nested tabs
+    # alone make a ready analysis look like a collection of tables.
+    assert html.count("Mean iModulon activity over elapsed time") == 2
     assert "Component signs and scales belong to the supplied model" in html
     assert "Search components" in html
     assert '"iModulon Analysis"' in html

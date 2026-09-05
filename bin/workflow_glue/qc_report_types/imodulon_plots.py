@@ -1133,6 +1133,25 @@ def add_imodulon_analysis(data: IModulonResult) -> None:
         validate_imodulon_timecourse(data)
     tabs = Tabs()
     with tabs.add_tab("Overview"):
+        # Put the most useful snapshot-wide visual in the initially active pane.
+        # Burying every figure in an inactive nested tab makes a successful ICA
+        # result appear to contain tables only when the main tab is first opened.
+        if data.ready:
+            contrasts = list(
+                data.differential.groupby(
+                    ["target_group", "control_group"], sort=False
+                )
+            )
+            if timecourse:
+                _wrap(create_time_heatmap(data))
+            elif len(contrasts) == 1:
+                (target, control), rows = contrasts[0]
+                _wrap(
+                    create_volcano(rows, f"{target} vs {control}", data.cutoff),
+                    530,
+                )
+            elif len(contrasts) > 1:
+                _wrap(create_multi_contrast_effects(data))
         DataTable.from_pandas(_overview(data), use_index=False)
         readiness = data.samples[
             ["sample_id", "alias", "group", "order", "assigned_abundance", "ready"]
