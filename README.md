@@ -145,7 +145,7 @@ treated_2,treated,/data/bams/treated_2,true,1
 | `group` | Yes | Experimental condition. At least two rows must use `control`, matched case-insensitively. Each other group is contrasted separately with the control group. |
 | `bam_dir` | Yes | Existing directory searched recursively for `.bam` files. The path must be visible to the selected container runtime. |
 | `is_live` | No | `true`, `false`, or blank, case-insensitively. Blank or missing values default to `true`. A row is watched only when this value and `--live_analysis` are both true. |
-| `order` | No | Signed integer elapsed time in minutes. Every row must provide it when `--timeline_analysis` is enabled. In temporal mode, each group is one independent-replicate time point: a group must have one order value and an order value must identify one group. |
+| `order` | No | Signed integer elapsed time in minutes. Every row must provide it when `--timeline_analysis` is enabled. With active ICA, including this column automatically enables ICA time-course analysis. In temporal mode, each group is one independent-replicate time point: a group must have one order value and an order value must identify one group. |
 
 Effectively live samples may start with an empty `bam_dir`. Samples that are not
 live are processed once and must contain at least one BAM when the workflow
@@ -354,6 +354,7 @@ See the detailed documentation for output contracts and interpretation:
 - [Analysis report and quality control](docs/quality_control.md)
 - [Quantification and transcript-biotype QC](docs/quantification.md)
 - [Differential expression, fry, GSVA, stability, and checkpoints](docs/differential_expression.md)
+- [Fixed-matrix iModulon projection and differential activity](docs/imodulon_analysis.md)
 
 ## Prokaryotic annotations
 

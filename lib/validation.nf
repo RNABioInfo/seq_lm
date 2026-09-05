@@ -1,6 +1,38 @@
 nextflow.enable.types = true
 
+def ica_analysis_enabled(params_map: Map) -> Boolean {
+    return params_map.ica_analysis != false && params_map.ica_matrix != null &&
+        "${params_map.ica_matrix}".trim() != ''
+}
+
 def validate_parameters(params_map: Map) -> Void {
+    if (params_map.ica_analysis != false && params_map.ica_gene_map && !params_map.ica_matrix) {
+        error('--ica_gene_map requires --ica_matrix.')
+    }
+    if (ica_analysis_enabled(params_map)) {
+        if (!params_map.reference_genome || !params_map.reference_annotation) {
+            error('--ica_matrix requires both --reference_genome and --reference_annotation.')
+        }
+        [ica_log_base: 2.0, ica_pseudocount: 1.0, ica_min_gene_coverage: 1.0,
+         ica_min_read_count: 10000, ica_padj_cutoff: 0.05].each { name: String, fallback ->
+            def value = params_map.containsKey(name) ? params_map[name] : fallback
+            if (!(value instanceof Number) || !Double.isFinite((value as Number).doubleValue())) {
+                error("--${name} must be a finite number.")
+            }
+            if (name == 'ica_log_base' && value <= 1) {
+                error('--ica_log_base must be greater than 1.')
+            }
+            if (name == 'ica_pseudocount' && value <= 0) {
+                error('--ica_pseudocount must be greater than 0.')
+            }
+            if (name in ['ica_min_gene_coverage', 'ica_padj_cutoff'] && (value <= 0 || value > 1)) {
+                error("--${name} must be greater than 0 and at most 1.")
+            }
+            if (name == 'ica_min_read_count' && (value < 0 || value != Math.floor((value as Number).doubleValue()))) {
+                error('--ica_min_read_count must be a nonnegative integer.')
+            }
+        }
+    }
     if (params_map.de_lfc_cutoff < 0) {
         error('--de_lfc_cutoff must be nonnegative.')
     }

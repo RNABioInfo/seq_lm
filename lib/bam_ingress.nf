@@ -64,6 +64,15 @@ def get_samples(ingress_args) -> List<Sample> {
     return attach_minknow_run_metadata(samples, ingress_args.termination_requested)
 }
 
+/** Return whether the sample-sheet header explicitly declares temporal order. */
+def sample_sheet_has_order_column(sample_sheet_path: Path) -> Boolean {
+    if (!sample_sheet_path.exists() || !sample_sheet_path.isFile()) {
+        return false
+    }
+    def rows: List = sample_sheet_path.splitCsv(header: true, strip: true).take(1)
+    return !rows.empty && rows[0].keySet().contains('order')
+}
+
 def parse_sample_sheet(ingress_args) -> List<Sample> {
     def required_fields: Set<String> = ["alias", "group", "bam_dir"].toSet()
 

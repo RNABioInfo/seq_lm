@@ -2,7 +2,7 @@
 
 nextflow.enable.types = true
 
-include { validate_parameters } from '../lib/validation.nf'
+include { validate_parameters; ica_analysis_enabled } from '../lib/validation.nf'
 
 def assert_validation_error(values: Map, expected_message: String) -> Void {
     try {
@@ -79,6 +79,32 @@ workflow {
         base + [timeline_analysis: true],
         '--timeline_analysis requires --gene_set_enrichment',
     )
+
+    def ica: Map = base + [monitoring_behavior: 'disabled', ica_matrix: root.resolve('weights.tsv'),
+        ica_log_base: 2.0, ica_pseudocount: 1.0, ica_min_gene_coverage: 1.0,
+        ica_min_read_count: 10000, ica_padj_cutoff: 0.05]
+    assert ica_analysis_enabled(ica)
+    assert ica_analysis_enabled(ica + [ica_analysis: true])
+    assert !ica_analysis_enabled(ica + [ica_analysis: false])
+    assert !ica_analysis_enabled(ica + [ica_matrix: null])
+    assert !ica_analysis_enabled(ica + [ica_matrix: '  '])
+    validate_parameters(ica + [ica_analysis: false, differential_expression: false,
+        reference_genome: null, reference_annotation: null])
+    validate_parameters(ica + [ica_analysis: false, ica_matrix: null,
+        ica_gene_map: root.resolve('missing map.tsv')])
+    validate_parameters(ica)
+    validate_parameters(ica + [differential_expression: false])
+    assert_validation_error(ica + [ica_matrix: null, ica_gene_map: root.resolve('map.tsv')], '--ica_gene_map requires --ica_matrix')
+    assert_validation_error(ica + [reference_genome: null], '--ica_matrix requires both')
+    assert_validation_error(ica + [ica_log_base: 1], '--ica_log_base must be greater')
+    assert_validation_error(ica + [ica_log_base: Double.NaN], '--ica_log_base must be a finite')
+    assert_validation_error(ica + [ica_pseudocount: 0], '--ica_pseudocount must be greater')
+    assert_validation_error(ica + [ica_min_gene_coverage: 0], '--ica_min_gene_coverage must be greater')
+    assert_validation_error(ica + [ica_min_gene_coverage: 1.1], '--ica_min_gene_coverage must be greater')
+    assert_validation_error(ica + [ica_min_read_count: -1], '--ica_min_read_count must be a nonnegative integer')
+    assert_validation_error(ica + [ica_min_read_count: 0.5], '--ica_min_read_count must be a nonnegative integer')
+    assert_validation_error(ica + [ica_padj_cutoff: 1.1], '--ica_padj_cutoff must be greater')
+    assert_validation_error(ica + [ica_padj_cutoff: Double.POSITIVE_INFINITY], '--ica_padj_cutoff must be a finite')
 
     channel.of('MinKNOW termination parameters are conditionally validated').view()
 }

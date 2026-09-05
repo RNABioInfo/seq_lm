@@ -47,6 +47,84 @@ def finalize_qc_report(output_root: Path) -> Void {
     return null
 }
 
+/** Allocate beyond committed and interrupted report revisions, including restarts. */
+def next_qc_report_revision(output_root: Path) -> Integer {
+    if (!java.nio.file.Files.isDirectory(output_root)) {
+        return 0
+    }
+    def revisions: List<Integer> = []
+    java.nio.file.Files.newDirectoryStream(output_root, 'qc_report_snapshot_revision_*.html').withCloseable { paths ->
+        paths.each { path: Path ->
+            def match = path.fileName.toString() =~ /^qc_report_snapshot_revision_(\d+)\.html$/
+            if (match.matches()) {
+                revisions.add(match.group(1).toInteger())
+            }
+        }
+    }
+    def state_path: Path = output_root.resolve('qc_report_state.json')
+    if (java.nio.file.Files.isRegularFile(state_path)) {
+        def state: Map = new groovy.json.JsonSlurper().parse(state_path.toFile()) as Map
+        if (state.report_revision != null) {
+            revisions.add(state.report_revision as Integer)
+        }
+    }
+    return revisions.empty ? 0 : revisions.max() + 1
+}
+
+/** Publish one complete report snapshot, advancing the state pointer last. */
+def publish_qc_report_snapshot(report_files: List<Path>, output_root: Path) -> Path {
+    def normalized_root: Path = output_root.toAbsolutePath().normalize()
+    java.nio.file.Files.createDirectories(normalized_root)
+    def state_files: List<Path> = report_files.findAll { path: Path ->
+        path.fileName.toString() == 'qc_report_state.json'
+    }
+    if (state_files.size() != 1) {
+        error('A QC report publication must contain exactly one qc_report_state.json file.')
+    }
+    def state_path: Path = state_files[0]
+    def state: Map = new groovy.json.JsonSlurper().parse(state_path.toFile()) as Map
+    if (!(state.report_revision instanceof Integer) || state.report_revision < next_qc_report_revision(normalized_root)) {
+        error('Refusing to publish a stale or invalid QC report revision.')
+    }
+    def snapshot_name: String = "${state.snapshot ?: ''}"
+    def payloads: List<Path> = report_files.findAll { path: Path -> path != state_path }
+    if (snapshot_name != "qc_report_snapshot_revision_${state.report_revision}.html" ||
+        !payloads.any { path: Path -> path.fileName.toString() == snapshot_name }) {
+        error("QC report state points to a missing snapshot: ${snapshot_name}")
+    }
+    def snapshot: Path = payloads.find { path: Path -> path.fileName.toString() == snapshot_name }
+    def shells: List<Path> = payloads.findAll { path: Path -> path.fileName.toString() == 'qc_report.html' }
+    if (shells.size() != 1 || payloads.size() != 2) {
+        error('A QC report publication must contain one HTML snapshot and one live shell.')
+    }
+    if (!(state.snapshot_bytes instanceof Number) || (state.snapshot_bytes as Number).longValue() != java.nio.file.Files.size(snapshot)) {
+        error("QC report state has an invalid snapshot size for ${snapshot_name}.")
+    }
+
+    // The shell can be opened immediately, so its target must exist first too.
+    [snapshot, shells[0], state_path].each { source: Path ->
+        def name: String = source.fileName.toString()
+        def temporary: Path = java.nio.file.Files.createTempFile(normalized_root, ".${name}-", '.pending')
+        java.nio.file.Files.copy(source, temporary, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        try {
+            java.nio.file.Files.move(
+                temporary,
+                normalized_root.resolve(name),
+                java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+                java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+            )
+        }
+        catch (_exception: java.nio.file.AtomicMoveNotSupportedException) {
+            java.nio.file.Files.move(
+                temporary,
+                normalized_root.resolve(name),
+                java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+            )
+        }
+    }
+    return normalized_root.resolve(snapshot_name)
+}
+
 include { ChunkQCResult } from '../lib/sample.nf'
 include { shell_quote ; safe_name } from './generic_helpers.nf'
 

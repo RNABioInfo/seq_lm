@@ -2,7 +2,12 @@
 
 nextflow.enable.types = true
 
-include { bam_ingress ; get_samples ; validate_samples } from './lib/bam_ingress.nf'
+include {
+    bam_ingress ;
+    get_samples ;
+    sample_sheet_has_order_column ;
+    validate_samples
+} from './lib/bam_ingress.nf'
 include {
     ChunkQCResult ;
     Sample ;
@@ -22,9 +27,12 @@ include {
     qc_report_root_dir ;
     accumulate_qc_report_chunk_state ;
     qc_report_inputs_from_state ;
-    finalize_qc_report
+    finalize_qc_report ;
+    publish_qc_report_snapshot ;
+    next_qc_report_revision
 } from './modules/qc_report_helpers.nf'
 include { join_report_batches } from './modules/report_batches.nf'
+include { join_ica_report_batches } from './modules/ica_report_batches.nf'
 include { quality_control } from './subworkflows/quality_control.nf'
 include { quantification } from './subworkflows/quantification.nf'
 include { differential_expression } from './subworkflows/differential_expression.nf'
@@ -41,7 +49,9 @@ include {
     sample_checkpoint_key ;
     write_sample_checkpoints
 } from './lib/sample_checkpoints.nf'
-include { validate_parameters } from './lib/validation.nf'
+include { imodulon_analysis } from './subworkflows/imodulon_analysis.nf'
+include { next_ica_snapshot_index } from './lib/ica_publication.nf'
+include { validate_parameters; ica_analysis_enabled } from './lib/validation.nf'
 
 process make_report {
     label 'seq_lm'
@@ -130,6 +140,7 @@ process qc_report_input_tree {
     label 'seq_lm_qc'
     cpus 1
     maxForks 1
+    fair true
 
     input:
     qc_report_inputs: Map
@@ -166,8 +177,7 @@ process qc_report {
     container 'rnabioinfo/seq_lm_report:v1.0.0'
     cpus 1
     maxForks 1
-
-    publishDir params.out_dir, mode: 'copy', pattern: 'qc_report*', overwrite: true
+    fair true
 
     input:
     qc_report_inputs: Map
@@ -177,14 +187,19 @@ process qc_report {
     differential_results: Path
     differential_analysis_note: String
     stability_results: Path
+    ica_results: Path
     has_differential_results: Boolean
     has_stability_results: Boolean
+    has_ica_results: Boolean
+    ica_analysis_index: Integer
+    first_report_revision: Integer
 
     stage:
     stageAs qc_results, 'qc_results'
     stageAs transcript_biotypes, 'transcript_biotypes.tsv'
     stageAs differential_results, 'differential_results'
     stageAs stability_results, 'stability_results.tsv'
+    stageAs ica_results, 'ica_results'
 
     output:
     report_files = files('qc_report*', arity: '3')
@@ -192,6 +207,7 @@ process qc_report {
     script:
     def rows: String = qc_report_inputs.rows
     def quoted_rows: String = shell_quote(rows)
+    def report_revision: Integer = first_report_revision + (qc_report_inputs.report_sequence != null ? qc_report_inputs.report_sequence : qc_report_inputs.latest_batch_index) as Integer
     def params_json: String = new groovy.json.JsonBuilder(params).toPrettyString()
     def quoted_params_json: String = shell_quote(params_json)
     def differential_args: String = has_differential_results
@@ -210,6 +226,9 @@ process qc_report {
     def stability_args: String = has_stability_results
         ? '--stability-results stability_results.tsv'
         : ''
+    def ica_args: String = has_ica_results
+        ? "--imodulon-results ica_results --imodulon-batch ${qc_report_inputs.latest_batch_index} --imodulon-sequence ${qc_report_inputs.report_sequence} --imodulon-analysis-index ${ica_analysis_index}"
+        : ''
     """
         printf 'name\\tgroup\\torder\\tchunks_seen\\tlatest_batch_index\\tqc_dir\\n' > report_samples.tsv
         printf '%s\\n' ${quoted_rows} >> report_samples.tsv
@@ -226,12 +245,14 @@ process qc_report {
             --versions versions \
             --params params.json \
             --latest-batch ${qc_report_inputs.latest_batch_index} \
+            --report-revision ${report_revision} \
             ${transcript_biotype_args} \
             ${differential_args} \
             ${gene_set_args} \
             ${temporal_args} \
             ${readiness_args} \
             ${stability_args} \
+            ${ica_args} \
             --stability-behavior ${params.monitoring_behavior} \
             --lfc-cutoff ${params.de_lfc_cutoff} \
             --padj-cutoff ${params.de_padj_cutoff}
@@ -261,8 +282,14 @@ workflow sample_pipeline {
     stability_settings: Map
     initial_stability_state: Map
     minknow_connection: Map
+    ica_matrix: Path
+    ica_gene_map: Path
+    ica_settings: Map
+    first_ica_index: Integer
+    ica_output_root: Path
 
     main:
+    def first_report_revision: Integer = next_qc_report_revision(ica_output_root)
     /*
          * `bam_ingress` emits synchronized sample batches. The pipeline spreads
          * each non-empty batch into one record per sample chunk, prepares a
@@ -312,6 +339,18 @@ workflow sample_pipeline {
             )
         }
         output(quantification_output_ch)
+
+        if (ica_settings.enabled) {
+            imodulon_analysis(
+                quantified_sample_batches_ch,
+                ica_matrix,
+                reference_annotation,
+                ica_gene_map,
+                ica_settings,
+                first_ica_index,
+                ica_output_root,
+            )
+        }
 
         if (differential_expression_enabled) {
             differential_expression(
@@ -428,6 +467,31 @@ workflow sample_pipeline {
                     results: optional_file(),
                     stability_results: optional_file(),
                     has_stability_results: false,
+                )
+            }
+        }
+
+        if (ica_settings.enabled) {
+            join_ica_report_batches(
+                analysis_report_batches_ch,
+                imodulon_analysis.out.snapshots,
+            )
+            analysis_report_batches_ch = join_ica_report_batches.out
+        }
+        else {
+            analysis_report_batches_ch = analysis_report_batches_ch.map { report ->
+                record(
+                    batch_index: report.batch_index,
+                    report_sequence: report.report_sequence,
+                    biotypes: report.biotypes,
+                    differential_analysis_note: report.differential_analysis_note,
+                    has_differential_results: report.has_differential_results,
+                    results: report.results,
+                    stability_results: report.stability_results,
+                    has_stability_results: report.has_stability_results,
+                    ica_results: optional_file(),
+                    has_ica_results: false,
+                    ica_analysis_index: 0,
                 )
             }
         }
@@ -551,8 +615,12 @@ workflow sample_pipeline {
             qc_report_ready_ch.map { result -> result.differential_results },
             qc_report_ready_ch.map { result -> result.differential_analysis_note },
             qc_report_ready_ch.map { result -> result.stability_results },
+            qc_report_ready_ch.map { result -> result.ica_results },
             qc_report_ready_ch.map { result -> result.has_differential_results },
             qc_report_ready_ch.map { result -> result.has_stability_results },
+            qc_report_ready_ch.map { result -> result.has_ica_results },
+            qc_report_ready_ch.map { result -> result.ica_analysis_index },
+            first_report_revision,
         )
     }
     else {
@@ -564,10 +632,17 @@ workflow sample_pipeline {
             optional_file(),
             '',
             optional_file(),
+            optional_file(),
             false,
             false,
+            false,
+            0,
+            first_report_revision,
         )
     }
+    qc_report.out.report_files
+        .map { files: List<Path> -> publish_qc_report_snapshot(files, ica_output_root) }
+        .collect()
 }
 
 // Entrypoint workflow
@@ -575,6 +650,7 @@ workflow {
     main:
     WorkflowMain.initialise(workflow, params, log)
     validate_parameters(params)
+    def ica_enabled: Boolean = ica_analysis_enabled(params)
 
     if (params.disable_ping == false) {
         Pinguscript.ping_post(workflow, 'start', 'none', params.out_dir, params)
@@ -594,11 +670,14 @@ workflow {
         ? file(params.gene_sets, checkIfExists: true)
         : optional_file()
     output_root = file(params.out_dir).toAbsolutePath().normalize()
+    def sample_sheet_path: Path? = params.sample_sheet ? file(params.sample_sheet) : null
+    def ica_timecourse_enabled: Boolean = ica_enabled && sample_sheet_path != null &&
+        sample_sheet_has_order_column(sample_sheet_path)
 
     ingress_args = record(
         live_analysis: params.live_analysis,
-        timeline_analysis: params.timeline_analysis,
-        sample_sheet_path: params.sample_sheet ? file(params.sample_sheet) : null,
+        timeline_analysis: params.timeline_analysis || ica_timecourse_enabled,
+        sample_sheet_path: sample_sheet_path,
         bam_poll_interval_ms: (params.bam_poll_interval_seconds as Integer) * 1000,
         bam_stability_polls: params.bam_stability_polls as Integer,
         termination_requested: params.monitoring_behavior == 'terminate',
@@ -684,6 +763,15 @@ workflow {
         stability_parameter_values,
         initial_stability_state,
         minknow_connection,
+        ica_enabled ? file(params.ica_matrix, checkIfExists: true) : optional_file(),
+        ica_enabled && params.ica_gene_map ? file(params.ica_gene_map, checkIfExists: true) : optional_file(),
+        [enabled: ica_enabled,
+         has_gene_map: params.ica_gene_map != null && "${params.ica_gene_map}".trim() != '',
+         log_base: params.ica_log_base, pseudocount: params.ica_pseudocount,
+         min_gene_coverage: params.ica_min_gene_coverage,
+         min_read_count: params.ica_min_read_count, padj_cutoff: params.ica_padj_cutoff],
+        ica_enabled ? next_ica_snapshot_index(output_root) : 0,
+        output_root,
     )
 
     onComplete:

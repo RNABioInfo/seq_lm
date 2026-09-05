@@ -3,7 +3,12 @@
 nextflow.enable.types = true
 
 include { ChunkQCResult ; Sample } from '../lib/sample.nf'
-include { parse_sample_order ; validate_timeline_samples } from '../lib/bam_ingress.nf'
+include {
+    parse_sample_order ;
+    parse_sample_sheet ;
+    sample_sheet_has_order_column ;
+    validate_timeline_samples
+} from '../lib/bam_ingress.nf'
 include { qc_report_inputs_from_state } from '../modules/qc_report_helpers.nf'
 
 def assert_temporal_error(action: Closure, expected_message: String) -> Void {
@@ -23,6 +28,28 @@ workflow {
     def root: Path = java.nio.file.Files.createTempDirectory('seq-lm-temporal-report-')
     def bam_dir: Path = root.resolve('bams')
     java.nio.file.Files.createDirectories(bam_dir)
+    def ordered_sheet: Path = root.resolve('ordered.csv')
+    def comparison_sheet: Path = root.resolve('comparison.csv')
+    def incomplete_order_sheet: Path = root.resolve('incomplete_order.csv')
+    java.nio.file.Files.writeString(
+        ordered_sheet,
+        "alias,group,bam_dir,order\ncontrol,control,${bam_dir},0\ntreated,treated,${bam_dir},15\n",
+    )
+    java.nio.file.Files.writeString(
+        comparison_sheet,
+        "alias,group,bam_dir\ncontrol,control,${bam_dir}\ntreated,treated,${bam_dir}\n",
+    )
+    java.nio.file.Files.writeString(
+        incomplete_order_sheet,
+        "alias,group,bam_dir,order\ncontrol,control,${bam_dir},0\ntreated,treated,${bam_dir},\n",
+    )
+    assert sample_sheet_has_order_column(ordered_sheet)
+    assert !sample_sheet_has_order_column(comparison_sheet)
+    assert sample_sheet_has_order_column(incomplete_order_sheet)
+    assert_temporal_error(
+        { -> validate_timeline_samples(parse_sample_sheet([sample_sheet_path: incomplete_order_sheet])) },
+        'requires an order value for every sample',
+    )
 
     def early_sample: Sample = record(
         name: 'early_rep',

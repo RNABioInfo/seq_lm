@@ -27,7 +27,7 @@ def test_write_report_uses_live_shell_and_versioned_snapshot(tmp_path):
     shell = report_path.read_text()
     state = json.loads((tmp_path / "qc_report_state.json").read_text())
     snapshot = tmp_path / state["snapshot"]
-    assert snapshot.name == "qc_report_snapshot_batch_2.html"
+    assert snapshot.name == "qc_report_snapshot_revision_0.html"
     snapshot_html = snapshot.read_text()
     assert "snapshot" in snapshot_html
     assert 'id="seq-lm-report-navigation"' in snapshot_html
@@ -429,6 +429,7 @@ def test_qc_report_writes_html(tmp_path):
 
     html = report.read_text()
     assert "seq_lm analysis report" in html
+    assert ">iModulon Analysis</button>" not in html
     assert (
         html.find("Quality Control")
         < html.find("Differential Analysis")
@@ -480,7 +481,7 @@ def test_qc_report_writes_html(tmp_path):
     assert "GSVA score over time" in html
     assert "Gene expression over time" in html
     assert "Gene z-score" in html
-    assert "Descriptive only. Heatmap colors are gene-wise z-scores." in html
+    assert "Heatmap colors are gene-wise z-scores." in html
     assert "Time (min)" in html
     assert "Carbon response" in html
     assert "Mixed response" in html
@@ -869,3 +870,76 @@ def test_create_nanoplot_metrics_table_summarizes_samples():
     assert values.loc["Number of mapped reads", "time_point_1/rep_1"] == "2"
     assert values.loc["Number of bases", "time_point_1/rep_1"] == "400"
     assert values.loc["Number of aligned bases", "time_point_1/rep_1"] == "380"
+
+
+def test_live_report_revision_advances_when_local_batch_restarts(tmp_path):
+    class Report:
+        def write(self, path):
+            path.write_text("<html><body>snapshot</body></html>")
+
+    report = tmp_path / "qc_report.html"
+    qc_report.write_report(Report(), report, 9, 5)
+    first = json.loads((tmp_path / "qc_report_state.json").read_text())
+    original = (tmp_path / first["snapshot"]).read_bytes()
+    qc_report.write_report(Report(), report, 0, 5)
+    state = json.loads((tmp_path / "qc_report_state.json").read_text())
+    assert state["report_revision"] == first["report_revision"] + 1
+    assert state["latest_batch"] == "0"
+    assert state["snapshot"] != first["snapshot"]
+    assert (tmp_path / first["snapshot"]).read_bytes() == original
+    with pytest.raises(ValueError, match="older report revision"):
+        qc_report.write_report(Report(), report, 0, 5, report_revision=0)
+    (tmp_path / "qc_report_snapshot_revision_5.html").write_text("interrupted publication")
+    qc_report.write_report(Report(), report, 0, 5)
+    assert json.loads((tmp_path / "qc_report_state.json").read_text())["report_revision"] == 6
+
+
+def test_live_viewer_refreshes_on_revision_and_rejects_stale_updates(tmp_path):
+    """Execute the real refresh script with mocked DOM/network events."""
+    import re
+    import shutil
+    import subprocess
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node is required to execute the live report refresh script")
+    shell = qc_report._live_report_shell("qc_report_state.json", "qc_report_snapshot_revision_10.html", 10, 1)
+    script = re.search(r"<script>(.*?)</script>", shell, re.S).group(1)
+    harness = r'''
+const assert = require('node:assert/strict');
+const vm = require('node:vm');
+let refresh, onload;
+let state = {report_revision: 11, latest_batch: '0', snapshot: 'qc_report_snapshot_revision_11.html', snapshot_bytes: 10};
+const status = {style: {}};
+const frame = {
+  src: 'original',
+  contentDocument: {querySelector: () => ({}), querySelectorAll: () => []},
+  contentWindow: {scrollX: 0, scrollY: 0, setTimeout: () => {}, scrollTo: () => {}},
+  addEventListener: (_, callback) => { onload = callback; }
+};
+const context = {
+  URL, console, Date, Event: class {},
+  document: {getElementById: id => id === 'seq-lm-report-frame' ? frame : status},
+  window: {location: {href: 'https://example.test/qc_report.html'}, setInterval: callback => { refresh = callback; }, setTimeout: () => {}},
+  fetch: async url => ({ok: true, json: async () => state, headers: {get: () => '10'}})
+};
+vm.runInNewContext(SCRIPT, context);
+(async () => {
+  onload();
+  await refresh();
+  assert.match(frame.src, /revision_11.html/);
+  onload();
+  const newest = frame.src;
+  state = {...state, report_revision: 9, latest_batch: '999', snapshot: 'stale.html'};
+  await refresh();
+  assert.equal(frame.src, newest);
+  state = {...state, report_revision: 11, snapshot: 'duplicate.html'};
+  await refresh();
+  assert.equal(frame.src, newest);
+  state = {...state, report_revision: 12, latest_batch: '0', snapshot: 'revision_12.html'};
+  await refresh();
+  assert.match(frame.src, /revision_12.html/);
+})().catch(error => {console.error(error); process.exitCode = 1;});
+'''.replace("SCRIPT", json.dumps(script))
+    test = tmp_path / "live-viewer.cjs"
+    test.write_text(harness)
+    subprocess.run([node, str(test)], check=True, capture_output=True, text=True)

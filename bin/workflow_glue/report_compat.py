@@ -156,7 +156,8 @@ _REPORT_NAVIGATION_SCRIPT = r"""
               "Quality Control",
               "Differential Analysis",
               "Gene Set Enrichment",
-              "Temporal Analysis"
+              "Temporal Analysis",
+              "iModulon Analysis"
             ]);
             const isPrimary = labels.includes("Quality Control") &&
               labels.every((label) => primaryLabels.has(label));
@@ -179,6 +180,28 @@ _REPORT_NAVIGATION_SCRIPT = r"""
           });
         };
 
+        const addComponentDropdownSearch = () => {
+          document.querySelectorAll(".dropdown-toggle").forEach((toggle) => {
+            if (text(toggle) !== "Component") return;
+            const menu = toggle.parentElement.querySelector(".dropdown-menu");
+            if (!menu || menu.querySelector(".seq-lm-component-search")) return;
+            const input = document.createElement("input");
+            input.type = "search";
+            input.className = "form-control form-control-sm m-2 seq-lm-component-search";
+            input.style.width = "calc(100% - 1rem)";
+            input.placeholder = "Search components";
+            input.setAttribute("aria-label", "Search components");
+            input.addEventListener("click", (event) => event.stopPropagation());
+            input.addEventListener("input", () => {
+              const query = input.value.trim().toLocaleLowerCase();
+              menu.querySelectorAll(".dropdown-item").forEach((item) => {
+                item.hidden = !text(item).toLocaleLowerCase().includes(query);
+              });
+            });
+            menu.prepend(input);
+          });
+        };
+
         const resizeVisibleCharts = () => {
           window.dispatchEvent(new Event("resize"));
           if (window.Bokeh && window.Bokeh.index) {
@@ -197,12 +220,14 @@ _REPORT_NAVIGATION_SCRIPT = r"""
         };
 
         markTabLevels();
+        addComponentDropdownSearch();
         document.addEventListener("shown.bs.tab", () => {
           window.setTimeout(resizeVisibleCharts, 0);
           window.setTimeout(resizeVisibleCharts, 150);
         });
         window.addEventListener("load", () => {
           markTabLevels();
+          addComponentDropdownSearch();
           window.setTimeout(resizeVisibleCharts, 0);
         });
       })();

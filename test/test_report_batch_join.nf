@@ -11,8 +11,8 @@ workflow {
      * restored by the sequence assigned before readiness checking.
      */
     differential_results_ch = channel.of(
-        [batch_index: 4, report_sequence: 1, biotypes: file('biotypes_batch_4.tsv'), differential_analysis_note: 'No matching feature IDs.', has_differential_results: false, results: file('OPTIONAL_FILE'), stability_results: file('OPTIONAL_FILE'), has_stability_results: false],
-        [batch_index: 2, report_sequence: 0, biotypes: file('biotypes_batch_2.tsv'), differential_analysis_note: '', has_differential_results: true, results: file('edgeR_batch_2'), stability_results: file('stability_batch_2.tsv'), has_stability_results: true],
+        [batch_index: 4, report_sequence: 1, biotypes: file('biotypes_batch_4.tsv'), differential_analysis_note: 'No matching feature IDs.', has_differential_results: false, results: file('OPTIONAL_FILE'), stability_results: file('OPTIONAL_FILE'), has_stability_results: false, ica_results: file('ica_batch_4'), has_ica_results: true, ica_analysis_index: 8],
+        [batch_index: 2, report_sequence: 0, biotypes: file('biotypes_batch_2.tsv'), differential_analysis_note: '', has_differential_results: true, results: file('edgeR_batch_2'), stability_results: file('stability_batch_2.tsv'), has_stability_results: true, ica_results: file('ica_batch_2'), has_ica_results: true, ica_analysis_index: 7],
     )
     qc_report_trees_ch = channel.of(
         [qc_report_inputs: [latest_batch_index: 4, rows: 'batch 4'], qc_results: file('qc_batch_4')],
@@ -31,6 +31,8 @@ workflow {
                 assert report.has_differential_results
                 assert report.stability_results.name == 'stability_batch_2.tsv'
                 assert report.has_stability_results
+                assert report.ica_results.name == 'ica_batch_2'
+                assert report.ica_analysis_index == 7
             }
             else if (report.batch_index == 4) {
                 assert report.transcript_biotypes.name == 'biotypes_batch_4.tsv'

@@ -168,3 +168,10 @@ record SampleQCReportInputs {
     sample: Sample
     chunks: List<ChunkQCResult>
 }
+
+record ICABatchResult {
+    batch_index: Integer
+    report_sequence: Integer
+    analysis_index: Integer
+    results: Path
+}

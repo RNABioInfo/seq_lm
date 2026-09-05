@@ -98,9 +98,11 @@ The BAM sample sheet uses `alias`, `group`, and `bam_dir` columns, plus optional
 `is_live` and `order` columns. `is_live` accepts case-insensitive `true` or
 `false`; a missing or blank value defaults to `true`. A sample is watched only
 when both `--live_analysis` and its row-level `is_live` value are true. When
-`--timeline_analysis` is enabled, `order` is required and is interpreted as a
-signed integer elapsed time in minutes. Each group must map to one minute and
-each minute to one group for the single supported trajectory.
+`--timeline_analysis` is enabled, `order` is required. With active ICA, including
+the `order` column automatically enables ICA time-course views. In either case,
+order is interpreted as signed integer elapsed minutes. Every row must provide a
+value, each group must map to one minute, and each minute to one group for the
+single supported trajectory.
 
 Final samples are processed once from all BAMs present at startup and must have
 at least one BAM. Later QC checkpoints wait for one new BAM from every currently

@@ -17,7 +17,7 @@
           "format": "path",
           "fa_icon": "fas fa-file-csv",
           "description": "CSV sample sheet describing the BAM directories to analyze.",
-          "help_text": "The sheet must contain alias, group, and bam_dir columns. Optional is_live and order columns control live watching and timeline order. is_live accepts true or false case-insensitively; missing or blank values default to true. Samples that are not effectively live must contain at least one BAM at startup."
+          "help_text": "The sheet must contain alias, group, and bam_dir columns. Optional is_live controls live watching. When ICA is active, including order automatically enables ICA time-course analysis and requires a valid elapsed-minute trajectory. is_live accepts true or false case-insensitively; missing or blank values default to true. Samples that are not effectively live must contain at least one BAM at startup."
         },
         "live_analysis": {
           "type": "boolean",
@@ -315,6 +315,65 @@
           "hidden": true
         }
       }
+    },
+    "imodulon_analysis_options": {
+      "title": "iModulon Analysis Options",
+      "type": "object",
+      "description": "Fixed-matrix projection, control-versus-group differential activity, and automatic time-course visualization when the sample sheet contains order.",
+      "properties": {
+        "ica_analysis": {
+          "type": "boolean",
+          "default": true,
+          "description": "Allow iModulon analysis when an ICA matrix is supplied.",
+          "help_text": "Set false to skip ICA analysis even when ica_matrix is configured. Without a matrix, ICA is skipped regardless of this toggle."
+        },
+        "ica_matrix": {
+          "type": "string",
+          "format": "path",
+          "description": "ICA gene-by-component weights CSV/TSV. Supplying this enables iModulon analysis unless ica_analysis is false.",
+          "help_text": "When ICA is enabled, requires both reference inputs. First column: gene IDs; remaining columns: named components. Controls supply the baseline. No activity matrix or metadata sidecar is required."
+        },
+        "ica_gene_map": {
+          "type": "string",
+          "format": "path",
+          "description": "Optional explicit annotation-gene to model-gene mapping CSV/TSV.",
+          "help_text": "When ICA is enabled, requires ica_matrix. Columns gene_id and model_gene_id must define a one-to-one map. Automatic matching is not added to an explicit map."
+        },
+        "ica_log_base": {
+          "type": "number",
+          "exclusiveMinimum": 1,
+          "default": 2.0,
+          "description": "Logarithm base for million-scaled Oarfish gene abundance."
+        },
+        "ica_pseudocount": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "default": 1.0,
+          "description": "Pseudocount added before logging million-scaled gene abundance."
+        },
+        "ica_min_gene_coverage": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1,
+          "default": 1.0,
+          "description": "Required fraction of model genes represented by annotation targets.",
+          "help_text": "Default requires all model genes. Lower explicitly to permit partial projection. Coverage does not establish biological validity."
+        },
+        "ica_min_read_count": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 10000,
+          "description": "Minimum assigned abundance in every sample before analyzing an ICA batch.",
+          "help_text": "Zero-total samples always defer analysis. This setting is independent of DEA readiness."
+        },
+        "ica_padj_cutoff": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1,
+          "default": 0.05,
+          "description": "BH-adjusted p-value threshold for Welch differential-activity tests."
+        }
+      }
     }
   },
   "allOf": [
@@ -383,10 +442,15 @@
       "if": {
         "properties": {
           "monitoring_behavior": {
-            "enum": ["log", "terminate"]
+            "enum": [
+              "log",
+              "terminate"
+            ]
           }
         },
-        "required": ["monitoring_behavior"]
+        "required": [
+          "monitoring_behavior"
+        ]
       },
       "then": {
         "properties": {
@@ -403,7 +467,9 @@
             "const": "terminate"
           }
         },
-        "required": ["monitoring_behavior"]
+        "required": [
+          "monitoring_behavior"
+        ]
       },
       "then": {
         "properties": {
@@ -412,6 +478,9 @@
           }
         }
       }
+    },
+    {
+      "$ref": "#/definitions/imodulon_analysis_options"
     }
   ],
   "docs": {

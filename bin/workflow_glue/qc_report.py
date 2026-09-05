@@ -30,6 +30,10 @@ from .qc_report_types.temporal_plots import (
     add_temporal_analysis,
     load_temporal_results,
 )
+from .qc_report_types.imodulon_plots import (
+    add_imodulon_analysis,
+    load_imodulon_results,
+)
 from .qc_report_types.sankey_plot import (
     add_sample_read_fate_sankeys,
     create_read_fate_sankey_html,
@@ -65,13 +69,28 @@ def create_read_length_quality_kde_html(nanoplot):
     )
 
 
-def _live_report_paths(report_path, latest_batch):
+def _next_report_revision(report_path):
+    """Allocate beyond published or interrupted local report snapshots."""
+    report_path = Path(report_path)
+    pattern = re.escape(report_path.stem) + r"_snapshot_revision_(\d+)\.html"
+    revisions = [
+        int(match.group(1))
+        for path in report_path.parent.glob(f"{report_path.stem}_snapshot_revision_*.html")
+        if (match := re.fullmatch(pattern, path.name))
+    ]
+    state_path = report_path.with_name(f"{report_path.stem}_state.json")
+    if state_path.exists():
+        state = json.loads(state_path.read_text())
+        if "report_revision" in state:
+            revisions.append(int(state["report_revision"]))
+    return max(revisions, default=-1) + 1
+
+
+def _live_report_paths(report_path, report_revision):
     """Return stable-shell, state, and immutable snapshot paths."""
     report_path = Path(report_path)
-    batch_token = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(latest_batch)).strip("._")
-    batch_token = batch_token or "unknown"
     snapshot_path = report_path.with_name(
-        f"{report_path.stem}_snapshot_{batch_token}{report_path.suffix}"
+        f"{report_path.stem}_snapshot_revision_{report_revision}{report_path.suffix}"
     )
     state_path = report_path.with_name(f"{report_path.stem}_state.json")
     return report_path, state_path, snapshot_path
@@ -80,7 +99,7 @@ def _live_report_paths(report_path, latest_batch):
 def _live_report_shell(
     state_name,
     snapshot_name,
-    latest_batch,
+    report_revision,
     refresh_seconds,
 ):
     """Return a stable page shell that refreshes only its report frame."""
@@ -126,10 +145,10 @@ def _live_report_shell(
       const frame = document.getElementById("seq-lm-report-frame");
       const status = document.getElementById("seq-lm-live-status");
       const stateUrl = new URL({json.dumps(state_name)}, window.location.href);
-      let displayedBatch = {json.dumps(str(latest_batch))};
+      let displayedRevision = {json.dumps(report_revision)};
       let frameReady = false;
       let pendingViewState = null;
-      let pendingBatch = null;
+      let pendingRevision = null;
 
       const text = (element) =>
         element ? element.textContent.trim().replace(/\\s+/g, " ") : null;
@@ -198,11 +217,11 @@ def _live_report_shell(
         }} catch (error) {{
           frameReady = false;
         }}
-        if (pendingBatch !== null) {{
+        if (pendingRevision !== null) {{
           restoreViewState(pendingViewState);
-          displayedBatch = pendingBatch;
+          displayedRevision = pendingRevision;
           pendingViewState = null;
-          pendingBatch = null;
+          pendingRevision = null;
         }}
         showStatus(
           frameReady ? "" : "Waiting for update."
@@ -218,9 +237,12 @@ def _live_report_shell(
             throw new Error(`state request returned ${{response.status}}`);
           }}
           const state = await response.json();
-          const nextBatch = String(state.latest_batch);
-          const displayedNumber = Number(displayedBatch);
-          const nextNumber = Number(nextBatch);
+          const nextRevision = state.report_revision;
+          if (!Number.isSafeInteger(nextRevision) || nextRevision < 0) {{
+            throw new Error("invalid report revision");
+          }}
+          const displayedNumber = Number(displayedRevision);
+          const nextNumber = Number(nextRevision);
           const stateIsOlder = (
             Number.isFinite(displayedNumber) &&
             Number.isFinite(nextNumber) &&
@@ -228,8 +250,8 @@ def _live_report_shell(
           );
           if (
             stateIsOlder ||
-            pendingBatch !== null ||
-            (nextBatch === displayedBatch && frameReady)
+            pendingRevision !== null ||
+            (nextRevision === displayedRevision && frameReady)
           ) {{
             showStatus(
               frameReady ? "" : "Waiting for update."
@@ -238,7 +260,7 @@ def _live_report_shell(
           }}
 
           const snapshotUrl = new URL(state.snapshot, window.location.href);
-          snapshotUrl.searchParams.set("batch", nextBatch);
+          snapshotUrl.searchParams.set("revision", String(nextRevision));
           const snapshotResponse = await fetch(snapshotUrl, {{
             method: "HEAD",
             cache: "no-store"
@@ -263,7 +285,7 @@ def _live_report_shell(
           }}
 
           pendingViewState = captureViewState();
-          pendingBatch = nextBatch;
+          pendingRevision = nextRevision;
           frame.src = snapshotUrl.href;
         }} catch (error) {{
           showStatus("Waiting for update.");
@@ -285,6 +307,7 @@ def write_report(
     latest_batch,
     refresh_seconds,
     subtitle_notice=None,
+    report_revision=None,
 ):
     """Write either a static report or a live shell with a versioned snapshot."""
     if refresh_seconds <= 0:
@@ -292,23 +315,28 @@ def write_report(
         apply_report_branding(report_path, subtitle_notice)
         return
 
-    report_path, state_path, snapshot_path = _live_report_paths(
-        report_path,
-        latest_batch,
-    )
+    if report_revision is None:
+        report_revision = _next_report_revision(report_path)
+    if isinstance(report_revision, bool) or not isinstance(report_revision, int) or report_revision < 0:
+        raise ValueError("Report revision must be a nonnegative integer")
+    if report_revision < _next_report_revision(report_path):
+        raise ValueError("Refusing to overwrite or publish an older report revision")
+    report_path, state_path, snapshot_path = _live_report_paths(report_path, report_revision)
     report.write(snapshot_path)
     apply_report_branding(snapshot_path, subtitle_notice)
     report_path.write_text(
         _live_report_shell(
             state_path.name,
             snapshot_path.name,
-            latest_batch,
+            report_revision,
             refresh_seconds,
         )
     )
     state_path.write_text(
         json.dumps(
             {
+                "schema_version": 2,
+                "report_revision": report_revision,
                 "latest_batch": str(latest_batch),
                 "snapshot": snapshot_path.name,
                 "snapshot_bytes": snapshot_path.stat().st_size,
@@ -341,6 +369,7 @@ def main(args):
     fry_results = None
     gsva_results = None
     temporal_results = None
+    imodulon_results = None
     transcript_biotypes = args.transcript_biotypes
     if args.differential_results is not None:
         differential = load_differential_results(
@@ -368,6 +397,14 @@ def main(args):
                     differential,
                     gsva_results,
                 )
+    if args.imodulon_results is not None:
+        imodulon_results = load_imodulon_results(
+            args.imodulon_results,
+            args.imodulon_batch,
+            args.imodulon_sequence,
+            args.imodulon_analysis_index,
+            samples.samples_df,
+        )
 
     report = labs_report(
         labs,
@@ -461,12 +498,19 @@ def main(args):
                             differential.condition_colors,
                         )
 
+        if imodulon_results is not None:
+            with primary_tabs.add_tab("iModulon Analysis"):
+                add_imodulon_analysis(
+                    imodulon_results,
+                )
+
     write_report(  # type: ignore
         report,
         args.report,
         args.latest_batch,
         args.refresh_seconds,
         args.dea_readiness_notice,
+        args.report_revision,
     )
     logger.info(f"Analysis report written to {args.report}.")
 
@@ -495,6 +539,11 @@ def argparser():
         default="unknown",
         help="Latest live analysis batch index represented in the report.",
     )
+    parser.add_argument("--report-revision", type=int, help="Persistent publication revision, independent of local batch indices.")
+    parser.add_argument("--imodulon-results", help="Immutable ICA snapshot directory.")
+    parser.add_argument("--imodulon-batch", type=int, help="Expected ICA source batch index.")
+    parser.add_argument("--imodulon-sequence", type=int, help="Expected ICA report sequence.")
+    parser.add_argument("--imodulon-analysis-index", type=int, help="Expected ICA analysis index.")
     parser.add_argument(
         "--differential-results",
         help=(

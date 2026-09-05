@@ -29,7 +29,7 @@ from .gsva_plots import GSVAResult
 
 
 GENE_SET_RESOLUTION_FILE = "gene_set_resolution.tsv"
-TEMPORAL_CAVEAT = "Descriptive only. Heatmap colors are gene-wise z-scores."
+TEMPORAL_CAVEAT = "Heatmap colors are gene-wise z-scores."
 
 
 @dataclass
