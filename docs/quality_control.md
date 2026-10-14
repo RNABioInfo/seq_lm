@@ -30,11 +30,10 @@ Expected published output layout:
 ```text
 qc_report.html
 qc_report_state.json
-qc_report_snapshot_<batch_index>.html
+qc_report_snapshot_revision_<report_revision>.html
 ```
 
-`qc_report.html` retains its historical filename for compatibility, but its
-display title is `seq_lm analysis report`. It is published at the workflow
+`qc_report.html` displays the title `seq_lm analysis report`. It is published at the workflow
 output root with overwrite enabled so EPI2ME can display one stable report path
 while live chunks arrive. The shell polls `qc_report_state.json` and refreshes
 only its internal report frame when a complete snapshot becomes available.
@@ -95,7 +94,7 @@ qc_results/
 ```
 
 The BAM sample sheet uses `alias`, `group`, and `bam_dir` columns, plus optional
-`is_live` and `order` columns. `is_live` accepts case-insensitive `true` or
+`is_live`, `order`, and `minknow_run_dir` columns. `is_live` accepts case-insensitive `true` or
 `false`; a missing or blank value defaults to `true`. A sample is watched only
 when both `--live_analysis` and its row-level `is_live` value are true. When
 `--timeline_analysis` is enabled, `order` is required. With active ICA, including
@@ -107,9 +106,9 @@ single supported trajectory.
 Final samples are processed once from all BAMs present at startup and must have
 at least one BAM. Later QC checkpoints wait for one new BAM from every currently
 active live sample, retain final or stopped samples' QC inputs, and refresh the
-cumulative report. A sample leaves later batch barriers after its `STOP` is
-drained, so other samples may continue independently. Only live samples require
-`STOP` files. The workflow treats `alias` as the
+cumulative report. A sample leaves later batch barriers after its manual `STOP`
+is drained or [MinKNOW completion](minknow_completion.md) is validated and its BAM
+inventory settles, so other samples may continue independently. The workflow treats `alias` as the
 sample name and requires at least two rows where `group` is `control`.
 
 QC-only startup batches are not published as incomplete reports. Without

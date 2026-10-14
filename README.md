@@ -43,7 +43,7 @@ treated_2,treated,/data/bams/treated_2,true
 | Field | Required | Meaning |
 | --- | --- | --- |
 | `alias` | Yes | Sample name; unique within its group. |
-| `group` | Yes | Condition; use `control` for at least two samples. Other groups are compared with controls. |
+| `group` | Yes | Condition label. Without a gene contrast file, DEA requires at least two `control` samples. ICA uses its independent configured control. |
 | `bam_dir` | Yes | Existing directory searched recursively for BAMs; accessible to the container. |
 | `is_live` | No | Watch this sample when `live_analysis` is also true. Blank or omitted means true. |
 | `order` | No | Signed integer elapsed minutes for temporal analysis. |
@@ -67,6 +67,7 @@ params {
     sample_sheet = "/path/to/samples.csv"
     reference_genome = "/path/to/reference.fa"
     reference_annotation = "/path/to/annotation.gtf"
+    strand_specificity = "forward"
     out_dir = "/path/to/results"
     live_analysis = false
     differential_expression = true
@@ -79,6 +80,12 @@ params {
 ```bash
 nextflow run . -profile standard -c run.config -w /path/to/work
 ```
+
+Choose `strand_specificity = "reverse"` for reads in the opposite transcript
+orientation or `"unstranded"` to accept both orientations, such as unstranded
+cDNA libraries. The default `"forward"` preserves direct-RNA behavior. This
+setting applies to all samples; see [strand specificity](docs/quantification.md#strand-specificity)
+for CLI usage and checkpoint compatibility.
 
 Use `-profile singularity` for Singularity/Apptainer. Set parameters in the config:
 quote strings, but leave booleans and numbers unquoted. Explicit boolean/numeric
@@ -100,7 +107,17 @@ Open `qc_report.html` in your results directory. For live analysis, set
 `live_analysis = true` in `run.config` before launching. The report updates as
 stable BAM chunks arrive.
 
-When a live sample is finished, create a `STOP` file in its BAM directory (automatically in "terminate" monitoring behavior):
+In `disabled` or `log` monitoring mode, live samples automatically finish when a
+validated MinKNOW `final_summary.txt` or `final_summary_*.txt` is present and the
+summary and BAM inventory have remained unchanged for 30 seconds, with no pending
+unstable BAMs. This also works when analysis starts after sequencing has finished.
+Standard dated run directories, `bam_pass`/`bam_fail`, and barcode directories
+beneath those folders are recognized. For other layouts, add the optional
+`minknow_run_dir` sample-sheet column naming the dedicated directory for that run.
+See [completion detection and its limitations](docs/minknow_completion.md).
+
+For a manual completion signal, create a `STOP` file in the BAM directory
+(automatically in `terminate` monitoring mode):
 
 ```bash
 touch /data/bams/treated_1/STOP
@@ -126,7 +143,11 @@ and GTF/GFF3 together; remove both reference settings for QC-only analysis.
 Keep `timeline_analysis = false` unless gene-set enrichment is enabled and the
 sample sheet contains complete time metadata.
 
-For iModulons, use a compatible gene-by-component weight matrix. Add
+For iModulons, seqLM projects expression onto a supplied, compatible
+gene-by-component weight matrix; it does not train a new ICA model. The repository
+implementation uses NumPy/SciPy/pandas rather than PyModulon and tests
+target-minus-control mean activities with Welch tests and BH correction, not
+PyModulon DiMA. Add
 `ica_imodulon_table = "/path/to/iM_table.csv"` for names and functions from the
 **same model**, with one annotation row per component. The report shows
 **Time course details** when time metadata is present, otherwise **Component details**.
@@ -169,8 +190,12 @@ in the inputs. Repeat the launch command after restarting EPI2ME.
 ## Stability monitoring and MinKNOW termination
 
 Set `monitoring_behavior = "log"` to record stop eligibility, or `"terminate"`
-to stop eligible acquisitions. Monitoring requires differential expression;
-termination also requires live analysis and MinKNOW credentials.
+to stop eligible acquisitions. Select `stopping_method = "dea"` (the default)
+for differential-expression stability, or `"ica"` for iModulon convergence.
+ICA monitoring requires enabled ICA analysis and its model, and checks every
+component for every required sample. Termination also requires live analysis and
+MinKNOW credentials. See [ICA monitoring](docs/imodulon_analysis.md#sequencing-termination)
+for the fold-change tolerance and informative checkpoint window.
 
 Generate credentials in the activated `seq-lm` environment:
 
@@ -206,6 +231,7 @@ Values belong in the config's `params` block. Defaults are from `nextflow.config
 | `sample_sheet` | Unset | CSV with sample names, groups, and BAM directories. |
 | `reference_genome` | Unset | Reference FASTA; required with the annotation. |
 | `reference_annotation` | Unset | Transcript GTF/GFF3; required with the FASTA. |
+| `gene_contrast_file` | Unset | Headerless CSV of target,reference pairs; selects DEA comparisons and groups. |
 | `gene_sets` | Unset | GMT gene sets for fry and GSVA. |
 
 **Live acquisition**
@@ -215,6 +241,8 @@ Values belong in the config's `params` block. Defaults are from `nextflow.config
 | `live_analysis` | `true` | Watch samples marked live in the sample sheet. |
 | `bam_poll_interval_seconds` | `5` | Seconds between BAM-directory scans. |
 | `bam_stability_polls` | `3` | Unchanged observations required before accepting a BAM. |
+| `detect_minknow_completion` | `true` | Detect final MinKNOW summaries for live samples in disabled/log monitoring mode. |
+| `minknow_completion_settle_seconds` | `30` | Positive integer quiet period for the final summary and BAM inventory before closing a sample. |
 
 **Differential expression and gene sets**
 
@@ -233,6 +261,8 @@ Values belong in the config's `params` block. Defaults are from `nextflow.config
 | Parameter | Default | Description |
 | --- | --- | --- |
 | `ica_analysis` | `false` | Enable iModulon projection; requires a matrix and both references. |
+| `ica_control_group` | `"control"` | ICA reference group; requires at least two samples. |
+| `ica_condition_groups` | Unset | Comma-separated ICA conditions; control is included automatically. Unset selects all samples. |
 | `ica_matrix` | Unset | CSV/TSV gene-by-component weight matrix. |
 | `ica_imodulon_table` | Unset | Optional component names and functions for the exact model. |
 | `ica_gene_map` | Unset | Optional CSV/TSV with gene_id and model_gene_id columns. |
@@ -247,7 +277,10 @@ Values belong in the config's `params` block. Defaults are from `nextflow.config
 | Parameter | Default | Description |
 | --- | --- | --- |
 | `monitoring_behavior` | `"disabled"` | Stability action: disabled, log, or terminate. |
-| `num_stable_batches` | `3` | Consecutive stable comparisons required for stop eligibility. |
+| `stopping_method` | `"dea"` | Analysis controlling stopping: dea or ica. |
+| `ica_max_fold_change` | `1.05` | Largest allowed component-wise reconstructed expression change across the ICA checkpoint window. |
+| `ica_min_read_growth_fraction` | `0.1` | Minimum assigned-abundance increase for a new ICA checkpoint; 0.1 means 10%. |
+| `num_stable_batches` | `3` | DEA: consecutive stable comparisons. ICA: informative updates in the window, requiring four checkpoints at the default. |
 | `stability_max_feature_diff_fraction` | `0.05` | Maximum fraction of filtered features added or removed. |
 | `stability_max_median_abs_lfc_delta` | `0.05` | Maximum median absolute change in log₂ fold change. |
 | `stability_min_jaccard_similarity` | `0.95` | Minimum overlap of sufficiently large DE-call sets. |

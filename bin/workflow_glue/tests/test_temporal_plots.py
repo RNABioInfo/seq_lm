@@ -12,7 +12,7 @@ from bokeh.models import ColorBar, HoverTool, Legend  # noqa: E402
 from ezcharts.components.reports import labs  # noqa: E402
 from ezcharts.layout.snippets import Tabs  # noqa: E402
 
-from workflow_glue.report_compat import labs_report  # noqa: E402
+from workflow_glue.report_layout import labs_report  # noqa: E402
 from workflow_glue.qc_report_types import differential_plots as dp  # noqa: E402
 from workflow_glue.qc_report_types import temporal_plots as tp  # noqa: E402
 
@@ -288,5 +288,5 @@ def test_temporal_analysis_writes_one_shared_gene_set_dropdown(tmp_path):
     assert html.count(">Gene set<") == 1
     assert "GSVA score over time" in html
     assert "Gene expression over time" in html
-    assert "Descriptive only. Heatmap colors are gene-wise z-scores." in html
+    assert tp.TEMPORAL_CAVEAT in html
     assert "Gene z-score" in html

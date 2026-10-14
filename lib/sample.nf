@@ -1,5 +1,11 @@
 nextflow.enable.types = true
 
+record GeneContrast {
+    contrast_id: String
+    target_group: String
+    reference_group: String
+}
+
 record Sample {
     name: String
     group: String
@@ -7,6 +13,7 @@ record Sample {
     bam_dir: Path
     is_live: Boolean
     protocol_run_id: String?
+    minknow_run_dir: Path?
 }
 
 record SampleChunk {

@@ -3,6 +3,7 @@ nextflow.enable.types = true
 
 include { QuantifiedSampleBatch ; ICABatchResult } from '../lib/sample.nf'
 include { shell_quote } from '../modules/generic_helpers.nf'
+include { tsv_field } from '../lib/gene_contrasts.nf'
 include { publish_ica_snapshot } from '../lib/ica_publication.nf'
 
 workflow imodulon_analysis {
@@ -31,12 +32,12 @@ workflow imodulon_analysis {
     }
 
     emit:
-    snapshots = published
+    published
 }
 
 process prepare_ica_model {
     label 'seq_lm_ica'
-    container 'rnabioinfo/seq_lm_ica:v1.0.0'
+    container 'rnabioinfo/seq_lm_imodulon:v1.0.0'
     cpus 1
 
     input:
@@ -59,6 +60,7 @@ process prepare_ica_model {
     def map_args: String = settings.has_gene_map ? '--gene-map gene_map/input.tsv' : ''
     def table_args: String = settings.has_imodulon_table ? '--imodulon-table imodulon_table/input.csv' : ''
     """
+    # Prepare model including scales for the ICA monitoring metric.
     imodulon-analysis prepare \\
         --matrix model_weights/input.csv \\
         --annotation annotation/input.gtf \\
@@ -70,7 +72,7 @@ process prepare_ica_model {
 
 process infer_ica_activities {
     label 'seq_lm_ica'
-    container 'rnabioinfo/seq_lm_ica:v1.0.0'
+    container 'rnabioinfo/seq_lm_imodulon:v1.0.0'
     cpus 1
     // Preserve input report-sequence order even when computations finish out of order.
     fair true
@@ -96,7 +98,7 @@ process infer_ica_activities {
     script:
     def rows: String = batch.samples.withIndex().collect { sample, index: Integer ->
         [sample.sample.name, sample.sample.group, sample.sample.order == null ? '' : sample.sample.order,
-         "input${index + 1}.quant", sample.batch_index].join('\t')
+         "input${index + 1}.quant", sample.batch_index].collect { field -> tsv_field("${field}") }.join('\t')
     }.join('\n')
     """
     printf 'name\\tgroup\\torder\\tcount_file\\tsource_batch_index\\n' > quant_manifest.tsv
@@ -105,6 +107,7 @@ process infer_ica_activities {
         --prepared prepared_ica \\
         --manifest quant_manifest.tsv \\
         --counts-dir quant \\
+        --control-group ${shell_quote(settings.control_group)} \\
         --log-base ${settings.log_base} \\
         --pseudocount ${settings.pseudocount} \\
         --min-reads ${settings.min_read_count} \\
@@ -115,4 +118,3 @@ process infer_ica_activities {
         --output ica_results
     """
 }
-

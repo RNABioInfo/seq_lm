@@ -31,6 +31,17 @@ class SampleSheetTest(unittest.TestCase):
         self.assertFalse(samples[0].is_live)
         self.assertEqual(samples[0].order, 3)
 
+    def test_minknow_run_directory_override(self):
+        samples = parse_sample_sheet(self._write(
+            f"alias,group,bam_dir,minknow_run_dir\nsample,control,{self.root},{self.root}\n"))
+        self.assertEqual(samples[0].minknow_run_dir, self.root)
+        samples = parse_sample_sheet(self._write(
+            f"alias,group,bam_dir,minknow_run_dir\nsample,control,{self.root},\n"))
+        self.assertIsNone(samples[0].minknow_run_dir)
+        with self.assertRaisesRegex(SampleSheetError, "MinKNOW run directory"):
+            parse_sample_sheet(self._write(
+                f"alias,group,bam_dir,minknow_run_dir\nsample,control,{self.root},{self.root / 'missing'}\n"))
+
     def test_rejects_empty_sheet_and_missing_fields(self):
         with self.assertRaisesRegex(SampleSheetError, "at least one row"):
             parse_sample_sheet(self._write("alias,group,bam_dir\n"))

@@ -1,12 +1,15 @@
 nextflow.enable.types = true
 
 include {
+    GeneContrast ;
     DifferentialExpressionResult ;
     Sample ;
     StabilityAudit ;
     StabilityComparisonInput
 } from './sample.nf'
-include { optional_file ; safe_name } from '../modules/generic_helpers.nf'
+include { optional_file } from '../modules/generic_helpers.nf'
+include { tsv_field ; parse_delimited_rows } from './gene_contrasts.nf'
+include { get_stop_files_in_dir } from './bam_ingress.nf'
 
 def stability_sample_key(sample) -> String {
     return "${sample.group}\t${sample.name}"
@@ -14,7 +17,8 @@ def stability_sample_key(sample) -> String {
 
 def stability_config(params_map: Map, samples: List<Sample>) -> Map {
     return [
-        schema_version: 1,
+        schema_version: 3,
+        contrasts: params_map.contrasts,
         behavior: params_map.behavior,
         num_stable_batches: params_map.num_stable_batches,
         max_feature_diff_fraction: params_map.max_feature_diff_fraction,
@@ -25,7 +29,7 @@ def stability_config(params_map: Map, samples: List<Sample>) -> Map {
         min_de_calls_for_fraction_metrics: params_map.min_de_calls_for_fraction_metrics,
         max_small_set_call_changes: params_map.max_small_set_call_changes,
         samples: samples.collect { sample ->
-            [name: sample.name, group: sample.group, is_live: sample.is_live]
+            [name: sample.name, group: sample.group, is_live: sample.is_live, protocol_run_id: sample.protocol_run_id]
         }.toSorted { left, right ->
             "${left.group}/${left.name}" <=> "${right.group}/${right.name}"
         },
@@ -36,71 +40,53 @@ def discover_stability_state(output_root: Path, first_analysis_index: Integer, c
     if (first_analysis_index < 1) {
         return [previous_results: optional_file(), streaks: [:], eligible: [:]]
     }
+
     def prior_index: Integer = first_analysis_index - 1
     def previous_results: Path = output_root.resolve('differential_expression').resolve("batch_${prior_index}")
+
     if (!java.nio.file.Files.isDirectory(previous_results)) {
         log.warn("Cannot restore DE stability baseline because ${previous_results} is missing; stability state starts fresh.")
         return [previous_results: optional_file(), streaks: [:], eligible: [:]]
     }
+
     def audit_dir: Path = output_root.resolve('stability').resolve("batch_${prior_index}")
     def config_path: Path = audit_dir.resolve('config.json')
     def contrasts_path: Path = audit_dir.resolve('contrast_stability.tsv')
     def samples_path: Path = audit_dir.resolve('sample_stability.tsv')
+
     if (![config_path, contrasts_path, samples_path].every { path: Path -> java.nio.file.Files.isRegularFile(path) }) {
-        log.info("Using DE snapshot ${previous_results} as a stability baseline; no compatible prior audit was found.")
-        return [previous_results: file(previous_results), streaks: [:], eligible: [:]]
-    }
-    def prior_config: Map = new groovy.json.JsonSlurper().parse(config_path.toFile()) as Map
-    if (groovy.json.JsonOutput.toJson(prior_config) != groovy.json.JsonOutput.toJson(config)) {
-        log.warn('DE stability parameters or sample structure changed; the previous stability streak is reset.')
+        log.info("No complete prior stability audit was found; stability state starts fresh.")
         return [previous_results: optional_file(), streaks: [:], eligible: [:]]
     }
+
+    def prior_config: Map = new groovy.json.JsonSlurper().parse(config_path.toFile()) as Map
+    if (groovy.json.JsonOutput.toJson(prior_config) != groovy.json.JsonOutput.toJson(config)) {
+        log.warn('DE stability parameters, sample structure, or protocol-run mappings changed; the previous stability streak is reset.')
+        return [previous_results: optional_file(), streaks: [:], eligible: [:]]
+    }
+
     def contrast_rows: List<Map> = read_stability_tsv(contrasts_path)
     def sample_rows: List<Map> = read_stability_tsv(samples_path)
     def streaks: Map<String,Integer> = contrast_rows.collectEntries { row: Map ->
         [(row.contrast_id as String): (row.consecutive_stable_batches as String).toInteger()]
     }
+
     def eligible: Map<String,Boolean> = sample_rows.collectEntries { row: Map ->
         [("${row.group}\t${row.sample}" as String): parse_stability_boolean(row.eligible)]
     }
+
     log.info("Restored DE stability state from ${audit_dir}.")
     return [previous_results: file(previous_results), streaks: streaks, eligible: eligible]
 }
 
 def read_stability_tsv(path: Path) -> List<Map> {
-    def lines: List<String> = java.nio.file.Files.readAllLines(path)
-    if (lines.empty) {
-        return []
-    }
-    def fields: List<String> = lines[0].split('\t', -1).toList()
-    return lines.drop(1).findAll { line: String -> !line.empty }.collect { line: String ->
-        def values: List<String> = line.split('\t', -1).toList()
-        fields.withIndex().collectEntries { field: String, index: Integer ->
-            [(field): index < values.size() ? values[index] : '']
-        }
-    }
+    return parse_delimited_rows(path.text, '\t', true, false)
 }
 
 def parse_stability_boolean(value: Object) -> Boolean {
     return "${value}".equalsIgnoreCase('true')
 }
 
-def expected_contrasts(samples: List<Sample>) -> List<Map> {
-    def groups: List<String> = samples*.group.unique()
-    if (!groups.contains('control')) {
-        error("DE stability requires the reference group 'control'.")
-    }
-    return groups
-        .findAll { group: String -> group != 'control' }
-        .toSorted()
-        .collect { group: String ->
-            [
-                contrast_id: "group_${safe_name(group)}_vs_control",
-                target_group: group,
-                reference_group: 'control',
-            ]
-        }
-}
 
 def tsv_value(value: Object) -> String {
     return value == null ? '' : "${value}".replace('\t', ' ').replace('\n', ' ')
@@ -108,14 +94,16 @@ def tsv_value(value: Object) -> String {
 
 def write_stability_tsv(path: Path, columns: List<String>, rows: List<Map>) -> Path {
     def lines: List<String> = [columns.join('\t')]
+
     lines.addAll(rows.collect { row: Map ->
-        columns.collect { column: String -> tsv_value(row[column]) }.join('\t')
+        columns.collect { column: String -> tsv_field(tsv_value(row[column])) }.join('\t')
     })
+
     java.nio.file.Files.writeString(path, lines.join('\n') + '\n')
     return path
 }
 
-def run_seq_run_manager_stop(sample_row: Map, minknow_connection: Map) -> Boolean {
+def run_seq_run_manager_stop(protocol_run_id: String, minknow_connection: Map) -> Boolean {
     def command: List<String> = [
         (minknow_connection.command ?: 'seq-run-manager') as String,
         'stop',
@@ -130,70 +118,131 @@ def run_seq_run_manager_stop(sample_row: Map, minknow_connection: Map) -> Boolea
         '--ca-certificate-path',
         "${minknow_connection.ca_certificate}",
         '--run-id',
-        sample_row.protocol_run_id as String,
+        protocol_run_id,
     ]
+
     try {
         def process: Process = new ProcessBuilder(command).redirectErrorStream(true).start()
         def command_output: String = process.inputStream.getText('UTF-8').trim()
         def exit_code: Integer = process.waitFor()
         if (exit_code == 0) {
             if (command_output) {
-                log.info("seq-run-manager stop for run '${sample_row.protocol_run_id}': ${command_output}")
+                log.info("seq-run-manager stop for run '${protocol_run_id}': ${command_output}")
             }
             return true
         }
         log.warn(
-            "Automatic MinKNOW run termination failed for sample '${sample_row.group}/${sample_row.sample}' " +
-                "(run '${sample_row.protocol_run_id}', exit code ${exit_code}). " +
-                "The workflow will retry after the next stable batch.${command_output ? " Output: ${command_output}" : ''}"
+            "Automatic MinKNOW run termination failed for run '${protocol_run_id}' (exit code ${exit_code}). " +
+                "The workflow will retry when all active live samples are stable in a later batch.${command_output ? " Output: ${command_output}" : ''}"
         )
         return false
     }
     catch (exception: Exception) {
         log.warn(
-            "Automatic MinKNOW run termination failed for sample '${sample_row.group}/${sample_row.sample}' " +
-                "(run '${sample_row.protocol_run_id}'): ${exception.message}. " +
-                'The workflow will retry after the next stable batch.'
+            "Automatic MinKNOW run termination failed for run '${protocol_run_id}': ${exception.message}. " +
+                'The workflow will retry when all active live samples are stable in a later batch.'
         )
         return false
     }
 }
 
-def apply_stability_action(sample_row: Map, behavior: String, minknow_connection: Map) -> String {
-    def label: String = "${sample_row.group}/${sample_row.sample}"
-    if (behavior == 'log') {
-        if (!parse_stability_boolean(sample_row.newly_eligible)) {
-            return 'none'
+def apply_run_stability_actions(sample_rows: List<Map>, behavior: String, minknow_connection: Map) -> String? {
+    def candidates: List<Map> = []
+
+    sample_rows.each { row: Map ->
+        row.run_eligible = false
+        row.run_blocking_samples = ''
+        row.action_result = 'none'
+        if (!parse_stability_boolean(row.effectively_live)) {
+            return
         }
-        log.info("DE stability: sample '${label}' reached the configured stability threshold and would be stopped.")
-        return 'logged'
+        if (!get_stop_files_in_dir(Path.of(row.bam_dir as String)).empty) {
+            row.action_result = 'stop_exists'
+            return
+        }
+        if (!(row.protocol_run_id as String)) {
+            if (parse_stability_boolean(row.eligible)) {
+                if (behavior == 'terminate') {
+                    row.action_result = 'termination_disabled_no_run_id'
+                }
+                else if (behavior == 'log' && parse_stability_boolean(row.newly_eligible)) {
+                    log.info("Sequencing stability: sample '${row.group}/${row.sample}' is eligible; run readiness is unavailable without a protocol run ID.")
+                    row.action_result = 'logged'
+                }
+            }
+            return
+        }
+        candidates.add(row)
     }
-    if (behavior != 'terminate' || !parse_stability_boolean(sample_row.eligible)) {
-        return 'none'
+
+    def runs: Map = candidates.groupBy { row: Map -> row.protocol_run_id as String }
+    def marker_error: String? = null
+
+    runs.each { protocol_run_id: String, members: List<Map> ->
+        if (marker_error != null) {
+            return
+        }
+
+        def blockers: List<String> = members
+            .findAll { row: Map -> !parse_stability_boolean(row.eligible) }
+            .collect { row: Map -> "${row.group}/${row.sample}" as String }
+            .toSorted()
+
+        def ready: Boolean = blockers.empty
+        members.each { row: Map ->
+            row.run_eligible = ready
+            row.run_blocking_samples = blockers.join(',')
+            if (!ready && parse_stability_boolean(row.eligible)) {
+                row.action_result = 'waiting_for_run_stability'
+            }
+        }
+
+        if (!ready) {
+            return
+        }
+
+        if (behavior == 'log') {
+            log.info("Sequencing stability: all ${members.size()} active live sample(s) in MinKNOW run '${protocol_run_id}' are eligible; the run would be stopped.")
+            members.each { row: Map -> row.action_result = 'logged' }
+            return
+        }
+
+        if (behavior != 'terminate') {
+            return
+        }
+
+        if (!run_seq_run_manager_stop(protocol_run_id, minknow_connection)) {
+            members.each { row: Map -> row.action_result = 'stop_failed' }
+            return
+        }
+
+        def marker_failures: List<String> = []
+        members.each { row: Map ->
+            def stop_path: Path = Path.of(row.bam_dir as String).resolve('STOP')
+            try {
+                java.nio.file.Files.createFile(stop_path)
+                row.action_result = 'stop_created'
+                log.info("Sequencing stability: stopped MinKNOW run '${protocol_run_id}' and created STOP for sample '${row.group}/${row.sample}' at ${stop_path}.")
+            }
+            catch (java.nio.file.FileAlreadyExistsException _ignored) {
+                if (java.nio.file.Files.isRegularFile(stop_path)) {
+                    row.action_result = 'stop_exists'
+                }
+                else {
+                    marker_failures.add("${stop_path}: path exists but is not a regular file" as String)
+                }
+            }
+            catch (exception: Exception) {
+                marker_failures.add("${stop_path}: ${exception.message}" as String)
+            }
+        }
+
+        if (!marker_failures.empty) {
+            marker_error = "MinKNOW run '${protocol_run_id}' was stopped, but STOP markers could not be created: ${marker_failures.join('; ')}. Repair these directories and create the missing STOP files before resuming."
+        }
     }
-    def stop_path: Path = Path.of(sample_row.bam_dir as String).resolve('STOP')
-    if (java.nio.file.Files.exists(stop_path)) {
-        log.info("DE stability: STOP already exists for sample '${label}' at ${stop_path}.")
-        return 'stop_exists'
-    }
-    if (!(sample_row.protocol_run_id as String)) {
-        return 'termination_disabled_no_run_id'
-    }
-    if (!run_seq_run_manager_stop(sample_row, minknow_connection)) {
-        return 'stop_failed'
-    }
-    try {
-        java.nio.file.Files.createFile(stop_path)
-        log.info(
-            "DE stability: stopped MinKNOW run '${sample_row.protocol_run_id}' for sample '${label}' " +
-                "and created STOP at ${stop_path}."
-        )
-        return 'stop_created'
-    }
-    catch (java.nio.file.FileAlreadyExistsException _ignored) {
-        log.info("DE stability: STOP already exists for sample '${label}' at ${stop_path}.")
-        return 'stop_exists'
-    }
+
+    return marker_error
 }
 
 workflow differential_stability {
@@ -235,11 +284,12 @@ workflow differential_stability {
     def streaks: Map<String,Integer> = new LinkedHashMap<String,Integer>(initial_state.streaks as Map)
     def previous_eligibility: Map<String,Boolean> = new LinkedHashMap<String,Boolean>(initial_state.eligible as Map)
     def active_keys: Set<String> = active_samples.collect { sample -> stability_sample_key(sample) }.toSet()
-    def contrast_definitions: List<Map> = expected_contrasts(samples)
+    def contrast_definitions: List<GeneContrast> = settings.contrasts
+
     audits_ch = assessed_ch.map { result ->
         def assessment_rows: List<Map> = read_stability_tsv(result.assessments)
         def assessments_by_id: Map = assessment_rows.collectEntries { row: Map -> [(row.contrast_id): row] }
-        def contrast_rows: List<Map> = contrast_definitions.collect { contrast: Map ->
+        def contrast_rows: List<Map> = contrast_definitions.collect { contrast ->
             def assessment: Map = assessments_by_id[contrast.contrast_id] ?: [:]
             def stable: Boolean = !result.baseline && parse_stability_boolean(assessment.stable)
             def streak: Integer = stable ? (streaks[contrast.contrast_id] ?: 0) + 1 : 0
@@ -262,7 +312,7 @@ workflow differential_stability {
         }.collect { sample ->
             def key: String = stability_sample_key(sample)
             def required: List<String> = contrast_definitions
-                .findAll { contrast: Map -> sample.group in [contrast.target_group, contrast.reference_group] }
+                .findAll { contrast -> sample.group in [contrast.target_group, contrast.reference_group] }
                 *.contrast_id
             def consecutive_stable_batches: Integer = required.empty
                 ? 0
@@ -289,6 +339,13 @@ workflow differential_stability {
                 action_result: 'none',
             ]
         }
+        // fair orders process outputs, not task execution. Apply termination in
+        // this sequential handler so later snapshots cannot act before earlier ones.
+        def marker_error: String? = apply_run_stability_actions(sample_rows, behavior, minknow_connection)
+        if (marker_error != null) {
+            error(marker_error)
+        }
+
         return record(
             batch_index: result.batch_index,
             analysis_index: result.analysis_index,
@@ -298,10 +355,10 @@ workflow differential_stability {
             config: settings.config,
         ) as StabilityAudit
     }
-    finalize_stability_audit(audits_ch, minknow_connection)
+    finalized_audits_ch = finalize_stability_audit(audits_ch, minknow_connection)
 
     emit:
-    finalize_stability_audit.out
+    finalized_audits_ch
 }
 
 process assess_differential_stability {
@@ -378,13 +435,6 @@ process finalize_stability_audit {
     )
 
     exec:
-    audit.sample_rows.each { sample_row: Map ->
-        sample_row.action_result = apply_stability_action(
-            sample_row,
-            audit.behavior,
-            minknow_connection,
-        )
-    }
     def contrast_columns: List<String> = [
         'analysis_index', 'batch_index', 'baseline', 'contrast_id', 'target_group', 'reference_group',
         'current_de_call_count', 'previous_de_call_count', 'de_call_union_count', 'changed_de_call_count',
@@ -395,7 +445,7 @@ process finalize_stability_audit {
     def sample_columns: List<String> = [
         'analysis_index', 'batch_index', 'group', 'sample', 'bam_dir', 'protocol_run_id', 'effectively_live',
         'required_contrasts', 'consecutive_stable_batches', 'eligible', 'newly_eligible',
-        'behavior', 'action_result',
+        'behavior', 'action_result', 'run_eligible', 'run_blocking_samples',
     ]
     write_stability_tsv(task.workDir.resolve('contrast_stability.tsv'), contrast_columns, audit.contrast_rows)
     write_stability_tsv(task.workDir.resolve('sample_stability.tsv'), sample_columns, audit.sample_rows)

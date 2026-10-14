@@ -25,6 +25,35 @@ from workflow_glue.qc_report_types.imodulon_plots import (  # noqa: E402
     validate_imodulon_timecourse,
 )
 from workflow_glue import qc_report  # noqa: E402
+from workflow_glue.qc_report_types.ica_monitoring import load_ica_monitoring_results
+
+
+def test_ica_monitoring_matches_group_alias_pairs_and_snapshot(tmp_path):
+    root = write_ica_snapshot(tmp_path / "ica")
+    data = load_imodulon_results(root)
+    path = tmp_path / "sample_stability.tsv"
+    rows = pd.DataFrame({
+        "analysis_index": data.provenance["analysis_index"],
+        "batch_index": data.provenance["batch_index"],
+        "group": data.samples.group, "sample": data.samples.alias,
+        "method": "ica", "metric": "ica_monitoring", "behavior": "log",
+        "required_components": 2, "passing_components": 2, "blocking_components": "",
+        "consecutive_stable_batches": 3, "eligible": "false",
+        "reason": "all_components_converged", "action_result": "none",
+    })
+    rows.to_csv(path, sep="\t", index=False)
+    table = load_ica_monitoring_results(path, data, "log")
+    assert len(table) == len(data.samples)
+    assert table["Passing components"].eq("2").all()
+    rows["analysis_index"] += 1
+    rows.to_csv(path, sep="\t", index=False)
+    with pytest.raises(ValueError, match="analysis_index does not match"):
+        load_ica_monitoring_results(path, data, "log")
+    rows["analysis_index"] -= 1
+    rows = pd.concat([rows, rows.iloc[[0]]])
+    rows.to_csv(path, sep="\t", index=False)
+    with pytest.raises(ValueError, match="sample identities do not match"):
+        load_ica_monitoring_results(path, data, "log")
 
 
 def write_ica_snapshot(root, *, status="ready", groups=None, times=None, values=None):
@@ -65,6 +94,8 @@ def write_ica_snapshot(root, *, status="ready", groups=None, times=None, values=
         "analysis_index": 11,
         "model": model,
         "settings": {
+            "control_group": "control",
+            "condition_groups": list(dict.fromkeys(samples["group"])),
             "log_base": 2,
             "pseudocount": 1,
             "min_read_count": 10000,
@@ -690,3 +721,12 @@ def test_deferred_report_shows_only_annotations_in_diagnostics(tmp_path):
     assert "Component details" not in html
     assert "Time course details" not in html
     assert "assigned_abundance" not in html
+
+
+def test_ica_cohort_can_be_a_subset_of_qc_samples(tmp_path):
+    root = write_ica_snapshot(tmp_path / "snapshot")
+    data = load_imodulon_results(root)
+    expected = pd.DataFrame({"Name": data.samples.alias, "Group": data.samples.group})
+    expected = pd.concat([expected, pd.DataFrame([{"Name": "QC only", "Group": "omitted"}])], ignore_index=True)
+    loaded = load_imodulon_results(root, expected_samples=expected)
+    assert "omitted" not in loaded.groups

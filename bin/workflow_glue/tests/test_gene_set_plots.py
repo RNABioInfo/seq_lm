@@ -31,6 +31,10 @@ def write_gene_set_tree(path: Path):
             {"Name": "treated_1", "Group": "treated"},
         ]
     )
+    metadata.rename(columns={"Name": "sample", "Group": "group"}).to_csv(
+        path / "sample_metadata.tsv", sep="\t", index=False)
+    pd.DataFrame([{"contrast_id": "group_treated_vs_control", "target_group": "treated", "reference_group": "control"}]).to_csv(
+        path / "contrasts.tsv", sep="\t", index=False)
     feature_ids = ["feature_a", "feature_b", "feature_c", "feature_d"]
     pd.DataFrame(
         {
@@ -159,7 +163,7 @@ def write_gene_set_tree(path: Path):
             "description": ["Shared label", "Shared label", "Mixed response"],
             "n_genes": [2, 2, 2],
             "target_group": ["treated"] * 3,
-            "control_group": ["control"] * 3,
+            "reference_group": ["control"] * 3,
             "effect_size": [1.3, -0.9, 0.1],
             "average_score": [0.05, 0.05, 0.05],
             "t_statistic": [5.0, -4.0, 0.2],

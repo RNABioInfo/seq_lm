@@ -66,7 +66,7 @@ def _temporal_metadata(
             "Temporal analysis requires sample, group, and order metadata."
         )
 
-    metadata = metadata.copy()
+    metadata = metadata.loc[metadata["sample"].isin(differential.sample_metadata.index)].copy()
     for column in ("sample", "group"):
         if metadata[column].isna().any():
             raise ValueError(f"Temporal analysis contains missing {column} values.")

@@ -16,6 +16,7 @@ script_path = sub("^--file=", "", script_arg[[1]])
 script_dir = dirname(normalizePath(script_path))
 
 source(file.path(script_dir, "read_gmt.R"))
+source(file.path(script_dir, "..", "read_contrasts.R"))
 
 options = list(
     make_option(
@@ -36,10 +37,9 @@ options = list(
         help = "Gene sets in Gene Matrix Transposed (GMT) format."
     ),
     make_option(
-        c("--control_group"),
+        c("--contrasts"),
         type = "character",
-        default = "control",
-        help = "Reference group used for pairwise contrasts [default: %default]."
+        help = "Canonical TSV of contrast_id, target_group, reference_group."
     ),
     make_option(
         c("--lfc"),
@@ -124,12 +124,8 @@ if (length(missing_manifest_columns) > 0) {
 if (anyDuplicated(quant_manifest$name)) {
     stop("Sample names in --quant_manifest must be unique.")
 }
-if (!(args$control_group %in% quant_manifest$group)) {
-    stop(sprintf(
-        "Control group '%s' is absent from --quant_manifest.",
-        args$control_group
-    ))
-}
+contrasts = read_contrasts(args$contrasts, unique(quant_manifest$group))
+write_tsv(contrasts, file.path(output_dir, "contrasts.tsv"))
 
 choose_column = function(
     available,
@@ -700,10 +696,6 @@ make_count_annotation = function(identifier_map) {
         )
 }
 
-safe_name = function(value) {
-    gsub("[^A-Za-z0-9._-]", "_", value)
-}
-
 write_fry_plot = function(fry_table, output_path, title, top_n) {
     if (nrow(fry_table) == 0L) {
         return(invisible(NULL))
@@ -779,7 +771,6 @@ identifier_map = build_identifier_map(
 count_annotation = make_count_annotation(identifier_map)
 
 sample_groups = factor(quant_manifest$group)
-sample_groups = relevel(sample_groups, ref = args$control_group)
 
 sample_metadata = quant_manifest %>%
     transmute(
@@ -884,23 +875,15 @@ if (!is.null(gene_sets_path)) {
     ))
 }
 
-target_groups = setdiff(levels(sample_groups), args$control_group)
-if (length(target_groups) == 0L) {
-    stop("At least one non-control group is required.")
-}
-
-for (target_group in target_groups) {
+for (contrast_index in seq_len(nrow(contrasts))) {
+    target_group = contrasts$target_group[[contrast_index]]
+    reference_group = contrasts$reference_group[[contrast_index]]
     contrast = numeric(ncol(design))
     names(contrast) = colnames(design)
     contrast[[target_group]] = 1
-    contrast[[args$control_group]] = -1
+    contrast[[reference_group]] = -1
 
-    contrast_name = paste0(
-        "group_",
-        safe_name(target_group),
-        "_vs_",
-        safe_name(args$control_group)
-    )
+    contrast_name = contrasts$contrast_id[[contrast_index]]
     contrast_dir = file.path(output_dir, contrast_name)
     dir.create(contrast_dir, recursive = TRUE, showWarnings = FALSE)
 
@@ -973,7 +956,7 @@ for (target_group in target_groups) {
             write_fry_plot(
                 fry_result,
                 file.path(contrast_dir, "fry_signed_significance.png"),
-                paste0("fry: ", target_group, " vs ", args$control_group),
+                paste0("fry: ", target_group, " vs ", reference_group),
                 args$plot_top_n
             )
         }

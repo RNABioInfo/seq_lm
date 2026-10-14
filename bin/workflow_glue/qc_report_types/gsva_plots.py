@@ -55,7 +55,7 @@ REQUIRED_LIMMA_COLUMNS = (
     "description",
     "n_genes",
     "target_group",
-    "control_group",
+    "reference_group",
     "effect_size",
     "average_score",
     "t_statistic",
@@ -215,7 +215,7 @@ def _read_limma(
     _require_columns(results, REQUIRED_LIMMA_COLUMNS, path)
     _validate_identifiers(
         results,
-        ("gene_set", "target_group", "control_group"),
+        ("gene_set", "target_group", "reference_group"),
         path,
     )
     if results["gene_set"].duplicated().any():
@@ -225,8 +225,8 @@ def _read_limma(
         raise ValueError(f"{path} gene-set order does not match the GSVA score table.")
     if set(results["target_group"]) != {contrast.target_group}:
         raise ValueError(f"{path} has an unexpected target_group.")
-    if set(results["control_group"]) != {contrast.reference_group}:
-        raise ValueError(f"{path} has an unexpected control_group.")
+    if set(results["reference_group"]) != {contrast.reference_group}:
+        raise ValueError(f"{path} has an unexpected reference_group.")
     _validate_finite(
         results,
         ("n_genes", "effect_size", "average_score", "t_statistic", "log_odds"),

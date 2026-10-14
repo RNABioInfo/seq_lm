@@ -10,7 +10,6 @@ from .constants import (
     DISPLAY_COLUMNS,
     EXPECTED_COLUMNS,
     NANOPLOT_COLUMNS,
-    OPTIONAL_COLUMNS,
 )
 
 
@@ -42,16 +41,7 @@ def aggregate_nanoplot(nanoplot_paths: list[Path]) -> pd.DataFrame | None:
     if not nanoplot_paths:
         return None
 
-    nanoplot_results = []
-    for path in nanoplot_paths:
-        try:
-            nanoplot_results.append(pd.read_csv(path, sep="\t"))
-        except pd.errors.EmptyDataError:
-            # QC versions before the producer wrote an explicit header created
-            # a valid, headerless gzip stream when a BAM had no usable reads.
-            # Preserve that chunk as an empty table so cumulative live reports
-            # can still include its flagstat counts and later QC chunks.
-            nanoplot_results.append(pd.DataFrame(columns=NANOPLOT_COLUMNS))
+    nanoplot_results = [pd.read_csv(path, sep="\t") for path in nanoplot_paths]
     missing_columns = sorted(
         {
             column
@@ -76,10 +66,7 @@ def load_qc_samples(samples_path) -> QCResult:
         raise ValueError(
             "QC report samples table is missing columns: " + ", ".join(missing_columns)
         )
-    columns = EXPECTED_COLUMNS + [
-        column for column in OPTIONAL_COLUMNS if column in samples
-    ]
-    samples = samples[columns].rename(columns=DISPLAY_COLUMNS)
+    samples = samples[EXPECTED_COLUMNS].rename(columns=DISPLAY_COLUMNS)
 
     qc_results: list[SampleQCResult] = []
 

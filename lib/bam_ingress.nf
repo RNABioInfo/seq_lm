@@ -1,4 +1,5 @@
 include { Sample ; SampleChunk ; SampleBatch } from './sample.nf'
+include { parse_delimited_rows } from './gene_contrasts.nf'
 
 nextflow.enable.types = true
 
@@ -9,6 +10,8 @@ record BamIngressArgs {
     bam_poll_interval_ms: Integer
     bam_stability_polls: Integer
     termination_requested: Boolean
+    detect_minknow_completion: Boolean?
+    minknow_completion_settle_seconds: Integer?
 }
 
 record LiveSampleEvent {
@@ -69,15 +72,14 @@ def sample_sheet_has_order_column(sample_sheet_path: Path) -> Boolean {
     if (!sample_sheet_path.exists() || !sample_sheet_path.isFile()) {
         return false
     }
-    def rows: List = sample_sheet_path.splitCsv(header: true, strip: true).take(1)
+    def rows: List = parse_delimited_rows(sample_sheet_path.text, ',', true, true).take(1)
     return !rows.empty && rows[0].keySet().contains('order')
 }
 
 def parse_sample_sheet(ingress_args) -> List<Sample> {
     def required_fields: Set<String> = ["alias", "group", "bam_dir"].toSet()
 
-    return ingress_args.sample_sheet_path
-        .splitCsv(header: true, strip: true)
+    return parse_delimited_rows(ingress_args.sample_sheet_path.text, ',', true, true)
         .collect { row ->
             def keys: Set<String> = row.keySet() as Set<String>
             def missing = required_fields - keys
@@ -91,12 +93,13 @@ def parse_sample_sheet(ingress_args) -> List<Sample> {
             }
 
             def sample: Sample = record(
-                name: row.alias,
-                group: row.group,
+                name: row.alias?.trim(),
+                group: row.group?.trim(),
                 order: parse_sample_order(row.order, row.alias),
                 bam_dir: file(row.bam_dir),
                 is_live: parse_is_live(row.is_live, row.alias),
                 protocol_run_id: null,
+                minknow_run_dir: parse_minknow_run_dir(row.minknow_run_dir, row.alias),
             )
 
             if (!sample.name?.trim()) {
@@ -111,6 +114,18 @@ def parse_sample_sheet(ingress_args) -> List<Sample> {
 
             return sample
         }
+}
+
+def parse_minknow_run_dir(value: Object, alias: Object) -> Path? {
+    def normalized: String = value == null ? '' : "${value}".trim()
+    if (!normalized) {
+        return null
+    }
+    def directory: Path = file(normalized).toAbsolutePath().normalize()
+    if (!java.nio.file.Files.isDirectory(directory)) {
+        error("MinKNOW run directory does not exist or is not a directory for sample '${alias}': ${directory}")
+    }
+    return directory
 }
 
 def parse_sample_order(value: Object, alias: Object) -> Integer? {
@@ -182,6 +197,12 @@ def attach_minknow_run_metadata(samples: List<Sample>, termination_requested: Bo
     def sheets_by_parent: Map<String,Map> = [:]
     return samples.collect { sample ->
         def parent: Path = sample.bam_dir.toAbsolutePath().normalize().parent
+        if (!termination_requested) {
+            def run_directory: Path = MinknowCompletion.resolveRunDirectory(sample.bam_dir, sample.minknow_run_dir)
+            if (run_directory != null) {
+                parent = run_directory
+            }
+        }
         def parent_key: String = parent == null ? '' : parent.toString()
         def sheet_result: Map = sheets_by_parent.computeIfAbsent(parent_key) {
             inspect_minknow_sample_sheet(parent)
@@ -200,6 +221,7 @@ def attach_minknow_run_metadata(samples: List<Sample>, termination_requested: Bo
             bam_dir: sample.bam_dir,
             is_live: sample.is_live,
             protocol_run_id: run_result.protocol_run_id,
+            minknow_run_dir: sample.minknow_run_dir,
         ) as Sample
     }
 }
@@ -241,8 +263,7 @@ def inspect_minknow_sample_sheet(parent: Path?) -> Map {
         if (quote_count % 2 != 0) {
             return [rows: [], reason: "could not parse MinKNOW sample sheet ${sample_sheet}: unmatched CSV quote"]
         }
-        def rows: List<Map> = sample_sheet
-            .splitCsv(header: true, strip: true)
+        def rows: List<Map> = parse_delimited_rows(sample_sheet.text, ',', true, true)
             .collect { row ->
                 row.collectEntries { key, value ->
                     def normalized_key: String = "${key}".replace('\uFEFF', '').trim()
@@ -293,13 +314,13 @@ def protocol_run_id_for_sample(sample, sheet_result: Map) -> Map {
     return [protocol_run_id: protocol_run_id, reason: null]
 }
 
-def validate_samples(samples: List<Sample>) {
+def validate_samples(samples: List<Sample>, require_control: Boolean = true) -> Void {
     if (samples.empty) {
         error("BAM ingress requires at least one sample.")
     }
 
     def control_count = samples.count { sample -> sample.group.trim().equalsIgnoreCase('control') }
-    if (control_count < 2) {
+    if (require_control && control_count < 2) {
         error("Sample sheet requires at least two control samples in the group column.")
     }
 
@@ -323,6 +344,7 @@ def validate_samples(samples: List<Sample>) {
             error("BAM path is not a directory for sample '${sample_label(sample)}': ${sample.bam_dir}")
         }
     }
+    return
 }
 
 def parse_is_live(value: Object, alias: Object) -> Boolean {
@@ -391,6 +413,9 @@ def mixed_analysis_ingress(samples: List<Sample>, ingress_args, experiment_sampl
                 live_samples.size(),
                 ingress_args.bam_poll_interval_ms,
                 ingress_args.bam_stability_polls,
+                [enabled: ingress_args.get('detect_minknow_completion') != false && !ingress_args.termination_requested,
+                 run_dir: sample.minknow_run_dir, protocol_run_id: sample.protocol_run_id,
+                 settle_seconds: ingress_args.get('minknow_completion_settle_seconds') ?: 30],
             )
         )
     }
@@ -468,7 +493,8 @@ def make_live_analysis_ingress_channel(
     initial_bams: List<Path>,
     live_sample_count: Integer,
     poll_interval_ms: Integer,
-    stability_polls: Integer
+    stability_polls: Integer,
+    completion: Map
 ) {
     def existing_stop_files: List<Path> = get_stop_files_in_dir(sample.bam_dir)
     def batch_index: Integer = 0
@@ -494,6 +520,7 @@ def make_live_analysis_ingress_channel(
             initial_bams,
             poll_interval_ms as Long,
             stability_polls,
+            completion,
             {
                 log.info(
                     "Live BAM poller is active for sample '${sample_label(sample)}' under ${sample.bam_dir}."
@@ -507,7 +534,7 @@ def make_live_analysis_ingress_channel(
         }
         .map { event -> make_live_path_event(event.source as String, event.path as Path) }
         .flatMap { event ->
-            if (is_stop_path(event.path)) {
+            if (is_stop_path(event.path) || event.source == 'minknow-final-summary') {
                 log_sample_stop(sample, event.path, event.source, batch_index, live_sample_count)
                 return [make_live_stop_event(batch_index, sample_index, sample)]
             }

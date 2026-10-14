@@ -25,17 +25,9 @@ _package_name = "deseq_analysis"
 def argparser() -> ArgumentParser:
     """Create the command-line parser."""
     parser = ArgumentParser(description="Differential expression analysis.")
-    inputs = parser.add_mutually_exclusive_group(required=True)
-    inputs.add_argument(
-        "-m",
-        "--quant-manifest",
+    parser.add_argument(
+        "-m", "--quant-manifest", required=True,
         help="TSV with name, group, and count_file columns.",
-    )
-    inputs.add_argument(
-        "-q",
-        "--quant-files",
-        nargs="+",
-        help="Legacy run_N_replicate_N featureCounts files.",
     )
     parser.add_argument("-o", "--output-dir", default=".")
     parser.add_argument("-t", "--threads", type=int, default=1)
@@ -81,7 +73,7 @@ def main() -> None:
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    metadata_df = get_metadata(args.quant_files, args.quant_manifest)
+    metadata_df = get_metadata(args.quant_manifest)
     if "control" not in set(metadata_df["group"]):
         raise ValueError("Differential expression requires a control group.")
     comparison_groups = sorted(set(metadata_df["group"]) - {"control"})

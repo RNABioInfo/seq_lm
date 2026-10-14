@@ -276,6 +276,9 @@ def prepare(matrix, annotation, gene_map, min_coverage, output, imodulon_table=N
             "genes": shared,
             "components": components,
             "component_metadata": component_metadata,
+            # Full-model column maxima make the convergence score
+            # invariant to ICA column scaling, even with partial gene mapping.
+            "component_max_abs_weights": dict(zip(components, column_scale.tolist())),
             "transcript_map": transcript_map,
             "transcript_aliases": {
                 a: next(iter(ts))
@@ -423,6 +426,7 @@ def analyze(
     batch_index=0,
     analysis_index=0,
     report_sequence=0,
+    control_group="control",
 ):
     prepared, output = Path(prepared), Path(output)
     output.mkdir(parents=True, exist_ok=False)
@@ -433,8 +437,10 @@ def analyze(
 
     metadata = read_table(manifest)
 
-    if not {"name", "group", "count_file"}.issubset(metadata.columns):
-        raise ValueError("Manifest requires name, group, count_file")
+    required_columns = {"name", "group", "order", "count_file", "source_batch_index"}
+    missing_columns = required_columns - set(metadata.columns)
+    if missing_columns:
+        raise ValueError("Manifest is missing required columns: " + ", ".join(sorted(missing_columns)))
     
     for column in ("name", "group"):
         metadata[column] = metadata[column].str.strip()
@@ -447,22 +453,10 @@ def analyze(
 
     identifiers(metadata.sample_id, "Samples")
 
-    control_labels = set(
-        metadata.loc[metadata.group.str.lower().eq("control"), "group"]
-    )
-
-    if len(control_labels) != 1:
-        raise ValueError("Require one unambiguous case-insensitive control group label")
-    
-    control_group = next(iter(control_labels))
+    control_group = control_group.strip()
     control = metadata.group.eq(control_group).to_numpy()
-
-    if control.sum() < 2:
-        raise ValueError("Require at least two control samples")
-    
-    for field in ("order", "source_batch_index"):
-        if field not in metadata:
-            metadata[field] = ""
+    if not control_group or control.sum() < 2:
+        raise ValueError(f"Require at least two control samples in group '{control_group}'")
 
     metadata = metadata.rename(columns={"name": "alias"})
     abundance = np.zeros((len(model["genes"]), len(metadata)))
@@ -519,6 +513,8 @@ def analyze(
         "quantifications": hashes,
         "manifest_sha256": sha256(manifest),
         "settings": {
+            "control_group": control_group,
+            "condition_groups": list(dict.fromkeys(metadata.group)),
             "log_base": log_base,
             "pseudocount": pseudocount,
             "min_read_count": min_reads,
@@ -675,6 +671,7 @@ def main():
     run = modes.add_parser("analyze")
     for flag in ("prepared", "manifest", "counts-dir", "output"):
         run.add_argument("--" + flag, required=True)
+    run.add_argument("--control-group", default="control")
     run.add_argument("--log-base", type=lambda x: finite_number(x, 1), default=2.0)
     run.add_argument("--pseudocount", type=lambda x: finite_number(x, 0), default=1.0)
     run.add_argument(

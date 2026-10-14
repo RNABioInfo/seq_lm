@@ -2,7 +2,7 @@
 
 nextflow.enable.types = true
 
-include { DifferentialExpressionBatch ; QuantifiedSampleBatch } from '../lib/sample.nf'
+include { DifferentialExpressionBatch ; QuantifiedSampleBatch ; GeneContrast ; DifferentialExpressionResult } from '../lib/sample.nf'
 
 include {
     differential_expression_results_dir ;
@@ -10,10 +10,13 @@ include {
     shell_quote
 } from '../modules/generic_helpers.nf'
 
+include { gene_contrast_tsv ; tsv_field } from '../lib/gene_contrasts.nf'
+
 /** Run differential expression for every complete quantification batch. */
 workflow differential_expression {
     take:
     quantified_batches: Channel<QuantifiedSampleBatch>
+    contrasts: List<GeneContrast>
     first_analysis_index: Integer
     annotation: Path
     gene_sets: Path
@@ -81,6 +84,7 @@ workflow differential_expression {
 
     edgeR_results_ch = run_differential_expression_edgeR(
         ready_quantified_sample_batches_ch,
+        contrasts,
         gene_sets,
         annotation,
         de_lfc_cutoff,
@@ -156,6 +160,7 @@ process run_differential_expression_edgeR {
 
     input:
     quant_batch: DifferentialExpressionBatch
+    contrasts: List<GeneContrast>
     gene_sets: Path
     annotation: Path
     de_lfc_cutoff: Number
@@ -172,6 +177,7 @@ process run_differential_expression_edgeR {
     )
 
     script:
+    def contrast_rows: String = gene_contrast_tsv(contrasts)
     def results_dir: String = differential_expression_results_dir(quant_batch.analysis_index)
     def gene_set_args: String = gene_sets.name == optional_file().name ? '' : "--gene_sets ${gene_sets}"
     def manifest_rows: String = quant_batch.samples
@@ -186,9 +192,11 @@ process run_differential_expression_edgeR {
         printf '%s\\n' ${quoted_manifest_rows} >> quant_manifest.tsv
 
         mkdir ${results_dir}
+        printf '%s' ${shell_quote(contrast_rows)} > contrasts.tsv
 
         edgeR-analysis \
             --quant_manifest quant_manifest.tsv \
+            --contrasts contrasts.tsv \
             --output_dir ${results_dir} \
             ${gene_set_args} \
             --annotation ${annotation} \
@@ -204,7 +212,7 @@ process run_gene_set_variation_analysis {
     maxForks 1
 
     input:
-    differential_result: Map
+    differential_result: DifferentialExpressionResult
 
     stage:
     stageAs differential_result.results, 'edgeR_results'
@@ -224,6 +232,7 @@ process run_gene_set_variation_analysis {
         cp -R edgeR_results/. ${results_dir}/
 
         gsva-analysis \
+            --contrasts ${results_dir}/contrasts.tsv \
             --feature_counts ${results_dir}/feature_counts.tsv \
             --sample_metadata ${results_dir}/sample_metadata.tsv \
             --gene_set_resolution ${results_dir}/gene_set_resolution.tsv \
@@ -232,5 +241,5 @@ process run_gene_set_variation_analysis {
 }
 
 def de_manifest_field(value: Object) -> String {
-    return "${value}".replaceAll(/[\t\r\n]+/, ' ')
+    return tsv_field("${value}")
 }

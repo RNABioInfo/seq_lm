@@ -37,12 +37,17 @@ def sample_metadata(include_second_target=False):
 def write_edge_r_tree(
     path: Path,
     *,
-    legacy_counts: bool = False,
     include_second_target: bool = False,
     second_order_mismatch: bool = False,
 ):
     """Write compact edgeR outputs for report tests."""
     metadata = sample_metadata(include_second_target)
+    metadata.rename(columns={"Name": "sample", "Group": "group"}).to_csv(
+        path / "sample_metadata.tsv", sep="\t", index=False)
+    definitions = [{"contrast_id": "group_treated_vs_control", "target_group": "treated", "reference_group": "control"}]
+    if include_second_target:
+        definitions.append({"contrast_id": "group_rescue_vs_control", "target_group": "rescue", "reference_group": "control"})
+    pd.DataFrame(definitions).to_csv(path / "contrasts.tsv", sep="\t", index=False)
     samples = metadata["Name"].tolist()
     feature_ids = ["feature_a", "feature_b", "feature_c", "feature_d"]
     counts = pd.DataFrame(
@@ -52,13 +57,7 @@ def write_edge_r_tree(
         },
         index=feature_ids,
     )
-    if legacy_counts:
-        counts.to_csv(path / "feature_counts.tsv", sep="\t", index=False)
-    else:
-        counts.rename_axis("feature_id").to_csv(
-            path / "feature_counts.tsv",
-            sep="\t",
-        )
+    counts.rename_axis("feature_id").to_csv(path / "feature_counts.tsv", sep="\t")
 
     pd.DataFrame(
         {
@@ -145,33 +144,12 @@ def test_load_differential_results_aligns_by_feature_id(tmp_path):
     assert data.contrasts[0].label == "treated vs control"
 
 
-def test_load_differential_results_supports_valid_legacy_counts(tmp_path):
-    """Legacy counts without feature_id use validated edgeR row ordering."""
-    metadata = write_edge_r_tree(
-        tmp_path,
-        legacy_counts=True,
-        include_second_target=True,
-    )
-    data = dp.load_differential_results(tmp_path, metadata)
-
-    assert data.feature_counts.index.name == "feature_id"
-    assert (
-        data.feature_counts.index.tolist()
-        == data.contrasts[0].results["feature_id"].tolist()
-    )
-    assert len(data.contrasts) == 2
-
-
-def test_legacy_counts_reject_different_contrast_feature_order(tmp_path):
-    """A legacy row-order fallback cannot silently align inconsistent contrasts."""
-    metadata = write_edge_r_tree(
-        tmp_path,
-        legacy_counts=True,
-        include_second_target=True,
-        second_order_mismatch=True,
-    )
-
-    with pytest.raises(ValueError, match="identical feature ordering"):
+def test_load_differential_results_requires_feature_ids(tmp_path):
+    metadata = write_edge_r_tree(tmp_path)
+    counts_path = tmp_path / "feature_counts.tsv"
+    counts = pd.read_csv(counts_path, sep="\t").drop(columns="feature_id")
+    counts.to_csv(counts_path, sep="\t", index=False)
+    with pytest.raises(ValueError, match="requires a feature_id column"):
         dp.load_differential_results(tmp_path, metadata)
 
 
@@ -378,7 +356,7 @@ def test_result_stability_is_last_differential_tab(tmp_path, monkeypatch):
     """Result Stability is rendered beside Overview and Contrasts."""
     metadata = write_edge_r_tree(tmp_path)
     data = dp.load_differential_results(tmp_path, metadata)
-    tab_names = []
+    tab_groups = []
     captured_tables = []
 
     class FakeTabContext:
@@ -389,8 +367,12 @@ def test_result_stability_is_last_differential_tab(tmp_path, monkeypatch):
             return False
 
     class FakeTabs:
+        def __init__(self):
+            self.names = []
+            tab_groups.append(self.names)
+
         def add_tab(self, name):
-            tab_names.append(name)
+            self.names.append(name)
             return FakeTabContext()
 
     monkeypatch.setattr(dp, "Tabs", FakeTabs)
@@ -403,7 +385,7 @@ def test_result_stability_is_last_differential_tab(tmp_path, monkeypatch):
 
     dp.add_differential_analysis(data, lfc_cutoff=1, padj_cutoff=0.05)
 
-    assert tab_names == ["Overview", "Contrasts", "Result Stability"]
+    assert tab_groups[0] == ["Overview", "Contrasts", "Result Stability"]
     assert captured_tables[0].columns[:2].tolist() == [
         "Sample",
         "#Stable consec. batches",
@@ -470,3 +452,27 @@ def test_heatmap_placeholder_when_no_gene_is_significant(tmp_path):
     labels = list(heatmap._fig.select({"type": Label}))
 
     assert "No genes pass both" in labels[0].text
+
+
+def test_explicit_contrasts_preserve_order_and_exclude_qc_only_groups(tmp_path):
+    metadata = write_edge_r_tree(tmp_path, include_second_target=True)
+    definitions = pd.read_csv(tmp_path / "contrasts.tsv", sep="\t").iloc[::-1]
+    definitions.to_csv(tmp_path / "contrasts.tsv", sep="\t", index=False)
+    # Repeated aliases in an omitted group must not collide with DEA samples.
+    qc_only = pd.DataFrame([{"Name": "control_1", "Group": "QC only"}])
+    report_samples = pd.concat([metadata, qc_only], ignore_index=True)
+    data = dp.load_differential_results(tmp_path, report_samples)
+    assert [contrast.label for contrast in data.contrasts] == ["rescue vs control", "treated vs control"]
+    assert "QC only" not in data.condition_colors
+    assert data.feature_counts.columns.tolist() == metadata["Name"].tolist()
+    # Explicit labels handle group names whose sanitized directory names collide.
+    definitions.loc[definitions.target_group.eq("treated"), "target_group"] = "rescue!"
+    definitions.loc[definitions.target_group.eq("rescue"), "target_group"] = "rescue?"
+    definitions.to_csv(tmp_path / "contrasts.tsv", sep="\t", index=False)
+    for filename, group_column in [("sample_metadata.tsv", "group"), ("edgeR_mds_data.tsv", "group")]:
+        frame = pd.read_csv(tmp_path / filename, sep="\t")
+        frame[group_column] = frame[group_column].replace({"treated": "rescue!", "rescue": "rescue?"})
+        frame.to_csv(tmp_path / filename, sep="\t", index=False)
+    report_samples["Group"] = report_samples["Group"].replace({"treated": "rescue!", "rescue": "rescue?"})
+    data = dp.load_differential_results(tmp_path, report_samples)
+    assert [contrast.label for contrast in data.contrasts] == ["rescue? vs control", "rescue! vs control"]

@@ -47,7 +47,7 @@ class LiveQuantificationTest(unittest.TestCase):
             self.assertEqual(matrix.loc["control/rep_1", "tx_1"], 10)
             self.assertEqual(matrix.loc["control/rep_1", "tx_2"], 21)
 
-    def test_featurecounts_input_remains_supported(self):
+    def test_featurecounts_input_is_rejected(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             counts_path = Path(temporary_directory) / "counts.txt"
             pd.DataFrame(
@@ -58,8 +58,8 @@ class LiveQuantificationTest(unittest.TestCase):
                 }
             ).to_csv(counts_path, sep="\t", index=False)
 
-            counts = read_quantification_counts(str(counts_path))
-            self.assertEqual(counts.to_dict(), {"gene_1": 12, "gene_2": 34})
+            with self.assertRaisesRegex(ValueError, "requires tname and num_reads"):
+                read_quantification_counts(str(counts_path))
 
     def test_duplicate_group_and_name_is_rejected(self):
         with tempfile.TemporaryDirectory() as temporary_directory:

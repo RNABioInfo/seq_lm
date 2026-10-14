@@ -9,7 +9,7 @@ from ezcharts.components.reports import labs
 from ezcharts.layout.snippets import Tabs
 from ezcharts.layout.snippets.table import DataTable
 
-from .report_compat import apply_report_branding, labs_report
+from .report_layout import apply_report_branding, labs_report
 from .util import get_named_logger, wf_parser  # noqa: ABS101
 
 from .qc_report_types.differential_plots import (
@@ -30,6 +30,7 @@ from .qc_report_types.temporal_plots import (
     add_temporal_analysis,
     load_temporal_results,
 )
+from .qc_report_types.ica_monitoring import load_ica_monitoring_results
 from .qc_report_types.imodulon_plots import (
     add_imodulon_analysis,
     load_imodulon_results,
@@ -52,21 +53,8 @@ __all__ = [
     "create_2d_kde_html",
     "create_nanoplot_metrics_table",
     "create_read_fate_sankey_html",
-    "create_read_length_quality_kde_html",
     "create_sample_read_fate_sankey_html",
 ]
-
-
-def create_read_length_quality_kde_html(nanoplot):
-    """Compatibility wrapper for the focused read-length/quality probe."""
-    return create_2d_kde_html(
-        nanoplot,
-        x_column="lengths",
-        y_column="quals",
-        title="Read length vs quality 2D KDE",
-        x_axis_label="Read length",
-        y_axis_label="Read quality",
-    )
 
 
 def _next_report_revision(report_path):
@@ -81,8 +69,9 @@ def _next_report_revision(report_path):
     state_path = report_path.with_name(f"{report_path.stem}_state.json")
     if state_path.exists():
         state = json.loads(state_path.read_text())
-        if "report_revision" in state:
-            revisions.append(int(state["report_revision"]))
+        if state["schema_version"] != 2:
+            raise ValueError("Unsupported report state schema_version.")
+        revisions.append(int(state["report_revision"]))
     return max(revisions, default=-1) + 1
 
 
@@ -237,6 +226,9 @@ def _live_report_shell(
             throw new Error(`state request returned ${{response.status}}`);
           }}
           const state = await response.json();
+          if (state.schema_version !== 2) {{
+            throw new Error("unsupported report state schema");
+          }}
           const nextRevision = state.report_revision;
           if (!Number.isSafeInteger(nextRevision) || nextRevision < 0) {{
             throw new Error("invalid report revision");
@@ -370,6 +362,7 @@ def main(args):
     gsva_results = None
     temporal_results = None
     imodulon_results = None
+    ica_monitoring_results = None
     transcript_biotypes = args.transcript_biotypes
     if args.differential_results is not None:
         differential = load_differential_results(
@@ -377,9 +370,10 @@ def main(args):
             samples.samples_df,
         )
         stability_results = load_stability_results(
-            args.stability_results,
+            args.stability_results if args.stopping_method == "dea" else None,
             differential.sample_metadata,
             args.stability_behavior,
+            samples.samples_df,
         )
         if args.gene_set_enrichment:
             fry_results = load_gene_set_results(
@@ -405,6 +399,10 @@ def main(args):
             args.imodulon_analysis_index,
             samples.samples_df,
         )
+        if args.stopping_method == "ica" and args.stability_results is not None:
+            ica_monitoring_results = load_ica_monitoring_results(
+                args.stability_results, imodulon_results, args.stability_behavior, samples.samples_df,
+            )
 
     report = labs_report(
         labs,
@@ -503,6 +501,9 @@ def main(args):
                 add_imodulon_analysis(
                     imodulon_results,
                 )
+            if ica_monitoring_results is not None:
+                with primary_tabs.add_tab("ICA Monitoring"):
+                    DataTable.from_pandas(ica_monitoring_results, use_index=False)
 
     write_report(  # type: ignore
         report,
@@ -560,14 +561,16 @@ def argparser():
     )
     parser.add_argument(
         "--stability-results",
-        help="Per-sample stability audit TSV for the represented DE snapshot.",
+        help="Per-sample stability audit TSV for the represented DEA or ICA snapshot.",
     )
     parser.add_argument(
         "--stability-behavior",
         choices=("disabled", "log", "terminate"),
         default="disabled",
-        help="Configured DE stability behavior [default: %(default)s].",
+        help="Configured stability behavior [default: %(default)s].",
     )
+    parser.add_argument("--stopping-method", choices=("dea", "ica"), default="dea",
+                        help="Analysis supplying the stability audit.")
     parser.add_argument(
         "--gene-set-enrichment",
         action="store_true",

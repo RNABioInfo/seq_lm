@@ -1,32 +1,28 @@
 ## Quickstart
 
-The workflow uses [nextflow](https://www.nextflow.io/) to manage compute and
-software resources, as such nextflow will need to be installed before attempting
-to run the workflow.
+Run from the repository root with Nextflow 26.04 or later and Docker or
+Singularity installed. The configured runtime fetches versioned container images.
 
-The workflow can currently be run using either
-[Docker](https://www.docker.com/products/docker-desktop) or
-[Singularity](https://docs.sylabs.io/guides/latest/user-guide/) to provide isolation of
-the required software. Both methods are automated out-of-the-box provided
-either Docker or Singularity is installed. Nextflow automatically fetches the
-configured, versioned images from Docker Hub through the selected runtime.
+Show the available parameters:
 
-It is not required to clone or download the git repository in order to run the workflow.
-For more information on running EPI2ME Labs workflows [visit out website](https://labs.epi2me.io/wfindex).
-
-**Workflow options**
-
-To obtain the workflow, having installed `nextflow`, users can run:
-
-```
-nextflow run epi2me-labs/wf-template --help
+```bash
+nextflow run . --help
 ```
 
-to see the options for the workflow.
+Analyze a sample sheet containing `alias`, `group`, and `bam_dir`:
 
-**Workflow outputs**
+```bash
+nextflow run . -profile standard --sample_sheet samples.csv --out_dir output
+```
 
-The primary outputs of the workflow include:
+Use `-profile singularity` for Singularity. Live analysis watches eligible BAM
+directories; use `--live_analysis false` to analyze a completed batch.
 
-* a simple text file providing a summary of sequencing reads,
-* an HTML report document detailing the primary findings of the workflow.
+Supply both `--reference_genome` and `--reference_annotation` to enable transcript
+quantification. Enable DEA with `--differential_expression true`, or ICA with
+`--ica_analysis true --ica_matrix weights.csv`. See [the README](../README.md)
+for analysis modes and sequencing termination settings.
+
+The output directory contains `qc_report.html`, per-sample QC, and the enabled
+quantification and analysis results. Finalized sample results include validated
+`FINAL` checkpoints for restoration on subsequent runs.

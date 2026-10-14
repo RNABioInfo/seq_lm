@@ -2,9 +2,10 @@ nextflow.enable.types = true
 
 include { ChunkQCResult ; QuantifiedSample ; Sample } from './sample.nf'
 include { safe_name } from '../modules/generic_helpers.nf'
+include { valid_strand_specificity } from './validation.nf'
 
 def sample_checkpoint_schema() -> Integer {
-    return 1
+    return 2
 }
 
 def sample_final_marker() -> String {
@@ -71,10 +72,11 @@ def next_analysis_snapshot_index(output_root: Path) -> Integer {
                 }
             }
         }
+
     return indices.empty ? 0 : indices.max() + 1
 }
 
-def discover_sample_checkpoints(samples: List<Sample>, output_root: Path, genome: Path, annotation: Path) -> Map {
+def discover_sample_checkpoints(samples: List<Sample>, output_root: Path, genome: Path, annotation: Path, strand_specificity: String) -> Map {
     def restored: List = []
     def active: List = []
     def safe_paths: Set<String> = [] as Set<String>
@@ -103,7 +105,7 @@ def discover_sample_checkpoints(samples: List<Sample>, output_root: Path, genome
             checkpoint_error(sample, sample_dir, "cannot parse ${sample_final_marker()}: ${exception.message}")
         }
 
-        validate_checkpoint_manifest(manifest, sample, sample_dir, genome, annotation)
+        validate_checkpoint_manifest(manifest, sample, sample_dir, genome, annotation, strand_specificity)
         def qc_results: List<ChunkQCResult> = (manifest.qc as List).collect { qc: Map ->
             def nanoplot: Path = sample_dir.resolve(qc.nanoplot as String).normalize()
             def flagstat: Path = sample_dir.resolve(qc.flagstat as String).normalize()
@@ -124,7 +126,7 @@ def discover_sample_checkpoints(samples: List<Sample>, output_root: Path, genome
     return [restored: restored, active: active]
 }
 
-def validate_checkpoint_manifest(manifest: Map, sample, sample_dir: Path, genome: Path, annotation: Path) {
+def validate_checkpoint_manifest(manifest: Map, sample, sample_dir: Path, genome: Path, annotation: Path, strand_specificity: String) {
     def problems: List<String> = []
     if (manifest.schema_version != sample_checkpoint_schema()) {
         problems.add("unsupported schema_version '${manifest.schema_version}'")
@@ -143,6 +145,14 @@ def validate_checkpoint_manifest(manifest: Map, sample, sample_dir: Path, genome
     }
     if (manifest.tools != sample_checkpoint_tools()) {
         problems.add('upstream tool versions changed')
+    }
+
+    def settings = manifest.quantification_settings
+    if (!(settings instanceof Map) || !valid_strand_specificity(settings.strand_specificity)) {
+        problems.add('quantification strand specificity metadata is invalid')
+    }
+    else if (settings.strand_specificity != strand_specificity) {
+        problems.add("quantification strand specificity changed (${settings.strand_specificity} to ${strand_specificity})")
     }
 
     def quant: Map = manifest.quantification as Map
@@ -195,15 +205,8 @@ def checkpoint_error(sample, sample_dir: Path, reason: String) {
     )
 }
 
-def checkpoint_static_manifest(sample, genome: Path, annotation: Path) -> Map {
-    return checkpoint_static_manifest(
-        sample,
-        [genome: file_identity(genome), annotation: file_identity(annotation)],
-    )
-}
-
-def checkpoint_static_manifest(sample, reference_identity: Map) -> Map {
-    return [schema_version: sample_checkpoint_schema(), sample: [name: sample.name, group: sample.group], bams: sample_bam_inventory(sample), reference: reference_identity, tools: sample_checkpoint_tools()]
+def checkpoint_static_manifest(sample, reference_identity: Map, strand_specificity: String) -> Map {
+    return [schema_version: sample_checkpoint_schema(), sample: [name: sample.name, group: sample.group], bams: sample_bam_inventory(sample), reference: reference_identity, tools: sample_checkpoint_tools(), quantification_settings: [strand_specificity: strand_specificity]]
 }
 
 /**
@@ -226,6 +229,7 @@ process write_sample_checkpoints {
     quantifications: List
     qc_results: List
     reference_identity: Map
+    strand_specificity: String
 
     stage:
     stageAs quantifications*.counts, 'checkpoint_inputs/quant/input?.quant'
@@ -283,7 +287,7 @@ process write_sample_checkpoints {
             )
             [batch_index: qc.batch_index, nanoplot: nanoplot_path, flagstat: flagstat_path]
         }
-        def manifest: Map = checkpoint_static_manifest(sample, reference_identity)
+        def manifest: Map = checkpoint_static_manifest(sample, reference_identity, strand_specificity)
         def quantification_sha256_placeholder: String = '__SEQ_LM_QUANTIFICATION_SHA256__'
         manifest.quantification = [
             path: 'quantification/final.quant',

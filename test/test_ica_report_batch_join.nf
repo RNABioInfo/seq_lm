@@ -13,8 +13,8 @@ workflow {
         [batch_index: 2, report_sequence: 0, analysis_index: 10, results: file('ica_10')],
         [batch_index: 4, report_sequence: 1, analysis_index: 11, results: file('ica_11')],
     )
-    join_ica_report_batches(reports, snapshots)
-    join_ica_report_batches.out
+    ica_report_batches = join_ica_report_batches(reports, snapshots)
+    ica_report_batches
         .map { result ->
             assert result.has_ica_results
             assert result.ica_results.name == "ica_${result.ica_analysis_index}"

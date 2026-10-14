@@ -3,7 +3,8 @@
 nextflow.enable.types = true
 
 include { DifferentialExpressionResult ; Sample } from '../lib/sample.nf'
-include { differential_stability ; discover_stability_state ; stability_config } from '../lib/stability.nf'
+include { resolve_gene_contrasts } from '../lib/gene_contrasts.nf'
+include { differential_stability ; discover_stability_state ; read_stability_tsv ; stability_config } from '../lib/stability.nf'
 
 params {
     test_behavior: String = 'log'
@@ -13,7 +14,7 @@ params {
 
 def write_snapshot(root: Path, analysis_index: Integer, log_fc: Number) -> Path {
     def snapshot: Path = root.resolve("snapshot_${analysis_index}")
-    def contrast: Path = snapshot.resolve('group_treated_vs_control')
+    def contrast: Path = snapshot.resolve('contrast_1')
     java.nio.file.Files.createDirectories(contrast)
     java.nio.file.Files.writeString(
         snapshot.resolve('sample_metadata.tsv'),
@@ -27,6 +28,8 @@ def write_snapshot(root: Path, analysis_index: Integer, log_fc: Number) -> Path 
         contrast.resolve('edgeR_results.tsv'),
         "feature_id\tlogFC\tFDR\nc1\t${log_fc}\t0.01\nc2\t0\t0.5\n",
     )
+    java.nio.file.Files.writeString(snapshot.resolve('contrasts.tsv'),
+        'contrast_id\ttarget_group\treference_group\ncontrast_1\ttreated\tcontrol\n')
     return snapshot
 }
 
@@ -52,6 +55,7 @@ workflow {
         )
     }
     def settings: Map = [
+        contrasts: resolve_gene_contrasts(samples, null),
         behavior: params.test_behavior as String,
         num_stable_batches: 2,
         max_feature_diff_fraction: 0.05,
@@ -98,7 +102,7 @@ workflow {
         client_private_key: credential_paths[1],
         ca_certificate: credential_paths[2],
     ]
-    differential_stability(
+    stability_audits = differential_stability(
         channel.fromList(results),
         samples,
         samples,
@@ -107,17 +111,18 @@ workflow {
         [previous_results: file("${projectDir}/../data/OPTIONAL_FILE"), streaks: [:], eligible: [:]],
         minknow_connection,
     )
-    differential_stability.out
+    stability_audits
         .collect()
         .map { audits ->
+            audits = audits.toSorted { left, right -> left.analysis_index <=> right.analysis_index }
             assert audits.size() == final_index + 1
             def rows: List<String> = java.nio.file.Files.readAllLines(audits[-1].sample_stability)
             def expected_eligible: String = params.test_reset ? 'false' : 'true'
             assert rows.drop(1).every { row: String -> row.split('\t', -1)[8] == (params.test_reset ? '1' : params.test_stop_mode == 'retry' ? '4' : '2') }
             assert rows.drop(1).every { row: String -> row.split('\t', -1)[9] == expected_eligible }
             if (params.test_reset) {
-                def contrast_rows: List<String> = java.nio.file.Files.readAllLines(audits[-1].contrast_stability)
-                assert contrast_rows[1].split('\t', -1)[20] == '1'
+                def contrast_rows: List<Map> = read_stability_tsv(audits[-1].contrast_stability)
+                assert contrast_rows[0].consecutive_stable_batches == '1'
                 return 'DE stability resets and rebuilds a contrast streak after instability'
             }
             if (params.test_behavior == 'terminate') {
@@ -161,8 +166,17 @@ workflow {
                 settings.config,
             )
             def expected_restored_streak: Integer = params.test_stop_mode == 'retry' ? 4 : 2
-            assert restored.streaks == ['group_treated_vs_control': expected_restored_streak]
+            assert restored.streaks == ['contrast_1': expected_restored_streak]
             assert restored.eligible.values().every { value -> value }
+            def changed_mapping: Map = settings.config + [samples: settings.config.samples.collect { row: Map ->
+                row + [protocol_run_id: 'replacement-run']
+            }]
+            assert discover_stability_state(output_root, final_index + 1, changed_mapping).streaks.isEmpty()
+            def changed_contrasts: Map = settings.config + [contrasts: [[contrast_id: 'contrast_1', target_group: 'control', reference_group: 'treated']]]
+            def reset: Map = discover_stability_state(output_root, final_index + 1, changed_contrasts)
+            assert reset.streaks.isEmpty() && reset.eligible.isEmpty()
+            assert reset.previous_results.name == 'OPTIONAL_FILE'
+            assert discover_stability_state(output_root, final_index + 1, settings.config + [schema_version: 1]).streaks.isEmpty()
             'DE stability reaches sample eligibility after two stable comparisons'
         }
         .view()

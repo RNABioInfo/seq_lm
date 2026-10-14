@@ -18,6 +18,39 @@ while retaining both references for QC plus quantification and transcript-
 biotype composition. The GMT input is optional whenever gene-set enrichment is
 disabled.
 
+## Explicit gene contrasts
+
+Supply `--gene_contrast_file contrasts.csv` to replace automatic comparisons
+against `control`. The CSV has no header and contains exactly two group names
+per line, for example:
+
+```csv
+challenge,baseline
+rescue,challenge
+```
+
+Each row tests the first group minus the second: positive logFC means higher
+expression in the first group. At least one contrast is required. Names match
+sample-sheet groups exactly after whitespace is trimmed. CSV quoting supports
+names containing commas. Empty or malformed rows, unknown groups,
+self-comparisons, and duplicate ordered contrasts are errors. Reversed pairs
+are distinct, and reports preserve file order.
+
+Only groups named in these contrasts enter DEA readiness checks, normalization,
+model fitting, fry, GSVA, and gene-set temporal plots. Every sample remains in
+QC and quantification/checkpoints. Unlisted groups do not block DEA read-depth
+readiness. ICA selection is independent and can still include those groups.
+Without this file, at least two `control` samples are required and each
+non-control group is compared against `control`.
+
+Every DEA snapshot contains `contrasts.tsv` with columns `contrast_id`,
+`target_group`, and `reference_group`. Result directories use those IDs; the
+report and stability monitor read explicit labels rather than decoding directory
+names. DE stability configuration includes the contrast definitions; changing
+them resets the baseline and streaks. Groups absent from all gene contrasts
+cannot become eligible through DEA monitoring. Active unselected samples still
+block stopping a shared MinKNOW run.
+
 The standalone quantification workflow refreshes after every complete live BAM
 batch. It uses the same chunk stream as quality control, but quantification is
 cumulative rather than chunk-local:
@@ -35,8 +68,8 @@ cumulative rather than chunk-local:
 5. The latest quantification is retained for every sample. Each live batch
    replaces entries for samples contributing a new chunk, reuses entries for
    final or already stopped samples, and emits a complete experiment batch.
-   If differential expression is enabled, edgeR rebuilds the full count matrix
-   from that batch and tests each non-control group versus the control group.
+   If differential expression is enabled, edgeR rebuilds the selected analysis count matrix
+   from that batch and tests the resolved gene contrasts.
 
 The BAM sample sheet must contain `alias`, `group`, and `bam_dir`; `is_live` is
 optional. It accepts case-insensitive `true` or `false`, and missing or blank
@@ -98,10 +131,13 @@ which rebuilds the current count matrix for every complete live batch.
 ### Differential-expression stability
 
 `--monitoring_behavior` controls automatic depth decisions and defaults
-to `disabled`. `log` performs a dry run and records when a sample would stop.
-`terminate` uses the sample's discovered MinKNOW `protocol_run_id` to call
-`seq-run-manager stop`, then atomically creates `STOP` in that sample's
-`bam_dir`. It requires `--minknow_client_certificate`,
+to `disabled`. `log` performs a dry run and records when a protocol run would
+stop. `terminate` groups active live samples by their discovered MinKNOW
+`protocol_run_id` and calls `seq-run-manager stop` once for a run only when
+every participating sample is eligible in the same analysis snapshot. After
+a successful request, it atomically creates a `STOP` file in every participating
+sample's `bam_dir`. These pollers drain pending BAMs and close; subsequent
+snapshots do not repeat the stop request. It requires `--minknow_client_certificate`,
 `--minknow_client_private_key`, and `--minknow_ca_certificate`; the MinKNOW
 manager defaults to `host.docker.internal:9501` and can be changed with
 `--minknow_host` and `--minknow_port`.
@@ -109,8 +145,13 @@ manager defaults to `host.docker.internal:9501` and can be changed with
 For every sample, startup discovery inspects the direct parent of `bam_dir` for
 exactly one `*sample_sheet*.csv` file and matches `alias` to its `sample_id`.
 Missing, ambiguous, malformed, or unmatched metadata disables termination only
-for that sample and produces a warning. Failed MinKNOW stop requests also warn,
-do not create `STOP`, and retry after the next stable batch.
+for that sample and produces a warning. Only configured seqLM samples with
+resolved metadata participate in run grouping; additional unconfigured barcodes
+are not discovered. Failed MinKNOW stop requests also warn, mark every
+participating sample as `stop_failed`, create no `STOP` files, and retry when
+all participating samples are eligible in a later snapshot. A failure to create
+markers after a successful stop fails the workflow with the affected paths;
+repair those directories and create the missing `STOP` files before resuming.
 
 Every successful edgeR snapshot is compared with the previous successful
 snapshot. The checks cover filtered-feature identity, median absolute logFC
@@ -122,8 +163,18 @@ edgeR snapshots are therefore required.
 Streaks are tracked independently for every non-control-versus-control
 contrast. A treated sample becomes eligible when its own group contrast has
 reached the threshold. A control sample becomes eligible only when every
-contrast involving the control group has reached it. Only effectively live,
-non-restored samples receive actions.
+contrast involving the control group has reached it. Individual eligibility is
+preserved independently of run readiness. An eligible treated sample waits if
+another active live sample in its run remains ineligible. Other protocol runs
+are assessed independently.
+
+Only effectively live, non-restored samples without an existing `STOP*` file
+participate in run readiness and receive new termination actions. Final,
+restored, and already closed samples do not block termination. In `log` mode,
+known runs use the same membership and readiness rule without making requests
+or creating markers; readiness is logged for each ready snapshot. For samples
+without run metadata, dry-run logging reports individual eligibility only and
+does not claim that their run is ready.
 
 Immutable audit files are published for every analyzed snapshot:
 
@@ -135,12 +186,23 @@ Immutable audit files are published for every analyzed snapshot:
 ```
 
 `sample_stability.tsv` includes the optional `protocol_run_id` and the result
-of each attempted termination action.
+of each attempted termination action. `eligible` remains the individual sample
+decision. The appended `run_eligible` column records readiness of its active run,
+and `run_blocking_samples` lists ineligible members as `group/sample` labels.
+An eligible sample blocked by another member has action result
+`waiting_for_run_stability`. Excluded and unmapped rows have `run_eligible=false`
+and no blocking list.
 
 They contain metric values, individual checks, consecutive streaks, required
-sample contrasts, eligibility transitions, and action results. A compatible
-audit and DE snapshot seed the next invocation; changing the behavior,
-thresholds, or sample structure resets the streak with a warning.
+sample contrasts, eligibility transitions, and action results. A complete current
+audit and its DE snapshot seed the next invocation; changing the behavior,
+thresholds, sample structure, or protocol-run mappings resets the streak with a
+warning. Missing audits start a fresh stability window.
+
+Run `bash test/run_stability_test.sh` to exercise the stability integration
+scenarios and ingress stop/drain regression using a fake run manager. The local
+test environment requires Nextflow and Python with pandas; no MinKNOW hardware
+or credentials are used.
 
 Read names must be globally unique across the BAM chunks for a sample. This is
 normally guaranteed by Nanopore UUID read identifiers. It ensures that all
@@ -285,14 +347,14 @@ locus-tag, `ID`, `Parent`, `Name`, and `Alias` fields. Use
 `.1` and the other does not. Namespaced GFF3 identifiers such as
 `gene:GENE001` and `transcript:TX001` are handled automatically.
 
-The script uses `control` as the reference group unless
-`--control_group <label>` is supplied. It filters low-expression transcripts,
-applies TMM normalization, estimates robust dispersions, fits an edgeR
-quasi-likelihood model, and tests each non-control group against the reference.
+The script requires `--contrasts <canonical.tsv>` with explicit target/reference
+definitions resolved by Nextflow. It filters low-expression transcripts, applies
+TMM normalization, estimates robust dispersions, fits one edgeR quasi-likelihood
+model across the selected cohort, and tests each requested contrast.
 Gene-level differential-expression results use `glmTreat`; its minimum effect
 size defaults to one log2 fold and can be changed with `--lfc`.
 
-At the analysis level, the command writes `feature_counts.tsv`,
+At the analysis level, the command writes `contrasts.tsv`, `feature_counts.tsv`,
 `sample_metadata.tsv`, `edgeR_mds_data.tsv`, and `edgeR_bcv_data.tsv`. The MDS
 table contains the sample coordinates and edgeR axis metadata; the BCV table
 contains average log CPM plus tagwise, trended, and common dispersion and BCV
@@ -354,7 +416,7 @@ The batch root receives:
 * `gsva_score_heatmap.png`, with row-standardized colors for display only;
 * `gsva_group_boxplots.pdf`, with raw sample scores by group.
 
-Each existing `group_<target>_vs_<control>/` directory also receives
+Each contrast directory identified by `contrasts.tsv` also receives
 `gsva_limma_results.tsv`. Its `effect_size` is the target-minus-control
 difference in GSVA scores, and its `adjusted_p_value` is Benjamini-Hochberg
 adjusted within that contrast. The score tables retain raw GSVA scores; only

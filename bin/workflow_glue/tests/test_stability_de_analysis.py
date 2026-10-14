@@ -34,6 +34,8 @@ def _write_snapshot(root: Path, shifts=None, calls=None):
     pd.DataFrame({"feature_id": ["f1", "f2", "f3"], "c1": [1, 2, 3]}).to_csv(
         root / "feature_counts.tsv", sep="\t", index=False
     )
+    pd.DataFrame([{"contrast_id": f"group_{group}_vs_control", "target_group": group, "reference_group": "control"}
+                  for group in ("A", "B")]).to_csv(root / "contrasts.tsv", sep="\t", index=False)
     for group in ("A", "B"):
         contrast = root / f"group_{group}_vs_control"
         contrast.mkdir()

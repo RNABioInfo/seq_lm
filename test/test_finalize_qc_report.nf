@@ -7,7 +7,7 @@ include { finalize_qc_report } from '../modules/qc_report_helpers.nf'
 workflow {
     def root: Path = java.nio.file.Files.createTempDirectory('seq-lm-final-report-')
     def report: Path = root.resolve('qc_report.html')
-    def snapshot: Path = root.resolve('qc_report_snapshot_4.html')
+    def snapshot: Path = root.resolve('qc_report_snapshot_revision_4.html')
     def state: Path = root.resolve('qc_report_state.json')
     java.nio.file.Files.writeString(
         report,
@@ -19,7 +19,8 @@ workflow {
     )
     java.nio.file.Files.writeString(
         state,
-        '{"latest_batch":"4","snapshot":"qc_report_snapshot_4.html"}\n',
+        new groovy.json.JsonBuilder([schema_version: 2, report_revision: 4, latest_batch: '4',
+            snapshot: snapshot.fileName.toString(), snapshot_bytes: java.nio.file.Files.size(snapshot)]).toString(),
     )
 
     finalize_qc_report(root)

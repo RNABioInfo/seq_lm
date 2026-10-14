@@ -1,24 +1,37 @@
 nextflow.enable.types = true
 
+def valid_strand_specificity(value) -> Boolean {
+    return value instanceof String && value in ['forward', 'reverse', 'unstranded']
+}
+
 def ica_analysis_enabled(params_map: Map) -> Boolean {
-    return params_map.ica_analysis != false && params_map.ica_matrix != null &&
+    return params_map.ica_analysis == true && params_map.ica_matrix != null &&
         "${params_map.ica_matrix}".trim() != ''
 }
 
 def validate_parameters(params_map: Map) -> Void {
-    if (params_map.ica_analysis != false && params_map.ica_gene_map && !params_map.ica_matrix) {
+    if (!valid_strand_specificity(params_map.strand_specificity)) {
+        error('--strand_specificity must be forward, reverse, or unstranded.')
+    }
+
+    if (params_map.ica_analysis == true && params_map.ica_gene_map && !params_map.ica_matrix) {
         error('--ica_gene_map requires --ica_matrix.')
     }
-    if (params_map.ica_analysis != false && params_map.ica_imodulon_table && !params_map.ica_matrix) {
+
+    if (params_map.ica_analysis == true && params_map.ica_imodulon_table && !params_map.ica_matrix) {
         error('--ica_imodulon_table requires --ica_matrix.')
     }
+
     if (ica_analysis_enabled(params_map)) {
+        if (!(params_map.ica_control_group instanceof String) || !params_map.ica_control_group.trim()) {
+            error('--ica_control_group must be a nonempty group name.')
+        }
         if (!params_map.reference_genome || !params_map.reference_annotation) {
             error('--ica_matrix requires both --reference_genome and --reference_annotation.')
         }
-        [ica_log_base: 2.0, ica_pseudocount: 1.0, ica_min_gene_coverage: 1.0,
-         ica_min_read_count: 10000, ica_padj_cutoff: 0.05].each { name: String, fallback ->
-            def value = params_map.containsKey(name) ? params_map[name] : fallback
+        ['ica_log_base', 'ica_pseudocount', 'ica_min_gene_coverage',
+         'ica_min_read_count', 'ica_padj_cutoff'].each { name: String ->
+            def value = params_map[name]
             if (!(value instanceof Number) || !Double.isFinite((value as Number).doubleValue())) {
                 error("--${name} must be a finite number.")
             }
@@ -36,15 +49,29 @@ def validate_parameters(params_map: Map) -> Void {
             }
         }
     }
+
+    if (params_map.containsKey('detect_minknow_completion') && !(params_map.detect_minknow_completion instanceof Boolean)) {
+        error('--detect_minknow_completion must be a Boolean.')
+    }
+    if (params_map.containsKey('minknow_completion_settle_seconds')) {
+        def settle = params_map.minknow_completion_settle_seconds
+        if (!(settle instanceof Integer) || settle < 1) {
+            error('--minknow_completion_settle_seconds must be a positive integer.')
+        }
+    }
+
     if (params_map.de_lfc_cutoff < 0) {
         error('--de_lfc_cutoff must be nonnegative.')
     }
+
     if (params_map.de_padj_cutoff <= 0 || params_map.de_padj_cutoff > 1) {
         error('--de_padj_cutoff must be greater than 0 and at most 1.')
     }
+
     if (params_map.min_read_count < 0) {
         error('--min_read_count must be nonnegative.')
     }
+
     if (params_map.min_replicate_sample_count < 1) {
         error('--min_replicate_sample_count must be at least 1.')
     }
@@ -53,9 +80,34 @@ def validate_parameters(params_map: Map) -> Void {
     if (!stability_behaviors.contains(params_map.monitoring_behavior as String)) {
         error('--monitoring_behavior must be disabled, log, or terminate.')
     }
-    if (params_map.monitoring_behavior != 'disabled' && !params_map.differential_expression) {
-        error('--monitoring_behavior requires --differential_expression.')
+
+    def stopping_method = params_map.stopping_method
+    if (!(stopping_method instanceof String) || !(stopping_method in ['dea', 'ica'])) {
+        error('--stopping_method must be dea or ica.')
     }
+
+    ['ica_max_fold_change', 'ica_min_read_growth_fraction'].each { name: String ->
+        def value = params_map[name]
+        if (!(value instanceof Number) || !Double.isFinite((value as Number).doubleValue())) {
+            error("--${name} must be a finite number.")
+        }
+        if (name == 'ica_max_fold_change' && value < 1) {
+            error('--ica_max_fold_change must be at least 1.')
+        }
+        if (name == 'ica_min_read_growth_fraction' && value <= 0) {
+            error('--ica_min_read_growth_fraction must be greater than 0.')
+        }
+    }
+
+    if (params_map.monitoring_behavior != 'disabled') {
+        if (stopping_method == 'dea' && !params_map.differential_expression) {
+            error('--monitoring_behavior with --stopping_method dea requires --differential_expression.')
+        }
+        if (stopping_method == 'ica' && !ica_analysis_enabled(params_map)) {
+            error('--monitoring_behavior with --stopping_method ica requires enabled --ica_analysis and --ica_matrix.')
+        }
+    }
+
     if (params_map.monitoring_behavior == 'terminate' && !params_map.live_analysis) {
         error('--monitoring_behavior terminate requires --live_analysis.')
     }
@@ -83,8 +135,10 @@ def validate_parameters(params_map: Map) -> Void {
             }
         }
     }
-    if (params_map.num_stable_batches < 1) {
-        error('--num_stable_batches must be at least 1.')
+    if (!(params_map.num_stable_batches instanceof Number) ||
+        !Double.isFinite((params_map.num_stable_batches as Number).doubleValue()) ||
+        params_map.num_stable_batches < 1 || params_map.num_stable_batches != Math.floor((params_map.num_stable_batches as Number).doubleValue())) {
+        error('--num_stable_batches must be a positive integer.')
     }
 
     def fraction_stability_params: Map<String,Float> = [

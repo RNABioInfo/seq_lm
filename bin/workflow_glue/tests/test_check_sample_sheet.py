@@ -79,7 +79,7 @@ def test_parse_is_live_rejects_invalid_value():
     ("alias,group,bam_dir,is_live", "rep_1,control,/tmp/rep_1,"),
 ])
 def test_sample_sheet_without_explicit_is_live_is_valid(tmp_path, header, row):
-    """Legacy and blank-valued samplesheets retain all-live semantics."""
+    """Samplesheets without optional live flags use all-live semantics."""
     sample_sheet = Path(tmp_path) / "sample_sheet.csv"
     first = tmp_path / "rep_1"
     second = tmp_path / "rep_2"

@@ -5,6 +5,8 @@ test_dir="$(mktemp -d "${TMPDIR:-/tmp}/seq_lm_gsva_generic.XXXXXX")"
 trap 'rm -rf -- "${test_dir}"' EXIT
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+printf 'contrast_id\ttarget_group\treference_group\ngroup_challenge_vs_baseline\tchallenge\tbaseline\n' > "${test_dir}/contrasts.tsv"
+printf 'contrast_id\ttarget_group\treference_group\ninvalid\tchallenge\tabsent\n' > "${test_dir}/invalid_contrasts.tsv"
 analysis_script="${script_dir}/gsva_analysis.R"
 
 Rscript - "${test_dir}" <<'RSCRIPT'
@@ -69,7 +71,7 @@ Rscript "${analysis_script}" \
     --sample_metadata "${test_dir}/sample_metadata.tsv" \
     --gene_set_resolution "${test_dir}/gene_set_resolution.tsv" \
     --output_dir "${test_dir}/results" \
-    --control_group baseline
+    --contrasts "${test_dir}/contrasts.tsv"
 
 for output in \
     gsva_scores.tsv \
@@ -142,7 +144,7 @@ expect_failure duplicate_ids Rscript "${analysis_script}" \
     --sample_metadata "${test_dir}/sample_metadata.tsv" \
     --gene_set_resolution "${test_dir}/gene_set_resolution.tsv" \
     --output_dir "${test_dir}/duplicate_results" \
-    --control_group baseline
+    --contrasts "${test_dir}/contrasts.tsv"
 
 sed '$d' "${test_dir}/sample_metadata.tsv" > "${test_dir}/mismatched_metadata.tsv"
 expect_failure mismatched_samples Rscript "${analysis_script}" \
@@ -150,7 +152,7 @@ expect_failure mismatched_samples Rscript "${analysis_script}" \
     --sample_metadata "${test_dir}/mismatched_metadata.tsv" \
     --gene_set_resolution "${test_dir}/gene_set_resolution.tsv" \
     --output_dir "${test_dir}/mismatch_results" \
-    --control_group baseline
+    --contrasts "${test_dir}/contrasts.tsv"
 
 awk -F '\t' 'BEGIN { OFS = "\t" } NR == 2 { $2 = "Inf" } { print }' \
     "${test_dir}/feature_counts.tsv" > "${test_dir}/infinite_feature_counts.tsv"
@@ -159,14 +161,14 @@ expect_failure nonfinite_expression Rscript "${analysis_script}" \
     --sample_metadata "${test_dir}/sample_metadata.tsv" \
     --gene_set_resolution "${test_dir}/gene_set_resolution.tsv" \
     --output_dir "${test_dir}/nonfinite_results" \
-    --control_group baseline
+    --contrasts "${test_dir}/contrasts.tsv"
 
 expect_failure absent_control Rscript "${analysis_script}" \
     --feature_counts "${test_dir}/feature_counts.tsv" \
     --sample_metadata "${test_dir}/sample_metadata.tsv" \
     --gene_set_resolution "${test_dir}/gene_set_resolution.tsv" \
     --output_dir "${test_dir}/absent_control_results" \
-    --control_group absent
+    --contrasts "${test_dir}/invalid_contrasts.tsv"
 
 head -n 2 "${test_dir}/gene_set_resolution.tsv" > "${test_dir}/undersized_resolution.tsv"
 expect_failure no_scoreable_sets Rscript "${analysis_script}" \
@@ -174,6 +176,6 @@ expect_failure no_scoreable_sets Rscript "${analysis_script}" \
     --sample_metadata "${test_dir}/sample_metadata.tsv" \
     --gene_set_resolution "${test_dir}/undersized_resolution.tsv" \
     --output_dir "${test_dir}/undersized_results" \
-    --control_group baseline
+    --contrasts "${test_dir}/contrasts.tsv"
 
 printf 'Generic GSVA smoke test passed.\n'

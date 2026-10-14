@@ -46,6 +46,25 @@
           "fa_icon": "fas fa-stream",
           "description": "Add descriptive temporal gene-set trajectories using elapsed-minute sample order values.",
           "help_text": "Requires gene_set_enrichment. Every sample-sheet row must provide a signed integer order value in elapsed minutes; groups represent independent-replicate time points along one trajectory."
+        },
+        "gene_contrast_file": {
+          "type": "string",
+          "format": "path",
+          "description": "Headerless CSV of DEA contrasts, one target,reference pair per row.",
+          "help_text": "Positive logFC means higher expression in the first group. At least one contrast is required. Only listed groups enter DEA, fry, GSVA, and gene-set temporal analysis. Without this file, comparisons use control and require at least two control samples."
+        },
+        "detect_minknow_completion": {
+          "type": "boolean",
+          "default": true,
+          "description": "Close live samples after a valid MinKNOW final summary and settled BAM output.",
+          "help_text": "Used with disabled or log monitoring; never contacts MinKNOW. Disable for externally aligned/copied data or pooled run directories. Optional sample-sheet minknow_run_dir overrides standard run-directory discovery."
+        },
+        "minknow_completion_settle_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 30,
+          "description": "Quiet period required after MinKNOW completion evidence.",
+          "help_text": "The final summary and BAM inventory must remain unchanged for this duration and all new BAMs must pass stability checks."
         }
       },
       "required": [
@@ -71,6 +90,18 @@
           "fa_icon": "fas fa-file-alt",
           "description": "Reference transcript annotation in GTF or GFF3 format used by Oarfish and transcript-biotype QC.",
           "help_text": "Supply this together with reference_genome to enable transcript quantification and the transcript-biotype composition figure. Biotypes use transcript_biotype, transcript_type, or biotype first, then linked gene_biotype, gene_type, or biotype; missing or conflicting annotations are shown as Unknown."
+        },
+        "strand_specificity": {
+          "type": "string",
+          "default": "forward",
+          "enum": [
+            "forward",
+            "reverse",
+            "unstranded"
+          ],
+          "fa_icon": "fas fa-dna",
+          "description": "Strand specificity for transcript quantification.",
+          "help_text": "Applies to every sample. forward accepts reads in the annotated transcript orientation (the existing direct-RNA default); reverse accepts the opposite orientation; unstranded accepts both. Changing this setting requires recomputing finalized sample checkpoints."
         },
         "gene_sets": {
           "type": "string",
@@ -132,7 +163,7 @@
       "title": "Run Monitoring Options",
       "type": "object",
       "fa_icon": "fas fa-chart-line",
-      "description": "Run monitoring allows to automatically terminate a run, after sufficient sequencing depth is reached.",
+      "description": "Track DEA or ICA convergence and optionally terminate an acquisition when all required live samples satisfy the selected stopping method.",
       "properties": {
         "monitoring_behavior": {
           "type": "string",
@@ -142,13 +173,13 @@
             "terminate"
           ],
           "default": "disabled",
-          "description": "Action when for a live sample all given contrasts are stable. Options: disabled = No action, log = Log to the console when an acquisition whould be terminated, stop = acquisition is terminated (requires Minknow credentials)"
+          "description": "Action for the selected stopping method: disabled, log eligibility without stopping, or terminate eligible MinKNOW acquisitions (requires live analysis and credentials). All required live samples sharing an acquisition must be eligible."
         },
         "num_stable_batches": {
           "type": "integer",
           "minimum": 1,
           "default": 3,
-          "description": "Number of consecutive stable snapshots required before a sample is eligible to stop."
+          "description": "DEA: consecutive successful comparisons. ICA monitoring: informative depth increases in the convergence window, requiring this many plus one snapshots."
         },
         "stability_max_feature_diff_fraction": {
           "type": "number",
@@ -181,6 +212,27 @@
           "minimum": 0,
           "default": 1,
           "description": "Maximum absolute DE-call transitions allowed when the call union is small."
+        },
+        "stopping_method": {
+          "type": "string",
+          "enum": [
+            "dea",
+            "ica"
+          ],
+          "default": "dea",
+          "description": "Analysis controlling stop eligibility: dea uses differential-expression stability; ica uses the ICA monitoring metric and requires every model component in every required sample to converge."
+        },
+        "ica_max_fold_change": {
+          "type": "number",
+          "minimum": 1,
+          "default": 1.05,
+          "description": "ICA monitoring metric: maximum multiplicative change in each component contribution to reconstructed expression across the informative checkpoint window. Automatically accounts for gene weights and log base; 1 means no change. This is a convergence heuristic, not a confidence bound."
+        },
+        "ica_min_read_growth_fraction": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "default": 0.1,
+          "description": "ICA monitoring: minimum fractional increase in assigned abundance since the last accepted checkpoint. 0.1 means 10% more assigned reads; unchanged snapshots never advance the window."
         }
       }
     },
@@ -290,14 +342,14 @@
       "properties": {
         "ica_analysis": {
           "type": "boolean",
-          "default": true,
+          "default": false,
           "description": "Allow iModulon analysis when an ICA matrix is supplied.",
           "help_text": "Set false to skip ICA analysis even when ica_matrix is configured. Without a matrix, ICA is skipped regardless of this toggle."
         },
         "ica_matrix": {
           "type": "string",
           "format": "path",
-          "description": "ICA gene-by-component weights CSV/TSV. Supplying this enables iModulon analysis unless ica_analysis is false.",
+          "description": "ICA gene-by-component weights CSV/TSV. Requires ica_analysis to be true.",
           "help_text": "When ICA is enabled, requires both reference inputs. First column: gene IDs; remaining columns: named components. Controls supply the baseline. No activity matrix or metadata sidecar is required."
         },
         "ica_imodulon_table": {
@@ -345,11 +397,55 @@
           "maximum": 1,
           "default": 0.05,
           "description": "BH-adjusted p-value threshold for Welch differential-activity tests."
+        },
+        "ica_control_group": {
+          "type": "string",
+          "minLength": 1,
+          "default": "control",
+          "description": "ICA centering and differential-activity reference group; requires at least two samples."
+        },
+        "ica_condition_groups": {
+          "type": "string",
+          "description": "Comma-separated ICA condition groups, independent of gene contrasts.",
+          "help_text": "The ICA control group is included automatically. Unset or whitespace-only values include all samples."
         }
       }
     }
   },
   "allOf": [
+    {
+      "if": {
+        "properties": {
+          "monitoring_behavior": {
+            "enum": [
+              "log",
+              "terminate"
+            ]
+          },
+          "stopping_method": {
+            "const": "ica"
+          }
+        },
+        "required": [
+          "monitoring_behavior",
+          "stopping_method"
+        ]
+      },
+      "then": {
+        "properties": {
+          "ica_analysis": {
+            "const": true
+          },
+          "ica_matrix": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "ica_matrix"
+        ]
+      }
+    },
     {
       "$ref": "#/definitions/input_options"
     },
@@ -358,6 +454,9 @@
     },
     {
       "$ref": "#/definitions/differential_analysis_options"
+    },
+    {
+      "$ref": "#/definitions/run_monitoring_options"
     },
     {
       "$ref": "#/definitions/output_options"
@@ -416,6 +515,9 @@
               "log",
               "terminate"
             ]
+          },
+          "stopping_method": {
+            "const": "dea"
           }
         },
         "required": [

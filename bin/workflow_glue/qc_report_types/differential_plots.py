@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-import re
 
 from bokeh.layouts import gridplot
 from bokeh.models import (
@@ -31,7 +30,6 @@ FEATURE_COUNTS_FILE = "feature_counts.tsv"
 BCV_DATA_FILE = "edgeR_bcv_data.tsv"
 MDS_DATA_FILE = "edgeR_mds_data.tsv"
 EDGE_R_RESULTS_FILE = "edgeR_results.tsv"
-CONTRAST_DIRECTORY = re.compile(r"^group_(.+)_vs_(.+)$")
 REQUIRED_RESULT_COLUMNS = ("feature_id", "logFC", "logCPM", "PValue", "FDR")
 REQUIRED_BCV_COLUMNS = (
     "feature_id",
@@ -116,11 +114,6 @@ class DifferentialResult:
     condition_colors: dict[str, str]
 
 
-def safe_name(value: str) -> str:
-    """Match the workflow/R safe-name convention used for contrast directories."""
-    return re.sub(r"[^A-Za-z0-9._-]", "_", value)
-
-
 def condition_palette(groups: list[str]) -> dict[str, str]:
     """Create a deterministic condition-to-color mapping."""
     ordered_groups = sorted(set(groups), key=lambda group: (group != "control", group))
@@ -158,51 +151,36 @@ def _normalise_sample_metadata(samples_df: pd.DataFrame) -> pd.DataFrame:
     return metadata.set_index("name", drop=False)
 
 
-def _resolve_contrast_groups(
-    directory_name: str,
-    groups: list[str],
-) -> tuple[str, str]:
-    """Resolve a sanitized contrast directory to original condition labels."""
-    if not CONTRAST_DIRECTORY.fullmatch(directory_name):
-        raise ValueError(f"Invalid edgeR contrast directory name: {directory_name}")
-
-    matches = [
-        (target, reference)
-        for target in groups
-        for reference in groups
-        if target != reference
-        and directory_name == f"group_{safe_name(target)}_vs_{safe_name(reference)}"
-    ]
-    if len(matches) != 1:
-        raise ValueError(
-            f"Could not uniquely map edgeR contrast directory '{directory_name}' "
-            "to the sample conditions."
-        )
-    return matches[0]
+def _read_contrast_definitions(results_dir: Path) -> pd.DataFrame:
+    """Read explicit contrast IDs and labels, retaining the requested order."""
+    path = results_dir / "contrasts.tsv"
+    definitions = pd.read_csv(path, sep="\t", dtype=str, keep_default_na=False)
+    columns = ["contrast_id", "target_group", "reference_group"]
+    if definitions.columns.tolist() != columns or definitions.empty:
+        raise ValueError("contrasts.tsv requires contrast_id, target_group, reference_group and at least one row.")
+    if (definitions.eq("").any().any()
+            or definitions["contrast_id"].duplicated().any()
+            or definitions.duplicated(["target_group", "reference_group"]).any()
+            or definitions["target_group"].eq(definitions["reference_group"]).any()
+            or not definitions["contrast_id"].str.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*").all()):
+        raise ValueError("contrasts.tsv contains invalid IDs, empty groups, self-comparisons, or duplicates.")
+    return definitions
 
 
 def _read_contrasts(
     results_dir: Path,
-    groups: list[str],
+    definitions: pd.DataFrame,
 ) -> list[ContrastResult]:
     """Read and validate every edgeR contrast table."""
-    contrast_dirs = sorted(
-        path
-        for path in results_dir.iterdir()
-        if path.is_dir() and (path / EDGE_R_RESULTS_FILE).is_file()
-    )
-    if not contrast_dirs:
-        raise ValueError(
-            f"No contrast directories containing {EDGE_R_RESULTS_FILE} were found "
-            f"in {results_dir}."
-        )
-
+    expected_ids = set(definitions["contrast_id"])
+    observed_ids = {path.name for path in results_dir.iterdir()
+                    if path.is_dir() and (path / EDGE_R_RESULTS_FILE).is_file()}
+    if expected_ids != observed_ids:
+        raise ValueError("edgeR result directories do not match contrasts.tsv.")
     contrasts = []
-    for contrast_dir in contrast_dirs:
-        target_group, reference_group = _resolve_contrast_groups(
-            contrast_dir.name,
-            groups,
-        )
+    for definition in definitions.itertuples(index=False):
+        contrast_dir = results_dir / definition.contrast_id
+        target_group, reference_group = definition.target_group, definition.reference_group
         results = pd.read_csv(contrast_dir / EDGE_R_RESULTS_FILE, sep="\t")
         missing = [
             column for column in REQUIRED_RESULT_COLUMNS if column not in results
@@ -252,7 +230,9 @@ def _align_feature_counts(
     contrasts: list[ContrastResult],
     sample_names: list[str],
 ) -> pd.DataFrame:
-    """Align CPM rows to feature IDs, including the legacy row-order format."""
+    """Align CPM rows using explicit feature IDs and sample names."""
+    if "feature_id" not in feature_counts:
+        raise ValueError("feature_counts.tsv requires a feature_id column.")
     count_columns = [
         column for column in feature_counts.columns if column != "feature_id"
     ]
@@ -272,36 +252,22 @@ def _align_feature_counts(
 
     first_ids = contrasts[0].results["feature_id"].tolist()
 
-    if "feature_id" in feature_counts:
-        feature_counts["feature_id"] = feature_counts["feature_id"].astype(str)
-        if (
-            feature_counts["feature_id"].eq("").any()
-            or feature_counts["feature_id"].duplicated().any()
-        ):
+    feature_counts["feature_id"] = feature_counts["feature_id"].astype(str)
+    if (
+        feature_counts["feature_id"].eq("").any()
+        or feature_counts["feature_id"].duplicated().any()
+    ):
+        raise ValueError(
+            "feature_counts.tsv contains empty or duplicate feature_id values."
+        )
+    feature_counts = feature_counts.set_index("feature_id")
+    for contrast in contrasts:
+        if set(feature_counts.index) != set(contrast.results["feature_id"]):
             raise ValueError(
-                "feature_counts.tsv contains empty or duplicate feature_id values."
+                "feature_counts.tsv and edgeR_results.tsv contain different "
+                "feature_id values."
             )
-        feature_counts = feature_counts.set_index("feature_id")
-        for contrast in contrasts:
-            if set(feature_counts.index) != set(contrast.results["feature_id"]):
-                raise ValueError(
-                    "feature_counts.tsv and edgeR_results.tsv contain different "
-                    "feature_id values."
-                )
-        feature_counts = feature_counts.loc[first_ids]
-    else:
-        for contrast in contrasts[1:]:
-            if contrast.results["feature_id"].tolist() != first_ids:
-                raise ValueError(
-                    "Legacy feature-count alignment requires identical feature "
-                    "ordering across every edgeR contrast."
-                )
-        if len(feature_counts) != len(first_ids):
-            raise ValueError(
-                "Legacy feature_counts.tsv has no feature_id column and its row "
-                "count does not match edgeR_results.tsv."
-            )
-        feature_counts.index = pd.Index(first_ids, name="feature_id")
+    feature_counts = feature_counts.loc[first_ids]
 
     feature_counts = feature_counts[sample_names].apply(
         pd.to_numeric,
@@ -444,9 +410,21 @@ def load_differential_results(
     if not counts_path.is_file():
         raise ValueError(f"Missing edgeR feature-count table: {counts_path}")
 
-    metadata = _normalise_sample_metadata(samples_df)
+    definitions = _read_contrast_definitions(results_dir)
+    selected_groups = set(definitions["target_group"]) | set(definitions["reference_group"])
+    group_column = "Group" if "Group" in samples_df else "group"
+    selected_samples = samples_df.loc[samples_df[group_column].isin(selected_groups)]
+    metadata = _normalise_sample_metadata(selected_samples)
     groups = metadata["group"].drop_duplicates().tolist()
-    contrasts = _read_contrasts(results_dir, groups)
+    if set(groups) != selected_groups:
+        raise ValueError("contrasts.tsv references groups absent from QC samples.")
+    exported = pd.read_csv(results_dir / "sample_metadata.tsv", sep="\t", dtype=str, keep_default_na=False)
+    if not {"sample", "group"}.issubset(exported.columns) or exported["sample"].duplicated().any():
+        raise ValueError("Invalid differential sample_metadata.tsv.")
+    expected = set(zip(metadata.index, metadata["group"]))
+    if set(zip(exported["sample"], exported["group"])) != expected:
+        raise ValueError("Differential sample_metadata.tsv does not match the selected QC cohort.")
+    contrasts = _read_contrasts(results_dir, definitions)
     feature_counts = _align_feature_counts(
         pd.read_csv(counts_path, sep="\t"),
         contrasts,
@@ -488,6 +466,7 @@ def load_stability_results(
     stability_path: str | Path | None,
     sample_metadata: pd.DataFrame,
     behavior: str,
+    report_samples: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """Load the sample stability audit and format its report table."""
     if behavior not in {"disabled", "log", "terminate"}:
@@ -513,6 +492,16 @@ def load_stability_results(
     missing = set(STABILITY_REQUIRED_COLUMNS).difference(audit.columns)
     if missing:
         raise ValueError(f"{path} is missing columns: {', '.join(sorted(missing))}")
+    if report_samples is not None:
+        expected_pairs = list(zip(report_samples["Name"], report_samples["Group"]))
+        observed_pairs = list(zip(audit["sample"], audit["group"]))
+        if len(set(observed_pairs)) != len(observed_pairs) or set(observed_pairs) != set(expected_pairs):
+            raise ValueError(f"{path} does not match QC sample identities.")
+        selected_pairs = set(zip(sample_metadata.index, sample_metadata["group"]))
+        selected = pd.Series([pair in selected_pairs for pair in observed_pairs], index=audit.index)
+        if audit.loc[~selected, "eligible"].ne("false").any() or audit.loc[~selected, "required_contrasts"].ne("").any():
+            raise ValueError("Samples outside the DEA cohort cannot require contrasts or be eligible.")
+        audit = audit.loc[selected].copy()
     if audit["sample"].eq("").any() or audit["sample"].duplicated().any():
         raise ValueError(f"{path} contains empty or duplicate sample names.")
     expected_samples = set(sample_metadata.index)

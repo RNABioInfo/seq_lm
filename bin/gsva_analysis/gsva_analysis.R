@@ -5,6 +5,8 @@ library(GSVA)
 library(limma)
 library(readr)
 library(tibble)
+script_path = sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)[[1L]])
+source(file.path(dirname(normalizePath(script_path)), "..", "read_contrasts.R"))
 
 options = list(
     make_option(c("--feature_counts"), type = "character"),
@@ -12,10 +14,9 @@ options = list(
     make_option(c("--gene_set_resolution"), type = "character"),
     make_option(c("--output_dir"), type = "character"),
     make_option(
-        c("--control_group"),
+        c("--contrasts"),
         type = "character",
-        default = "control",
-        help = "Reference group used for pairwise contrasts [default: %default]."
+        help = "Canonical TSV of contrast_id, target_group, reference_group."
     ),
     make_option(
         c("--min_size"),
@@ -35,6 +36,7 @@ parser = OptionParser(
 args = parse_args(parser)
 
 required_options = c(
+    "contrasts",
     "feature_counts",
     "sample_metadata",
     "gene_set_resolution",
@@ -82,10 +84,6 @@ nonempty_text = function(values, label) {
     values
 }
 
-safe_name = function(value) {
-    gsub("[^A-Za-z0-9._-]", "_", value)
-}
-
 read_expression_matrix = function(path) {
     table = read_tsv(
         path,
@@ -129,7 +127,7 @@ read_expression_matrix = function(path) {
     numeric_values
 }
 
-read_sample_metadata = function(path, sample_names, control_group) {
+read_sample_metadata = function(path, sample_names) {
     metadata = read_tsv(
         path,
         col_types = cols(.default = col_character()),
@@ -156,12 +154,6 @@ read_sample_metadata = function(path, sample_names, control_group) {
         ))
     }
     metadata = metadata[match(sample_names, metadata$sample), , drop = FALSE]
-    if (!(control_group %in% metadata$group)) {
-        stop(sprintf("Control group '%s' is absent from sample metadata.", control_group))
-    }
-    if (length(setdiff(unique(metadata$group), control_group)) == 0L) {
-        stop("At least one non-control group is required.")
-    }
     metadata
 }
 
@@ -323,9 +315,9 @@ dir.create(args$output_dir, recursive = TRUE, showWarnings = FALSE)
 expression_cpm = read_expression_matrix(args$feature_counts)
 metadata = read_sample_metadata(
     args$sample_metadata,
-    colnames(expression_cpm),
-    args$control_group
+    colnames(expression_cpm)
 )
+contrasts = read_contrasts(args$contrasts, unique(metadata$group))
 resolution = read_resolution(args$gene_set_resolution)
 
 log_expression = log2(expression_cpm + 1)
@@ -452,20 +444,19 @@ write_boxplots(
     file.path(args$output_dir, "gsva_group_boxplots.pdf")
 )
 
-group_levels = c(
-    args$control_group,
-    setdiff(unique(metadata$group), args$control_group)
-)
+group_levels = unique(metadata$group)
 group_factor = factor(metadata$group, levels = group_levels)
 design = model.matrix(~0 + group_factor)
 colnames(design) = group_levels
 fit = limma::lmFit(scores, design)
 
-for (target_group in setdiff(group_levels, args$control_group)) {
+for (contrast_index in seq_len(nrow(contrasts))) {
+    target_group = contrasts$target_group[[contrast_index]]
+    reference_group = contrasts$reference_group[[contrast_index]]
     contrast = numeric(ncol(design))
     names(contrast) = colnames(design)
     contrast[[target_group]] = 1
-    contrast[[args$control_group]] = -1
+    contrast[[reference_group]] = -1
     contrast_fit = limma::contrasts.fit(fit, contrasts = contrast)
     contrast_fit = limma::eBayes(contrast_fit)
     statistics = limma::topTable(
@@ -481,7 +472,7 @@ for (target_group in setdiff(group_levels, args$control_group)) {
         description = unname(prepared$descriptions[statistics$gene_set]),
         n_genes = unname(gene_counts[statistics$gene_set]),
         target_group = target_group,
-        control_group = args$control_group,
+        reference_group = reference_group,
         effect_size = statistics$logFC,
         average_score = statistics$AveExpr,
         t_statistic = statistics$t,
@@ -490,15 +481,7 @@ for (target_group in setdiff(group_levels, args$control_group)) {
         log_odds = statistics$B,
         stringsAsFactors = FALSE
     )
-    contrast_dir = file.path(
-        args$output_dir,
-        paste0(
-            "group_",
-            safe_name(target_group),
-            "_vs_",
-            safe_name(args$control_group)
-        )
-    )
+    contrast_dir = file.path(args$output_dir, contrasts$contrast_id[[contrast_index]])
     dir.create(contrast_dir, recursive = TRUE, showWarnings = FALSE)
     write_tsv(results, file.path(contrast_dir, "gsva_limma_results.tsv"))
 }

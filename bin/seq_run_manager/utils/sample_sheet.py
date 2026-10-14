@@ -92,6 +92,13 @@ def parse_sample_sheet(
                         f"BAM path is not a directory for sample '{group}/{alias}': {bam_dir}"
                     )
 
+                run_dir_value = (row.get("minknow_run_dir") or "").strip()
+                run_dir = Path(run_dir_value).expanduser() if run_dir_value else None
+                if run_dir is not None and not run_dir.is_dir():
+                    raise SampleSheetError(
+                        f"MinKNOW run directory does not exist or is not a directory for sample '{group}/{alias}': {run_dir}"
+                    )
+
                 samples.append(
                     Sample(
                         alias=alias,
@@ -99,6 +106,7 @@ def parse_sample_sheet(
                         bam_dir=bam_dir,
                         is_live=parse_is_live(row.get("is_live"), alias),
                         order=_parse_order(row.get("order"), alias),
+                        minknow_run_dir=run_dir,
                     )
                 )
     except (OSError, csv.Error) as error:

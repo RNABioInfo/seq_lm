@@ -281,7 +281,7 @@ def test_ambiguous_control_labels(tmp_path):
     p = setup_model(tmp_path)
     manifest = tmp_path / "manifest.tsv"
     manifest.write_text(manifest.read_text().replace("control", "Control", 1))
-    with pytest.raises(ValueError, match="unambiguous"):
+    with pytest.raises(ValueError, match="at least two control samples"):
         run(p, tmp_path)
 
 
@@ -304,13 +304,15 @@ def test_config_schema_defaults():
     schema = json.loads((root / "nextflow_schema.json").read_text())
     properties = schema["definitions"]["imodulon_analysis_options"]["properties"]
     config = (root / "nextflow.config").read_text()
-    assert len(properties) == 9
+    assert len(properties) == 11
     assert "ica_timecourse" not in properties
     for name, definition in properties.items():
         match = re.search(r"^\s*" + name + r" = (.+)$", config, re.M)
         assert match, name
         if definition["type"] == "boolean":
             assert match.group(1) == str(definition["default"]).lower()
+        elif isinstance(definition.get("default"), str):
+            assert json.loads(match.group(1)) == definition["default"]
         elif "default" in definition:
             assert float(match.group(1)) == definition["default"]
         else:
@@ -339,6 +341,7 @@ def test_component_metadata_is_keyed_and_preserved_in_snapshots(tmp_path, key):
     prepare(tmp_path / "matrix.csv", tmp_path / "annotation.gtf", None, 1, prepared, table)
     model = json.loads((prepared / "model.json").read_text())
     assert model["components"] == ["positive", "negative"]
+    assert model["component_max_abs_weights"] == {"positive": 1.0, "negative": 2.0}
     assert model["component_metadata"]["negative"]["regulator"] == "RpoS"
     assert model["hashes"]["imodulon_table"]
     for threshold, name in ((0, "ready"), (10000, "deferred")):
@@ -355,3 +358,23 @@ def test_component_metadata_rejects_mismatched_ids(tmp_path, rows):
     path.write_text("k,name\n" + rows)
     with pytest.raises(ValueError, match="component ID"):
         read_component_metadata(path, ["positive", "negative"])
+
+
+def test_custom_ica_reference_and_filtered_cohort(tmp_path):
+    prepared = setup_model(tmp_path)
+    manifest = tmp_path / "manifest.tsv"
+    frame = pd.read_csv(manifest, sep="\t")
+    frame["group"] = frame["group"].replace({"control": "baseline"})
+    frame.to_csv(manifest, sep="\t", index=False)
+    out = run(prepared, tmp_path, control_group="baseline")
+    provenance = json.loads((out / "provenance.json").read_text())
+    assert provenance["settings"]["control_group"] == "baseline"
+    assert set(provenance["settings"]["condition_groups"]) == {"baseline", "treated"}
+    activities = pd.read_csv(out / "activities.tsv", sep="\t", index_col=0)
+    np.testing.assert_allclose(activities.iloc[:, :2].mean(axis=1), 0, atol=1e-14)
+    comparisons = pd.read_csv(out / "differential_activity.tsv", sep="\t")
+    assert set(comparisons.control_group) == {"baseline"}
+    pytest.importorskip("ezcharts")
+    from workflow_glue.qc_report_types.imodulon_plots import load_imodulon_results
+    report = load_imodulon_results(out)
+    assert set(report.groups) == {"baseline", "treated"}

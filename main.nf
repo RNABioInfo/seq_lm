@@ -6,11 +6,13 @@ include {
     bam_ingress ;
     get_samples ;
     sample_sheet_has_order_column ;
-    validate_samples
+    validate_samples ;
+    validate_timeline_samples
 } from './lib/bam_ingress.nf'
 include {
     ChunkQCResult ;
     Sample ;
+    GeneContrast ;
     SampleBatchSize ;
     SampleChunkBAMGroup
 } from './lib/sample.nf'
@@ -36,6 +38,7 @@ include { join_ica_report_batches } from './modules/ica_report_batches.nf'
 include { quality_control } from './subworkflows/quality_control.nf'
 include { quantification } from './subworkflows/quantification.nf'
 include { differential_expression } from './subworkflows/differential_expression.nf'
+include { resolve_gene_contrasts ; gene_contrast_groups ; resolve_ica_groups ; select_analysis_batch } from './lib/gene_contrasts.nf'
 include { order_batches } from './lib/util.nf'
 include {
     differential_stability ;
@@ -50,38 +53,9 @@ include {
     write_sample_checkpoints
 } from './lib/sample_checkpoints.nf'
 include { imodulon_analysis } from './subworkflows/imodulon_analysis.nf'
+include { ica_monitoring } from './lib/ica_stability.nf'
 include { next_ica_snapshot_index } from './lib/ica_publication.nf'
 include { validate_parameters; ica_analysis_enabled } from './lib/validation.nf'
-
-process make_report {
-    label 'seq_lm'
-
-    input:
-    metadata: Map
-    per_read_stats: Path
-    versions: Path
-    params_json: Path
-
-    stage:
-    stageAs versions, 'versions/*'
-    stageAs params_json, 'params.json'
-
-    output:
-    file('wf-template-*.html')
-
-    script:
-    def report_name: String = 'wf-template-report.html'
-    def metadataJSON: String = new groovy.json.JsonBuilder(metadata).toPrettyString()
-    def stats_args: String = (per_read_stats.name == optional_file().name) ? '' : "--stats ${per_read_stats}"
-    """
-        echo '${metadataJSON}' > metadata.json
-        workflow-glue report ${report_name} \
-            --versions versions \
-            ${stats_args} \
-            --params params.json \
-            --metadata metadata.json
-        """
-}
 
 process prepare_chunk_bam {
     label 'seq_lm'
@@ -202,7 +176,7 @@ process qc_report {
     stageAs ica_results, 'ica_results'
 
     output:
-    report_files = files('qc_report*', arity: '3')
+    files('qc_report*', arity: '3')
 
     script:
     def rows: String = qc_report_inputs.rows
@@ -254,6 +228,7 @@ process qc_report {
             ${stability_args} \
             ${ica_args} \
             --stability-behavior ${params.monitoring_behavior} \
+            --stopping-method ${params.stopping_method} \
             --lfc-cutoff ${params.de_lfc_cutoff} \
             --padj-cutoff ${params.de_padj_cutoff}
         """
@@ -269,7 +244,10 @@ workflow sample_pipeline {
     first_analysis_index: Integer
     reference_genome: Path
     reference_annotation: Path
+    strand_specificity: String
     gene_sets: Path
+    gene_contrasts: List<GeneContrast>
+    ica_groups: Set<String>
     quantification_enabled: Boolean
     differential_expression_enabled: Boolean
     gene_set_enrichment_enabled: Boolean
@@ -322,16 +300,17 @@ workflow sample_pipeline {
     qc_result_ch = quality_control(merged_chunk_bam_ch)
     
     if (quantification_enabled) {
-        quantification(
+        quantification_outputs = quantification(
             merged_chunk_bam_ch,
             sample_batch_size_ch,
             restored_quantifications,
             reference_genome,
             reference_annotation,
+            strand_specificity,
         )
-        quantified_samples_ch = quantification.out.quantifications
-        quantified_sample_batches_ch = quantification.out.batches
-        quantification_report_batches_ch = quantification.out.report_batches
+        quantified_samples_ch = quantification_outputs.quantifications
+        quantified_sample_batches_ch = quantification_outputs.batches
+        quantification_report_batches_ch = quantification_outputs.report_batches
 
         quantification_output_ch = quantified_samples_ch.map { quantified_sample ->
             tuple(
@@ -342,8 +321,9 @@ workflow sample_pipeline {
         output(quantification_output_ch)
 
         if (ica_settings.enabled) {
-            imodulon_analysis(
-                quantified_sample_batches_ch,
+            ica_batches_ch = quantified_sample_batches_ch.map { batch -> select_analysis_batch(batch, ica_groups) }
+            ica_snapshots_ch = imodulon_analysis(
+                ica_batches_ch,
                 ica_matrix,
                 reference_annotation,
                 ica_gene_map,
@@ -355,8 +335,9 @@ workflow sample_pipeline {
         }
 
         if (differential_expression_enabled) {
-            differential_expression(
-                quantified_sample_batches_ch,
+            differential_outputs = differential_expression(
+                quantified_sample_batches_ch.map { batch -> select_analysis_batch(batch, gene_contrast_groups(gene_contrasts)) },
+                gene_contrasts,
                 first_analysis_index,
                 reference_annotation,
                 gene_sets,
@@ -365,16 +346,16 @@ workflow sample_pipeline {
                 min_read_count,
                 min_replicate_sample_count,
             )
-            differential_results_ch = differential_expression.out.results
-            differential_report_batches_ch = differential_expression.out.report_batches
+            differential_results_ch = differential_outputs.results
+            differential_report_batches_ch = differential_outputs.report_batches
 
             publish_differential_results(
                 differential_results_ch.map { result ->
                     tuple(result.batch_index, result.analysis_index, result.results)
                 }
             )
-            if (stability_behavior != 'disabled') {
-                differential_stability(
+            if (stability_behavior != 'disabled' && stability_settings.method == 'dea') {
+                stability_audits_ch = differential_stability(
                     differential_results_ch,
                     all_samples,
                     active_samples,
@@ -383,7 +364,6 @@ workflow sample_pipeline {
                     initial_stability_state,
                     minknow_connection,
                 )
-                stability_audits_ch = differential_stability.out
                 differential_reports_with_stability_ch = differential_report_batches_ch
                     .filter { report_batch -> report_batch.has_differential_results }
                     .map { report_batch -> tuple(report_batch.batch_index, report_batch) }
@@ -474,11 +454,43 @@ workflow sample_pipeline {
         }
 
         if (ica_settings.enabled) {
-            join_ica_report_batches(
+            ica_report_batches_ch = join_ica_report_batches(
                 analysis_report_batches_ch,
-                imodulon_analysis.out.snapshots,
+                ica_snapshots_ch,
             )
-            analysis_report_batches_ch = join_ica_report_batches.out
+            analysis_report_batches_ch = ica_report_batches_ch
+            if (stability_behavior != 'disabled' && stability_settings.method == 'ica') {
+                ica_audits_ch = ica_monitoring(
+                    ica_snapshots_ch,
+                    all_samples,
+                    active_samples,
+                    [groups: ica_groups.toList().toSorted(), behavior: stability_behavior,
+                     num_stable_batches: stability_settings.num_stable_batches,
+                     max_fold_change: stability_settings.ica_max_fold_change,
+                     min_read_growth_fraction: stability_settings.ica_min_read_growth_fraction],
+                    minknow_connection,
+                    ica_output_root,
+                )
+                analysis_report_batches_ch = analysis_report_batches_ch
+                    .map { report -> tuple(report.batch_index, report) }
+                    .join(
+                        ica_audits_ch.map { audit -> tuple(audit.batch_index, audit) },
+                        by: 0, failOnDuplicate: true, failOnMismatch: true,
+                    )
+                    .map { batch_index: Integer, report, audit ->
+                        if (report.ica_analysis_index != audit.analysis_index) {
+                            error("Inconsistent ICA monitoring analysis index for batch ${batch_index}.")
+                        }
+                        record(
+                            batch_index: batch_index, report_sequence: report.report_sequence,
+                            biotypes: report.biotypes, differential_analysis_note: report.differential_analysis_note,
+                            has_differential_results: report.has_differential_results, results: report.results,
+                            stability_results: audit.sample_stability, has_stability_results: true,
+                            ica_results: report.ica_results, has_ica_results: true,
+                            ica_analysis_index: report.ica_analysis_index,
+                        )
+                    }
+            }
         }
         else {
             analysis_report_batches_ch = analysis_report_batches_ch.map { report ->
@@ -522,6 +534,7 @@ workflow sample_pipeline {
             checkpoint_quantifications_ch,
             checkpoint_qc_results_ch,
             [genome: file_identity(reference_genome), annotation: file_identity(reference_annotation)],
+            strand_specificity,
         )
     }
 
@@ -609,7 +622,7 @@ workflow sample_pipeline {
             analysis_report_batches_ch,
             qc_report_input_tree_ch,
         )
-        qc_report(
+        qc_report_files_ch = qc_report(
             qc_report_ready_ch.map { result -> result.qc_report_inputs },
             qc_report_ready_ch.map { result -> result.qc_results },
             qc_report_ready_ch.map { result -> result.transcript_biotypes },
@@ -626,7 +639,7 @@ workflow sample_pipeline {
         )
     }
     else {
-        qc_report(
+        qc_report_files_ch = qc_report(
             qc_report_input_tree_ch.map { result -> result.qc_report_inputs },
             qc_report_input_tree_ch.map { result -> result.qc_results },
             optional_file(),
@@ -642,7 +655,7 @@ workflow sample_pipeline {
             first_report_revision,
         )
     }
-    qc_report.out.report_files
+    qc_report_files_ch
         .map { report_files: Collection<Path> ->
             def ordered_files: List<Path> = report_files.toList()
             publish_qc_report_snapshot(ordered_files, ica_output_root)
@@ -681,20 +694,35 @@ workflow {
 
     ingress_args = record(
         live_analysis: params.live_analysis,
-        timeline_analysis: params.timeline_analysis || ica_timecourse_enabled,
+        timeline_analysis: false,
         sample_sheet_path: sample_sheet_path,
         bam_poll_interval_ms: (params.bam_poll_interval_seconds as Integer) * 1000,
         bam_stability_polls: params.bam_stability_polls as Integer,
         termination_requested: params.monitoring_behavior == 'terminate',
+        detect_minknow_completion: params.detect_minknow_completion,
+        minknow_completion_settle_seconds: params.minknow_completion_settle_seconds,
     )
     all_samples = get_samples(ingress_args)
-    validate_samples(all_samples)
+    validate_samples(all_samples, params.differential_expression && !params.gene_contrast_file && !ica_enabled)
+    def gene_contrasts: List<GeneContrast> = params.differential_expression || params.gene_contrast_file
+        ? resolve_gene_contrasts(all_samples, params.gene_contrast_file ? file(params.gene_contrast_file) : null)
+        : []
+    def ica_groups: Set<String> = ica_enabled
+        ? resolve_ica_groups(all_samples, params.ica_control_group as String, params.ica_condition_groups as String)
+        : [] as Set<String>
+    if (params.timeline_analysis) {
+        validate_timeline_samples(all_samples.findAll { sample -> gene_contrast_groups(gene_contrasts).contains(sample.group) })
+    }
+    if (ica_timecourse_enabled) {
+        validate_timeline_samples(all_samples.findAll { sample -> ica_groups.contains(sample.group) })
+    }
     checkpoint_state = quantification_enabled
         ? discover_sample_checkpoints(
             all_samples,
             output_root,
             reference_genome,
             reference_annotation,
+            params.strand_specificity,
         )
         : [restored: [], active: all_samples]
     restored_quantifications = checkpoint_state.restored*.quantification
@@ -705,6 +733,10 @@ workflow {
         ? next_analysis_snapshot_index(output_root)
         : 0
     stability_parameter_values = [
+        contrasts: gene_contrasts,
+        method: params.stopping_method as String,
+        ica_max_fold_change: params.ica_max_fold_change,
+        ica_min_read_growth_fraction: params.ica_min_read_growth_fraction,
         behavior: params.monitoring_behavior as String,
         num_stable_batches: params.num_stable_batches as Integer,
         max_feature_diff_fraction: params.stability_max_feature_diff_fraction,
@@ -716,7 +748,7 @@ workflow {
         max_small_set_call_changes: params.stability_max_small_set_call_changes as Integer,
     ]
     stability_parameter_values.config = stability_config(stability_parameter_values, all_samples)
-    initial_stability_state = params.monitoring_behavior == 'disabled'
+    initial_stability_state = params.monitoring_behavior == 'disabled' || params.stopping_method != 'dea'
         ? [previous_results: optional_file(), streaks: [:], eligible: [:]]
         : discover_stability_state(
             output_root,
@@ -755,7 +787,10 @@ workflow {
         first_analysis_index,
         reference_genome,
         reference_annotation,
+        params.strand_specificity,
         gene_sets,
+        gene_contrasts,
+        ica_groups,
         quantification_enabled,
         params.differential_expression,
         params.gene_set_enrichment,
@@ -774,6 +809,8 @@ workflow {
         [enabled: ica_enabled,
          has_imodulon_table: params.ica_imodulon_table != null && "${params.ica_imodulon_table}".trim() != '',
          has_gene_map: params.ica_gene_map != null && "${params.ica_gene_map}".trim() != '',
+         control_group: (params.ica_control_group as String).trim(),
+         condition_groups: ica_groups.toList().toSorted(),
          log_base: params.ica_log_base, pseudocount: params.ica_pseudocount,
          min_gene_coverage: params.ica_min_gene_coverage,
          min_read_count: params.ica_min_read_count, padj_cutoff: params.ica_padj_cutoff],

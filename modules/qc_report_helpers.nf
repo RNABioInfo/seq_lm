@@ -1,5 +1,16 @@
 nextflow.enable.types = true
 
+/** Load the single current report-state format. */
+def read_qc_report_state(path: Path) -> Map {
+    def state: Map = new groovy.json.JsonSlurper().parse(path.toFile()) as Map
+    if (state.schema_version != 2 || !(state.report_revision instanceof Integer) || state.report_revision < 0 ||
+        state.snapshot != "qc_report_snapshot_revision_${state.report_revision}.html" ||
+        !(state.snapshot_bytes instanceof Number) || state.snapshot_bytes < 0 || !(state.latest_batch instanceof String)) {
+        error("Invalid current QC report state: ${path}")
+    }
+    return state
+}
+
 /** Replace the completed live shell with its latest self-contained snapshot. */
 def finalize_qc_report(output_root: Path) -> Void {
     def normalized_root: Path = output_root.toAbsolutePath().normalize()
@@ -8,7 +19,7 @@ def finalize_qc_report(output_root: Path) -> Void {
         return null
     }
 
-    def state: Map = new groovy.json.JsonSlurper().parse(state_path.toFile()) as Map
+    def state: Map = read_qc_report_state(state_path)
     def snapshot_name: String = state.snapshot == null ? '' : "${state.snapshot}"
     if (!snapshot_name || Path.of(snapshot_name).fileName.toString() != snapshot_name) {
         error("Invalid finalized QC report snapshot path '${snapshot_name}'.")
@@ -63,10 +74,8 @@ def next_qc_report_revision(output_root: Path) -> Integer {
     }
     def state_path: Path = output_root.resolve('qc_report_state.json')
     if (java.nio.file.Files.isRegularFile(state_path)) {
-        def state: Map = new groovy.json.JsonSlurper().parse(state_path.toFile()) as Map
-        if (state.report_revision != null) {
-            revisions.add(state.report_revision as Integer)
-        }
+        def state: Map = read_qc_report_state(state_path)
+        revisions.add(state.report_revision as Integer)
     }
     return revisions.empty ? 0 : revisions.max() + 1
 }
@@ -82,7 +91,7 @@ def publish_qc_report_snapshot(report_files: List<Path>, output_root: Path) -> P
         error('A QC report publication must contain exactly one qc_report_state.json file.')
     }
     def state_path: Path = state_files[0]
-    def state: Map = new groovy.json.JsonSlurper().parse(state_path.toFile()) as Map
+    def state: Map = read_qc_report_state(state_path)
     if (!(state.report_revision instanceof Integer) || state.report_revision < next_qc_report_revision(normalized_root)) {
         error('Refusing to publish a stale or invalid QC report revision.')
     }

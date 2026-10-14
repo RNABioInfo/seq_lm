@@ -1,11 +1,11 @@
 EXPECTED_COLUMNS = [
     "name",
     "group",
+    "order",
     "chunks_seen",
     "latest_batch_index",
     "qc_dir",
 ]
-OPTIONAL_COLUMNS = ["order"]
 DISPLAY_COLUMNS = {
     "name": "Name",
     "group": "Group",

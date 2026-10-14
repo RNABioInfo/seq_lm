@@ -63,14 +63,14 @@ class IModulonResult:
 
 
 def component_label(data: IModulonResult, component: str) -> str:
-    metadata = data.provenance.get("model", {}).get("component_metadata", {})
+    metadata = data.provenance["model"].get("component_metadata", {})
     name = metadata.get(component, {}).get("name", "")
     return f"{component} — {name}" if name and name != component else component
 
 
 def annotate_components(data: IModulonResult) -> None:
     """Attach display annotations without changing statistical component IDs."""
-    metadata = data.provenance.get("model", {}).get("component_metadata", {})
+    metadata = data.provenance["model"].get("component_metadata", {})
     if not isinstance(metadata, dict) or (
         metadata and set(metadata) != set(data.components)
     ):
@@ -96,7 +96,7 @@ def annotate_components(data: IModulonResult) -> None:
 def _component_description(data: IModulonResult, component: str) -> None:
     from dominate.tags import p
 
-    metadata = data.provenance.get("model", {}).get("component_metadata", {})
+    metadata = data.provenance["model"].get("component_metadata", {})
     description = metadata.get(component, {}).get("description", "")
     if description:
         p(description)
@@ -148,15 +148,32 @@ def load_imodulon_results(
         raise ValueError(f"Invalid ICA snapshot metadata in {root}: {exc}") from exc
     if status.get("status") not in {"ready", "deferred"}:
         raise ValueError("ICA status must be ready or deferred")
-    if provenance.get("schema_version") != 1:
+    required = {
+        "schema_version", "model", "settings", "control_sample_ids",
+        "batch_index", "report_sequence", "analysis_index",
+    }
+    if missing := required - set(provenance):
+        raise ValueError("ICA provenance is missing fields: " + ", ".join(sorted(missing)))
+    if not {"log_base", "pseudocount", "min_read_count", "padj_cutoff", "control_group", "condition_groups"}.issubset(provenance["settings"]):
+        raise ValueError("ICA provenance settings are incomplete")
+    if provenance["schema_version"] != 1:
         raise ValueError("Unsupported ICA provenance schema version")
     for field, expected in (
         ("batch_index", expected_batch),
         ("report_sequence", expected_sequence),
         ("analysis_index", expected_analysis_index),
     ):
-        if expected is not None and int(provenance.get(field, -1)) != int(expected):
+        if expected is not None and int(provenance[field]) != int(expected):
             raise ValueError(f"ICA snapshot {field} does not match its report record")
+
+    control_group = provenance["settings"]["control_group"]
+    selected_groups = provenance["settings"]["condition_groups"]
+    if (not isinstance(control_group, str) or not control_group.strip()
+            or not isinstance(selected_groups, list) or not selected_groups
+            or not all(isinstance(group, str) and group for group in selected_groups)
+            or len(set(selected_groups)) != len(selected_groups)
+            or control_group not in selected_groups):
+        raise ValueError("Invalid ICA control or selected condition groups")
 
     sample_path = root / "sample_metadata.tsv"
     samples = _read_tsv(sample_path)
@@ -173,14 +190,15 @@ def load_imodulon_results(
         or samples.duplicated(["group", "alias"]).any()
     ):
         raise ValueError("ICA sample group/alias pairs must be unique and nonempty")
+    if set(samples["group"]) != set(selected_groups):
+        raise ValueError("ICA sample groups do not match the selected cohort")
     if expected_samples is not None:
-        columns = (
-            ("Name", "Group")
-            if {"Name", "Group"}.issubset(expected_samples.columns)
-            else ("name", "group")
-        )
+        columns = ("Name", "Group")
         if not set(columns).issubset(expected_samples.columns):
             raise ValueError("QC sample metadata cannot be matched to ICA samples")
+        if not set(selected_groups).issubset(set(expected_samples[columns[1]])):
+            raise ValueError("ICA selected groups are absent from QC metadata")
+        expected_samples = expected_samples.loc[expected_samples[columns[1]].isin(selected_groups)]
         expected_pairs = Counter(
             zip(
                 expected_samples[columns[0]].astype(str),
@@ -194,7 +212,7 @@ def load_imodulon_results(
     samples["ready"] = samples["ready"].str.lower().map({"true": True, "false": False})
     if samples["ready"].isna().any():
         raise ValueError("ICA sample readiness must be true or false")
-    threshold = float(provenance.get("settings", {}).get("min_read_count", -1))
+    threshold = float(provenance["settings"]["min_read_count"])
     if (
         not math.isfinite(threshold)
         or threshold < 0
@@ -212,8 +230,8 @@ def load_imodulon_results(
         raise ValueError(
             "ICA snapshot status/readiness does not match sample abundance"
         )
-    control_ids = provenance.get("control_sample_ids", [])
-    control_samples = samples.loc[samples["group"].str.lower().eq("control")]
+    control_ids = provenance["control_sample_ids"]
+    control_samples = samples.loc[samples["group"].eq(control_group)]
     if (
         len(control_samples) < 2
         or control_samples["group"].nunique() != 1
@@ -323,7 +341,7 @@ def load_imodulon_results(
     sample_ids = samples["sample_id"].tolist()
     if set(activities["sample_id"]) != set(sample_ids):
         raise ValueError("ICA activity samples do not match sample metadata")
-    model = provenance.get("model", {})
+    model = provenance["model"]
     components = tuple(str(value) for value in model.get("components", []))
     if (
         not components
@@ -347,8 +365,8 @@ def load_imodulon_results(
             else rows["order"].eq(sample.order).all()
         ):
             raise ValueError("ICA activity order does not match sample metadata")
-    settings = provenance.get("settings", {})
-    cutoff = float(settings.get("padj_cutoff", 0.05))
+    settings = provenance["settings"]
+    cutoff = float(settings["padj_cutoff"])
     if not 0 < cutoff <= 1:
         raise ValueError("ICA provenance contains an invalid adjusted p-value cutoff")
     result.activities, result.summary, result.differential = (
@@ -445,7 +463,7 @@ def load_imodulon_results(
     valid_test_statuses = {"tested", "insufficient_replicates", "zero_variance"}
     if not set(differential["status"]).issubset(valid_test_statuses):
         raise ValueError("ICA differential activity contains an unknown test status")
-    control_ids = provenance.get("control_sample_ids", [])
+    control_ids = provenance["control_sample_ids"]
     if not control_ids or not set(control_ids).issubset(set(sample_ids)):
         raise ValueError("ICA provenance contains invalid control sample identities")
     control_groups = set(samples.loc[samples["sample_id"].isin(control_ids), "group"])
@@ -1154,7 +1172,7 @@ def create_time_heatmap(data: IModulonResult) -> BokehPlot:
 def _add_component_annotations(data: IModulonResult) -> None:
     from dominate.tags import h4
 
-    model = data.provenance.get("model", {})
+    model = data.provenance["model"]
     metadata = model.get("component_metadata", {})
     components = data.components or tuple(model.get("components", []))
     h4("Component annotations")

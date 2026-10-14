@@ -20,7 +20,7 @@ def write_nanoplot(path, rows):
             )
 
 
-def test_aggregate_nanoplot_accepts_legacy_headerless_empty_chunk(tmp_path):
+def test_aggregate_nanoplot_accepts_header_only_empty_chunk(tmp_path):
     """A terminal chunk with no usable reads does not break aggregation."""
     populated = tmp_path / "nanoplot_data_chunk_0.tsv.gz"
     empty = tmp_path / "nanoplot_data_chunk_1.tsv.gz"
@@ -34,8 +34,7 @@ def test_aggregate_nanoplot_accepts_legacy_headerless_empty_chunk(tmp_path):
         "percentIdentity": 98.0,
     }
     write_nanoplot(populated, [row])
-    with gzip.open(empty, "wt"):
-        pass
+    write_nanoplot(empty, [])
 
     result = parse_inputs.aggregate_nanoplot([populated, empty])
 
@@ -46,8 +45,7 @@ def test_aggregate_nanoplot_accepts_legacy_headerless_empty_chunk(tmp_path):
 def test_aggregate_nanoplot_all_empty_chunks_keep_expected_schema(tmp_path):
     """Samples with only empty QC chunks retain a report-compatible schema."""
     empty = tmp_path / "nanoplot_data_chunk_0.tsv.gz"
-    with gzip.open(empty, "wt"):
-        pass
+    write_nanoplot(empty, [])
 
     result = parse_inputs.aggregate_nanoplot([empty])
 
@@ -57,7 +55,7 @@ def test_aggregate_nanoplot_all_empty_chunks_keep_expected_schema(tmp_path):
 
 
 def test_aggregate_nanoplot_rejects_nonempty_malformed_chunk(tmp_path):
-    """The empty-file fallback does not hide malformed non-empty output."""
+    """Malformed non-empty output is rejected."""
     malformed = tmp_path / "nanoplot_data_chunk_0.tsv.gz"
     with gzip.open(malformed, "wt") as handle:
         handle.write("wrong\tcolumns\n1\t2\n")
@@ -67,7 +65,7 @@ def test_aggregate_nanoplot_rejects_nonempty_malformed_chunk(tmp_path):
 
 
 def test_load_qc_samples_preserves_optional_elapsed_minutes(tmp_path, monkeypatch):
-    """The report exposes order metadata without requiring it in legacy TSVs."""
+    """The report preserves supplied order values."""
     samples = tmp_path / "samples.tsv"
     samples.write_text(
         "name\tgroup\torder\tchunks_seen\tlatest_batch_index\tqc_dir\n"
@@ -97,3 +95,18 @@ def test_load_qc_samples_preserves_optional_elapsed_minutes(tmp_path, monkeypatc
     result = parse_inputs.load_qc_samples(samples)
 
     assert result.samples_df["Time (min)"].tolist() == ["-5"]
+
+
+def test_aggregate_nanoplot_rejects_headerless_chunk(tmp_path):
+    empty = tmp_path / "empty.tsv.gz"
+    with gzip.open(empty, "wt"):
+        pass
+    with pytest.raises(pd.errors.EmptyDataError):
+        parse_inputs.aggregate_nanoplot([empty])
+
+
+def test_load_qc_samples_requires_order_column(tmp_path):
+    samples = tmp_path / "samples.tsv"
+    samples.write_text("name\tgroup\tchunks_seen\tlatest_batch_index\tqc_dir\n")
+    with pytest.raises(ValueError, match="missing columns: order"):
+        parse_inputs.load_qc_samples(samples)

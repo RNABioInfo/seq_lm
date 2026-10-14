@@ -17,7 +17,7 @@ workflow {
         java.nio.file.Files.writeString(source.resolve(snapshot_name), "snapshot ${index}")
         java.nio.file.Files.writeString(
             source.resolve('qc_report_state.json'),
-            new groovy.json.JsonBuilder([report_revision: index, latest_batch: "0", snapshot: snapshot_name, snapshot_bytes: "snapshot ${index}".bytes.length]).toString(),
+            new groovy.json.JsonBuilder([schema_version: 2, report_revision: index, latest_batch: "0", snapshot: snapshot_name, snapshot_bytes: "snapshot ${index}".bytes.length]).toString(),
         )
         publish_qc_report_snapshot(
             [source.resolve('qc_report_state.json'), source.resolve(snapshot_name), source.resolve('qc_report.html')],

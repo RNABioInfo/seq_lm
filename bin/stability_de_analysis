@@ -7,13 +7,11 @@ from __future__ import annotations
 import argparse as ap
 import math
 import pathlib as pl
-import re
 from dataclasses import asdict, dataclass
 
 import pandas as pd
 
 
-CONTRAST_DIRECTORY = re.compile(r"^group_(.+)_vs_(.+)$")
 FEATURE_COUNTS_FILE = "feature_counts.tsv"
 SAMPLE_METADATA_FILE = "sample_metadata.tsv"
 EDGE_R_RESULTS_FILE = "edgeR_results.tsv"
@@ -241,10 +239,6 @@ def de_calls_are_stable(
     return jaccard >= min_jaccard_similarity
 
 
-def _safe_name(value: str) -> str:
-    return re.sub(r"[^A-Za-z0-9._-]", "_", value)
-
-
 def _read_groups(results_dir: pl.Path) -> list[str]:
     path = results_dir / SAMPLE_METADATA_FILE
     if not path.is_file():
@@ -258,17 +252,20 @@ def _read_groups(results_dir: pl.Path) -> list[str]:
     return metadata["group"].astype(str).drop_duplicates().tolist()
 
 
-def _contrast_groups(contrast_id: str, groups: list[str]) -> tuple[str, str]:
-    if not CONTRAST_DIRECTORY.fullmatch(contrast_id):
-        raise ValueError(f"Invalid contrast directory name: {contrast_id}")
-    matches = [
-        (target, reference)
-        for target in groups for reference in groups
-        if target != reference and contrast_id == f"group_{_safe_name(target)}_vs_{_safe_name(reference)}"
-    ]
-    if len(matches) != 1:
-        raise ValueError(f"Could not uniquely resolve contrast '{contrast_id}' to sample groups.")
-    return matches[0]
+def _read_contrasts(results_dir: pl.Path) -> pd.DataFrame:
+    definitions = pd.read_csv(results_dir / "contrasts.tsv", sep="\t", dtype=str, keep_default_na=False)
+    columns = ["contrast_id", "target_group", "reference_group"]
+    if definitions.columns.tolist() != columns or definitions.empty:
+        raise ValueError("Invalid or empty canonical contrast TSV")
+    if (definitions.eq("").any().any() or definitions["contrast_id"].duplicated().any()
+            or definitions.duplicated(["target_group", "reference_group"]).any()
+            or definitions["target_group"].eq(definitions["reference_group"]).any()
+            or not definitions["contrast_id"].str.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*").all()):
+        raise ValueError("Invalid or duplicate contrast definitions")
+    groups = set(definitions["target_group"]) | set(definitions["reference_group"])
+    if groups != set(_read_groups(results_dir)):
+        raise ValueError("Contrast groups do not match analysis sample metadata")
+    return definitions
 
 
 def _contrast_paths(results_dir: pl.Path) -> dict[str, pl.Path]:
@@ -289,17 +286,27 @@ def assess_results(previous_dir: pl.Path, current_dir: pl.Path, args: ap.Namespa
     current_groups = _read_groups(current_dir)
     if set(previous_groups) != set(current_groups):
         raise ValueError("Sample groups changed between stability checkpoints.")
+    
+    previous_definitions = _read_contrasts(previous_dir)
+    current_definitions = _read_contrasts(current_dir)
+
+    if not previous_definitions.equals(current_definitions):
+        raise ValueError("Contrast definitions changed between stability checkpoints.")
+    
     previous_paths = _contrast_paths(previous_dir)
     current_paths = _contrast_paths(current_dir)
-    if previous_paths.keys() != current_paths.keys():
+
+    if previous_paths.keys() != current_paths.keys() or set(current_paths) != set(current_definitions["contrast_id"]):
         raise ValueError("Contrast sets changed between stability checkpoints.")
     features = feature_metrics(
         args.max_feature_diff_fraction,
         FilteredFeatureCounts.from_paths(current_dir / FEATURE_COUNTS_FILE, previous_dir / FEATURE_COUNTS_FILE),
     )
     assessments: list[ContrastMetrics] = []
-    for contrast_id in sorted(current_paths):
-        target_group, reference_group = _contrast_groups(contrast_id, current_groups)
+    
+    for definition in current_definitions.itertuples(index=False):
+        contrast_id = definition.contrast_id
+        target_group, reference_group = definition.target_group, definition.reference_group
         de_results = DEResults.from_paths(current_paths[contrast_id], previous_paths[contrast_id])
         median_delta = effect_size_metrics(de_results)
         current_calls, previous_calls, union_count, changed_count, jaccard = call_metrics(

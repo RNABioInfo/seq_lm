@@ -19,11 +19,12 @@ workflow {
                     counts: root.resolve(index == 0 && sample_index == 0 ? 'zero.quant' : "q${sample_index}.quant"))
             })
     }
-    imodulon_analysis(channel.fromList(batches), root.resolve('matrix.csv'),
+    ica_snapshots_ch = imodulon_analysis(channel.fromList(batches), root.resolve('matrix.csv'),
         root.resolve('annotation.gtf'), root.resolve('matrix.csv'), root.resolve('iM_table.csv'),
-        [has_gene_map: false, has_imodulon_table: true, min_gene_coverage: 1.0, log_base: 2.0,
+        [control_group: 'control', has_gene_map: false, has_imodulon_table: true, min_gene_coverage: 1.0, log_base: 2.0,
          pseudocount: 1.0, min_read_count: 0, padj_cutoff: 0.05], first, out_root)
-    imodulon_analysis.out.snapshots.collect().view { results ->
+    ica_snapshots_ch.collect().view { results ->
+        results = results.toSorted { left, right -> left.analysis_index <=> right.analysis_index }
         assert results*.analysis_index == [first, first + 1]
         assert results*.batch_index == [4, 8]
         def latest = new groovy.json.JsonSlurper().parse(out_root.resolve('ica/latest.json').toFile())

@@ -178,6 +178,8 @@ def write_transcript_biotypes(path):
 def write_differential_results(path):
     """Write a small report-ready edgeR result tree."""
     path.mkdir(parents=True)
+    (path / "sample_metadata.tsv").write_text("sample\tgroup\ncontrol_1\tcontrol\ntreatment_1\ttime_point_1\n")
+    (path / "contrasts.tsv").write_text("contrast_id\ttarget_group\treference_group\ngroup_time_point_1_vs_control\ttime_point_1\tcontrol\n")
     (path / "feature_counts.tsv").write_text(
         "feature_id\tcontrol_1\ttreatment_1\n"
         "gene_1\t2\t32\n"
@@ -232,7 +234,7 @@ def write_differential_results(path):
         "carbon_mixed\tMixed response\t2\t2\t2\t2\tscored\n"
     )
     (contrast / "gsva_limma_results.tsv").write_text(
-        "gene_set\tdescription\tn_genes\ttarget_group\tcontrol_group\t"
+        "gene_set\tdescription\tn_genes\ttarget_group\treference_group\t"
         "effect_size\taverage_score\tt_statistic\tp_value\t"
         "adjusted_p_value\tlog_odds\n"
         "carbon_up\tCarbon response\t2\ttime_point_1\tcontrol\t"
@@ -396,6 +398,17 @@ def test_qc_report_writes_html(tmp_path):
     params = tmp_path / "params.json"
     params.write_text(json.dumps({"qc_report": True}))
 
+    write_flagstat(tmp_path / "qc_results/flagstat/QC_only/omitted/flagstat_data_chunk_0.tsv")
+    write_nanoplot(tmp_path / "qc_results/nanoplot/QC_only/omitted/nanoplot_data_chunk_0.tsv.gz", [])
+    with samples.open("a") as handle:
+        handle.write("omitted\tQC_only\t\t1\t0\tqc_results\n")
+    with stability_results.open("a") as handle:
+        handle.write("3\t2\tQC_only\tomitted\t/data/omitted\ttrue\t\t0\tfalse\tfalse\tlog\tnone\n")
+    composition = pd.read_csv(transcript_biotypes, sep="\t")
+    composition = pd.concat([composition, pd.DataFrame([
+        {"name": "omitted", "group": "QC_only", "biotype": biotype, "num_reads": 0, "fraction": 0}
+        for biotype in BIOTYPE_ORDER])], ignore_index=True)
+    composition.to_csv(transcript_biotypes, sep="\t", index=False)
     report = tmp_path / "qc_report.html"
     args = qc_report.argparser().parse_args(
         [
@@ -438,6 +451,7 @@ def test_qc_report_writes_html(tmp_path):
     )
     assert "control/control_1" in html
     assert "time_point_1/treatment_1" in html
+    assert "QC_only/omitted" in html
     assert "qc_results" in html
     assert "Number of mapped reads" in html
     assert "Number of bases" in html
@@ -690,7 +704,7 @@ def test_create_sample_read_fate_sankey_html_adds_sample_dropdown():
     assert "Supplementary" not in html
 
 
-def test_create_read_length_quality_kde_html_handles_single_read():
+def test_read_length_quality_kde_handles_single_read():
     """Sparse live data renders an empty 2D KDE plot instead of raising."""
     nanoplot = nanoplot_df(
         [
@@ -705,7 +719,8 @@ def test_create_read_length_quality_kde_html_handles_single_read():
             }
         ]
     )
-    html = qc_report.create_read_length_quality_kde_html(nanoplot)
+    html = qc_report.create_2d_kde_html(nanoplot, x_column="lengths", y_column="quals",
+        title="Read length vs quality 2D KDE", x_axis_label="Read length", y_axis_label="Read quality")
 
     assert "Read length vs quality 2D KDE (insufficient data)" in html
     assert "Plotly.newPlot" not in html
@@ -736,9 +751,9 @@ def test_kde_default_grid_size_is_100():
     )
 
 
-def test_create_read_length_quality_kde_html_uses_2d_contour_plot():
+def test_read_length_quality_kde_uses_2d_contour_plot():
     """2D KDE uses a Bokeh contour plot for valid numeric pairs."""
-    html = qc_report.create_read_length_quality_kde_html(
+    html = qc_report.create_2d_kde_html(
         nanoplot_df(
             [
                 {"lengths": "100", "quals": "10"},
@@ -747,7 +762,9 @@ def test_create_read_length_quality_kde_html_uses_2d_contour_plot():
                 {"lengths": "450", "quals": "40"},
                 {"lengths": "700", "quals": "26"},
             ]
-        )
+        ),
+        x_column="lengths", y_column="quals", title="Read length vs quality 2D KDE",
+        x_axis_label="Read length", y_axis_label="Read quality",
     )
 
     assert "Read length vs quality 2D KDE" in html
@@ -908,7 +925,7 @@ def test_live_viewer_refreshes_on_revision_and_rejects_stale_updates(tmp_path):
 const assert = require('node:assert/strict');
 const vm = require('node:vm');
 let refresh, onload;
-let state = {report_revision: 11, latest_batch: '0', snapshot: 'qc_report_snapshot_revision_11.html', snapshot_bytes: 10};
+let state = {schema_version: 2, report_revision: 11, latest_batch: '0', snapshot: 'qc_report_snapshot_revision_11.html', snapshot_bytes: 10};
 const status = {style: {}};
 const frame = {
   src: 'original',

@@ -1,5 +1,7 @@
 #!/usr/bin/env python
-"""Pytests argument definitions."""
+"""Pytest argument definitions."""
+
+from pathlib import Path
 
 
 def pytest_addoption(parser):
@@ -7,5 +9,5 @@ def pytest_addoption(parser):
     parser.addoption(
         "--test_data",
         action="store",
-        default="/host/test_data"
+        default=str(Path(__file__).resolve().parents[3] / "test_data")
     )

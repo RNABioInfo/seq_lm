@@ -9,6 +9,7 @@ class Sample:
     bam_dir: Path
     is_live: bool = True
     order: int | None = None
+    minknow_run_dir: Path | None = None
 
     @property
     def id(self) -> str:

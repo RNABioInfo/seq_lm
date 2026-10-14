@@ -14,11 +14,14 @@ import nextflow.extension.CH
  */
 class LiveBamWatcher {
 
+    private static final log = org.slf4j.LoggerFactory.getLogger(LiveBamWatcher)
+
     static ChannelImpl poll(
         Path root,
         Collection<Path> initialBams,
         long pollIntervalMillis,
         int requiredStablePolls,
+        Map completion,
         Closure onActive,
         Closure onError
     ) {
@@ -33,6 +36,7 @@ class LiveBamWatcher {
                     initiallyAccepted,
                     pollIntervalMillis,
                     requiredStablePolls,
+                    completion,
                     target,
                     onActive,
                     onError
@@ -49,6 +53,7 @@ class LiveBamWatcher {
         Set<String> initiallyAccepted,
         long pollIntervalMillis,
         int requiredStablePolls,
+        Map completion,
         def target,
         Closure onActive,
         Closure onError
@@ -56,6 +61,9 @@ class LiveBamWatcher {
         try {
             Set<String> acceptedBams = new LinkedHashSet<>(initiallyAccepted)
             Map<String, Map<String, Long>> observations = [:]
+            Path runDirectory = completion.enabled ? MinknowCompletion.resolveRunDirectory(root, completion.run_dir as Path) : null
+            Map completionState = [:]
+            String lastReason = null
             onActive.call()
 
             while (!Thread.currentThread().isInterrupted()) {
@@ -64,14 +72,24 @@ class LiveBamWatcher {
                 Set<String> currentKeys = currentBams.collect { Path path -> pathKey(path) } as Set<String>
                 observations.keySet().removeIf { String key -> !currentKeys.contains(key) }
 
+                Map<String, List<Long>> inventory = [:]
                 currentBams.each { Path bamPath ->
                     String key = pathKey(bamPath)
+                    // A producer may remove a file between discovery and stat.
+                    def attributes
+                    try {
+                        attributes = Files.readAttributes(bamPath, java.nio.file.attribute.BasicFileAttributes)
+                    }
+                    catch (java.nio.file.NoSuchFileException ignored) {
+                        observations.remove(key)
+                        return
+                    }
+                    long size = attributes.size()
+                    long modified = attributes.lastModifiedTime().toMillis()
+                    inventory[key] = [size, modified]
                     if (acceptedBams.contains(key)) {
                         return
                     }
-
-                    long size = Files.size(bamPath)
-                    long modified = Files.getLastModifiedTime(bamPath).toMillis()
                     Map<String, Long> previous = observations[key]
                     long stablePolls = previous != null && previous.size == size && previous.modified == modified
                         ? previous.stablePolls + 1L
@@ -89,6 +107,21 @@ class LiveBamWatcher {
                 if (!stopFiles.isEmpty() && !hasPendingBams) {
                     target.bind([source: "poll", path: stopFiles[0]])
                     return
+                }
+
+                if (completion.enabled) {
+                    Map evidence = MinknowCompletion.inspect(runDirectory, completion.protocol_run_id as String)
+                    if (evidence.reason != null && evidence.reason != lastReason) {
+                        if (evidence.reason == 'waiting for a final summary') log.info("MinKNOW completion for ${root}: ${evidence.reason}")
+                        else log.warn("MinKNOW completion for ${root}: ${evidence.reason}; continuing to watch BAMs")
+                    }
+                    lastReason = evidence.reason
+                    if (MinknowCompletion.settled(completionState, evidence, inventory, hasPendingBams,
+                            requiredStablePolls, (completion.settle_seconds as long) * 1000L, System.nanoTime())) {
+                        log.info("MinKNOW output completed for ${root}: ${evidence.path}; BAM output settled")
+                        target.bind([source: 'minknow-final-summary', path: evidence.path])
+                        return
+                    }
                 }
 
                 Thread.sleep(pollIntervalMillis)

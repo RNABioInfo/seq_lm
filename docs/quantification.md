@@ -21,6 +21,34 @@ Quantifications are published under:
 <out_dir>/<group>/<alias>/quantification/
 ```
 
+## Strand specificity
+
+Set `--strand_specificity` to match the library preparation. This run-wide
+setting applies to every sample, including when differential expression is
+disabled. The default is `forward`, preserving the existing direct-RNA behavior.
+
+| Value | Accepted read orientation relative to the annotated transcript | Oarfish argument |
+| --- | --- | --- |
+| `forward` | Same orientation | `-d fw` |
+| `reverse` | Opposite orientation | `-d rc` |
+| `unstranded` | Both orientations | `-d both` |
+
+Orientation is relative to each transcript, not the genome's positive strand.
+For an unstranded cDNA library, for example, use:
+
+```bash
+nextflow run . -profile standard -c run.config --strand_specificity unstranded
+```
+
+Alternatively, set `strand_specificity = 'unstranded'` inside the `params`
+block of `run.config`. Strand specificity is not inferred automatically.
+
+`FINAL` sample checkpoint manifests use schema version 2 and require
+`quantification_settings.strand_specificity`. A missing field, unsupported schema,
+or different strand setting stops restoration. Use a new `--out_dir` or delete
+the affected sample's complete output directory to recompute its results.
+Nextflow's `-resume` cache also distinguishes the strand setting.
+
 ## Transcript-biotype classification
 
 The annotation is parsed once per workflow run. Oarfish `tname` identifiers are

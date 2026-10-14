@@ -34,6 +34,7 @@ workflow quantification {
     restored_quantifications: List<QuantifiedSample>
     genome: Path
     annotation: Path
+    strand_specificity: String
 
     main:
     collated_bams = collate_chunk_bam(merged_bams)
@@ -109,6 +110,7 @@ workflow quantification {
         assemble_cumulative_collated_bam(cumulative_sample_bams_ch),
         genome,
         annotation,
+        strand_specificity,
     )
 
     def pending_quantified_sample_batches: Map<Integer, Map> = [:]
@@ -312,6 +314,7 @@ process oarfish_quant {
     merged_bam: CumulativeCollatedBAM
     genome: Path
     annotation: Path
+    strand_specificity: String
 
     output:
     record(
@@ -322,6 +325,11 @@ process oarfish_quant {
 
     script:
     def output_prefix: String = oarfish_out_name(merged_bam.batch_index, merged_bam.sample.name)
+    def strand_filters: Map<String,String> = [forward: 'fw', reverse: 'rc', unstranded: 'both']
+    def strand_filter: String = strand_filters[strand_specificity]
+    if (strand_filter == null) {
+        error('--strand_specificity must be forward, reverse, or unstranded.')
+    }
     """
         oarfish \
             -j ${task.cpus} \
@@ -329,7 +337,7 @@ process oarfish_quant {
             --annotation ${annotation} \
             --genome-fasta ${genome} \
             --filter-group no-filters \
-            -d fw \
+            -d ${strand_filter} \
             --output ${output_prefix}
         """
 }

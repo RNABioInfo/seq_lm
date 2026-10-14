@@ -1,10 +1,19 @@
 # Fixed-matrix iModulon analysis
 
-Enable `--ica_analysis=true` and supply `--ica_matrix` to infer component activities from each complete cumulative
-Oarfish batch. Every non-control group is also compared with the control group
-using independent two-sided Welch tests and Benjamini–Hochberg (BH) correction.
-ICA runs alongside differential expression and does not require edgeR, GMT,
-fry, or GSVA. Active ICA results are included in a dedicated report tab.
+Enable `--ica_analysis=true` and supply `--ica_matrix` to infer component activities
+from each complete cumulative Oarfish batch. seqLM performs fixed-model activity
+inference: it does not train ICA, discover new components, or determine iModulon
+gene-membership thresholds. Each selected non-control group is compared with
+`ica_control_group` using a two-sided Welch test for each component, followed by
+Benjamini–Hochberg (BH) correction within that contrast and snapshot. Biological
+samples are assumed independent; tests can be dependent, including contrasts
+that share controls. This branch can run with or without differential expression
+and does not require edgeR, GMT, fry, or GSVA. Active results are included in a
+dedicated report tab.
+
+The repository CLI `imodulon-analysis` implements this analysis using NumPy,
+SciPy, and pandas. PyModulon is not a runtime dependency and neither
+`pymodulon.util.infer_activities` nor `pymodulon.util.dima` is called.
 
 Enable ICA explicitly in your run parameters.
 Set `ica_analysis` to `false` in your parameter file (or `params.ica_analysis = false`
@@ -51,10 +60,18 @@ nextflow run . -params-file ica.json
 ```
 
 Both reference inputs are required. Existing sample-sheet requirements apply:
-`alias`, `group`, and `bam_dir`, with at least two control samples. Aliases may
-repeat across groups. ICA recognizes one case-insensitive spelling of `control`;
-using both `control` and `Control` as distinct labels is an error. Use lowercase
-`control` for compatibility with the existing differential-expression branch.
+`alias`, `group`, and `bam_dir`, with at least two samples in
+`--ica_control_group` (default `control`). Group names match exactly after
+whitespace is trimmed. `--ica_condition_groups early,late` selects those
+conditions plus all samples in the configured ICA control group. Unset or
+whitespace-only values select all samples. Empty entries, duplicate names, and
+unknown groups are errors. The gene contrast CSV does not affect ICA.
+
+The selected cohort determines ICA readiness, centering, activity comparisons,
+time-course plots, and monitoring. Excluded groups remain in QC; they can also
+appear in DEA if selected by gene contrasts. ICA provenance records the control
+and selected groups, and changing either resets monitoring history. Unselected
+live samples still block stopping a shared MinKNOW run.
 Adding the optional `order` column enables ICA time-course analysis automatically;
 omit the column for comparison-only ICA. Sample rows represent independent
 biological replicates, not paired observations.
@@ -115,7 +132,9 @@ No orthologs or model downloads are generated automatically.
 
 | Parameter | Default | Meaning |
 | --- | --- | --- |
-| `ica_analysis` | true | Allow ICA when a matrix is supplied; false disables the branch |
+| `ica_analysis` | false | Enable ICA when a matrix is supplied; false disables the branch |
+| `ica_control_group` | `control` | ICA centering and activity-comparison reference; at least two samples |
+| `ica_condition_groups` | unset | Comma-separated conditions; includes ICA control automatically; unset uses all samples |
 | `ica_matrix` | unset | Weights CSV/TSV; enables analysis when the toggle is true |
 | `ica_imodulon_table` | unset | Matching component names/functions CSV/TSV; requires the matrix |
 | `ica_gene_map` | unset | Explicit one-to-one gene map; requires the matrix |
@@ -137,7 +156,8 @@ rows with a measured zero.
 For each sample, divide aggregated gene abundance by **all Oarfish-assigned
 abundance**, including targets outside the model, and multiply by one million.
 There is no length correction, biotype exclusion, TMM normalization, or
-expression-based gene filtering. Then:
+expression-based gene filtering. This is million-scaled assigned abundance;
+it should not be described as length-normalized TPM. Then:
 
 ```text
 L = log_base(million_scaled_gene_abundance + pseudocount)
@@ -176,6 +196,38 @@ unchanged. Published activities and descriptive group means are control-centered
 The effect is an **activity difference**, not a log fold change. Confidence
 intervals are nominal two-sided 95% intervals, not simultaneous intervals.
 
+More explicitly, let `P = pseudoinverse(M_shared)` and `B = P @ L_shared`.
+For component `j`, target samples `T`, and control samples `C`, the implementation
+calculates:
+
+```text
+activity_difference[j] = mean(B[j, T]) - mean(B[j, C])
+                      = mean(A[j, T]) - mean(A[j, C])
+                      = (P @ (mean(L_shared[:, T], axis=1)
+                            - mean(L_shared[:, C], axis=1)))[j]
+```
+
+Samples contribute equally to each mean, without read-depth weighting. The
+published control mean is zero up to floating-point precision. Positive
+differences mean higher activity in the supplied component's sign convention;
+they do not necessarily mean activation of every member gene.
+
+The test uses sample variances `vT` and `vC` with `ddof=1` (exactly constant
+groups are explicitly assigned zero variance), and sample counts `nT` and `nC`:
+
+```text
+SE = sqrt(vT/nT + vC/nC)
+df = (vT/nT + vC/nC)^2 / ((vT/nT)^2/(nT-1) + (vC/nC)^2/(nC-1))
+t = activity_difference / SE
+p = 2 * scipy.stats.t.sf(abs(t), df)
+CI95 = activity_difference +/- scipy.stats.t.ppf(0.975, df) * SE
+```
+
+No paired, covariate-adjusted, or repeated-measures model is fitted. Two samples
+per group are the implementation's minimum for an estimable test, not a validated
+sample-size recommendation. Very small groups provide unstable variance
+estimates; the test does not account for uncertainty in the supplied ICA matrix.
+
 BH correction is performed separately for each contrast and snapshot, with every
 supplied component in the family. Untestable components enter the correction as
 p=1 internally but retain unavailable p-values, adjusted p-values, and significance
@@ -183,9 +235,146 @@ in the output. A valid test is significant when adjusted p-value is at most
 `ica_padj_cutoff`. No biological effect-size threshold is imposed across arbitrarily
 scaled components.
 
+BH adjustment is the implemented procedure, not evidence of unconditional FDR
+control: its guarantees depend on valid input p-values and suitable dependence
+conditions. Independence of ICA components in a training compendium does not
+establish independence of the contrast tests in this new experiment.
+
 Live batches are repeated estimates from accumulating reads, not independent
 replicates. Snapshot p-values do not control error from repeated checking or
-optional stopping, and ICA does not trigger sequencing termination.
+optional stopping. The convergence metric below does not use these p-values to
+decide termination.
+
+## Published basis and distinction from PyModulon DiMA
+
+The projection follows the least-squares calculation published by
+[Sastry et al. (2019), Nature Communications](https://www.nature.com/articles/s41467-019-13483-w)
+and the activity-difference projection described by
+[Sastry et al. (2021), PLOS Computational Biology](https://pmc.ncbi.nlm.nih.gov/articles/PMC7888660/).
+It also uses the same mathematical operation as
+[PyModulon's `infer_activities`](https://pymodulon.readthedocs.io/en/stable/_modules/pymodulon/util.html#infer_activities).
+Numerical agreement requires identical gene selection, expression preparation,
+and compatible pseudoinverse tolerances; seqLM rejects deficient rank explicitly.
+These references establish the projection method, not validation of seqLM's
+specific Oarfish normalization or its complete analysis pipeline.
+
+seqLM combines that projection with
+[Welch's unequal-variance test (1947)](https://doi.org/10.1093/biomet/34.1-2.28)
+and [Benjamini–Hochberg correction (1995)](https://doi.org/10.1111/j.2517-6161.1995.tb02031.x).
+This is a separate statistical choice from the DiMA method described in the
+2019 paper. That method fits a component-specific log-normal distribution to
+absolute within-condition biological-replicate activity differences, then
+evaluates the absolute difference between condition means against that
+distribution and applies FDR and an activity-difference threshold. The
+[documented PyModulon 0.2.1 `dima` source](https://pymodulon.readthedocs.io/en/stable/_modules/pymodulon/util.html#dima)
+uses the supplied activity matrix and project/condition metadata; it does not
+automatically obtain training-compendium noise from a weight matrix.
+
+Welch testing estimates noise from the two groups being compared and needs no
+replicate compendium. This is a practical rationale for the current interface,
+not evidence that Welch is superior to DiMA. The repository does not establish
+comparative calibration or superiority on representative biological experiments.
+Existing numerical tests compare the implementation with SciPy's Welch test;
+this verifies the calculation, not biological calibration.
+
+DiMA has no documented universal minimum sample count. A contrast may contain
+one sample per condition if suitable replicate-noise data are supplied elsewhere,
+but a few replicate differences cannot justify a reliable fitted noise
+distribution. In the documented 0.2.1 source, pairs overwrite the same
+project/condition column, retaining only the last pair per group; this is a
+version-specific implementation detail to verify before adopting that package.
+Neither a universal DiMA sample minimum nor improved significance calibration
+should be inferred from package usage. Historical noise must be assessed for
+compatibility with this experiment's protocol and sequencing depth.
+
+## Implementation packages and tools
+
+| Tool/package | Role |
+| --- | --- |
+| Nextflow (host environment: >=26.04.3), OpenJDK 17 | Workflow orchestration |
+| Docker or Singularity/Apptainer, according to the run profile | Process containers |
+| SAMtools | Remove `ts` tags, collate reads, assemble cumulative BAMs |
+| Oarfish | Transcript `num_reads` estimates from genome-aligned reads and annotation |
+| `imodulon-analysis` 1.0.0, Python 3.12.8 | Repository numerical CLI and ICA container runtime |
+| NumPy 1.26.4 | SVD, pseudoinverse, projection, variances, local BH implementation |
+| SciPy 1.13.1 (`scipy.stats`) | Student-t probabilities and confidence intervals |
+| pandas 2.2.3 | Input/output tables, sample joins, group summaries |
+| Bokeh, ezcharts, colorcet (report container) | Interactive plots, report layout/tables, colors |
+
+Numerical dependencies are pinned in `../docker_containers/seq_lm_imodulon/requirements.txt`;
+the standalone CLI runtime is defined in `../docker_containers/seq_lm_imodulon/Dockerfile`. Standard-library
+helpers handle argument parsing, annotation/CSV/JSON parsing, paths, and hashes.
+The ICA container is `rnabioinfo/seq_lm_ica:v1.0.0`. Container tags identify images;
+they are not the SAMtools or Oarfish executable version numbers. Actual numerical
+package versions are recorded in each snapshot's `provenance.json`.
+
+## Sequencing termination
+
+ICA can control sequencing termination independently of differential expression:
+
+```groovy
+ica_analysis = true
+ica_matrix = '/path/to/model.csv'
+stopping_method = 'ica'
+monitoring_behavior = 'log'  // use 'terminate' for MinKNOW termination
+ica_max_fold_change = 1.05
+ica_min_read_growth_fraction = 0.1
+num_stable_batches = 3
+```
+
+Supply the reference genome and annotation as usual. For ICA-only analysis,
+disable both `differential_expression` and `gene_set_enrichment`. Termination
+requires live analysis and the same MinKNOW credentials as DEA monitoring.
+Both analyses may run, but only `stopping_method` controls termination; ICA
+monitoring does not require significant differential activity.
+
+For each sample and **every component in the supplied model**, the evaluator
+retains `num_stable_batches + 1` informative cumulative checkpoints. A checkpoint
+is informative when its assigned abundance has increased by at least
+`ica_min_read_growth_fraction` since the last accepted checkpoint. The default
+therefore requires three depth increases of at least 10%, spanning four snapshots.
+The first ready snapshot establishes a baseline and cannot trigger stopping.
+
+For component j, let R be its highest activity minus its lowest activity in the
+window, and W the largest absolute gene weight in its full model column. The
+reported multiplicative change is `ica_log_base ** (R * W)`. Every component must
+be at or below `ica_max_fold_change`. Computation uses logarithms to assess the
+threshold safely when exponentiation would overflow. The metric is unchanged by
+rescaling or reversing the sign of an ICA column together with its activities.
+It works for zero and negative activities without dividing by those activities.
+
+For example, an activity range of 0.10 and a maximum absolute weight of 0.50
+give `2 ** 0.05 = 1.035`, which passes a 1.05 tolerance. Decreases and increases
+are treated symmetrically as multiplicative factors of at least one. This is
+each component's contribution to reconstructed **logged, normalized expression
+with the pseudocount**, not an observed gene fold change, total reconstruction
+error, biological activity fold change, or confidence bound. Validate the
+tolerance, depth floor, and window on completed runs before relying on automatic
+termination. Minimum-read readiness and model mapping/rank checks still apply.
+
+Unchanged or insufficiently increased depth never advances the window, but its
+current activities are still checked: a moving control baseline can revoke
+eligibility. Decreasing depth restarts that sample's window. Deferred or invalid
+snapshots reset the windows; missing/nonfinite activities and missing model
+scales block stopping. Changes to model, sample/control identities, transformation,
+software, or monitoring settings also reset history. Each new workflow invocation,
+including resume, starts a fresh monitoring window rather than restoring an old
+stop decision.
+
+Audits are published atomically under `stability/ica/batch_<ICA analysis index>/`:
+`component_stability.tsv` records activity ranges, weight scales, multiplicative
+changes, and pass/fail results; `sample_stability.tsv` records passing/blocking
+components, window readiness, run blockers, and stop actions; `config.json`
+records the monitoring settings. The matching HTML report includes an **ICA
+Monitoring** tab even when DEA is disabled. Every snapshot must include valid model
+weight scales.
+
+A live sample is eligible only if all its components pass the full window.
+All required active live samples sharing a MinKNOW acquisition must be eligible
+before that acquisition stops. Stop acknowledgement and STOP-marker handling
+use the same coordinator as DEA. Remaining BAMs are drained and final results
+reported using the existing ingress/finalization path. In `log` mode the
+coordinator records when it would stop, without issuing a stop request.
 
 ## Outputs and live status
 
@@ -264,8 +453,7 @@ the revision and source batch. Revision allocation continues across restarts and
 skips snapshots left by interrupted publication. Older reports cannot replace
 newer reports, and restarting the batch counter does not prevent an open viewer
 from refreshing. The complete HTML is published before the state pointer advances.
-The final report remains self-contained. An already-open viewer created by an
-older pipeline version needs one manual reload after upgrading.
+The final report remains self-contained.
 
 Volcano plots retain the published adjusted p-values in tooltips. Only exact
 zeros are replaced with the smallest positive representable value for plotting;
@@ -293,8 +481,9 @@ imodulon-analysis analyze --prepared prepared_ica --manifest quant_manifest.tsv 
     --counts-dir quant --output ica_results
 ```
 
-The manifest requires `name`, `group`, and `count_file`, and optionally `order`
-and `source_batch_index`. Outputs must name new directories. `prepare --gene-map`
+The manifest requires `name`, `group`, `count_file`, `order`, and
+`source_batch_index` columns. Leave `order` values blank when time-course analysis
+is not needed. Outputs must name new directories. `prepare --gene-map`
 and `--min-gene-coverage`, and `analyze --log-base`, `--pseudocount`, `--min-reads`,
 `--cutoff`, `--batch-index`, `--analysis-index`, and `--report-sequence` expose the
 same analysis settings and provenance.
@@ -305,7 +494,7 @@ environment on PATH. To run the same pinned numerical environment locally:
 
 ```bash
 python3 -m venv /tmp/ica-tests
-/tmp/ica-tests/bin/pip install -r containers/imodulon/requirements.txt pytest==8.3.5
+/tmp/ica-tests/bin/pip install -r ../docker_containers/seq_lm_imodulon/requirements.txt pytest==8.3.5
 /tmp/ica-tests/bin/python -m pytest bin/imodulon_analysis/tests -q
 PATH="/tmp/ica-tests/bin:$PATH" bash test/run_imodulon_test.sh
 bash test/run_report_integrity_test.sh

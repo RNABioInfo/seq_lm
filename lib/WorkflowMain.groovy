@@ -50,15 +50,10 @@ class WorkflowMain {
             System.exit(0)
         }
 
-        // Explode on conda
-        // conda.enabled seems to be backward compatible but wrap this
-        // in a generic catch just in case
-        try {
-            if (workflow.session.config.conda.enabled) {
-                log.error 'Sorry, this workflow is not compatible with Conda, please use -profile standard (Docker) or -profile singularity.'
-                System.exit(1)
-            }
-        } catch (Exception e) { }
+        if (workflow.session.config.conda.enabled) {
+            log.error 'This workflow requires Docker, Singularity, or Apptainer; Conda is not supported.'
+            System.exit(1)
+        }
 
         // Validate workflow parameters via the JSON schema
         if (params.validate_params) {

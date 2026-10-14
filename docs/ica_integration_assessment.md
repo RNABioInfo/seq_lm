@@ -1,5 +1,13 @@
 # Existing ICA model integration assessment
 
+**Historical scope:** this document records a design assessment, not the current
+seqLM implementation. The working tree now implements fixed-model activity
+projection, Welch/BH differential-activity testing, and optional ICA convergence
+monitoring for sequencing termination. Statements below that these features are
+proposed or excluded refer to the assessed version. Current parameters,
+calculations, dependencies, and limitations are documented in
+[Fixed-matrix iModulon analysis](imodulon_analysis.md).
+
 Assessment date: 2026-09-04. Pipeline inspected at commit `66cd122`, including
 the working tree. This is a design assessment; the interfaces below are
 proposed and are not implemented.
@@ -15,7 +23,7 @@ testing, and ICA-driven sequencing termination are outside this version.
 
 | Existing implementation | Integration consequence |
 | --- | --- |
-| `subworkflows/quantification.nf` emits `QuantifiedSampleBatch` with `batch_index`, `report_sequence`, and the latest quantification for every sample. Restored and stopped samples are retained. | Consume `quantification.out.batches`; do not rerun Oarfish or consume individual asynchronous sample updates. |
+| `subworkflows/quantification.nf` emits `QuantifiedSampleBatch` with `batch_index`, `report_sequence`, and the latest quantification for every sample. Restored and stopped samples are retained. | Assign `quantification(...)` to a variable and consume its `batches` output; do not rerun Oarfish or consume individual asynchronous sample updates. |
 | `bin/de_analysis/edgeR_analysis.R` applies `filterByExpr`, `normLibSizes`, then exports CPM as `feature_counts.tsv`. | Prepare ICA expression directly from the complete Oarfish outputs. The DE matrix has the wrong transformation and a changing feature universe. |
 | The inspected Oarfish `.quant` files contain `tname`, `len`, and `num_reads`. | Add explicit transcript-to-gene aggregation and a documented abundance transformation. There is no ready-made model-compatible TPM matrix in these files. |
 | `modules/report_batches.nf` joins on `batch_index` and restores `report_sequence` order. `main.nf:qc_report` serializes report generation. | Carry ICA results/status through the same joins and ordering mechanism. |

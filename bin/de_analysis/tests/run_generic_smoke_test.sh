@@ -5,6 +5,8 @@ test_dir="$(mktemp -d "${TMPDIR:-/tmp}/seq_lm_edgeR_generic.XXXXXX")"
 trap 'rm -rf -- "${test_dir}"' EXIT
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+printf 'contrast_id\ttarget_group\treference_group\ngroup_challenge_vs_baseline\tchallenge\tbaseline\n' > "${test_dir}/contrasts.tsv"
+printf 'contrast_id\ttarget_group\treference_group\ninvalid\tchallenge\tabsent\n' > "${test_dir}/invalid_contrasts.tsv"
 mkdir -p "${test_dir}/counts" "${test_dir}/custom_counts"
 
 {
@@ -84,7 +86,7 @@ Rscript "${script_dir}/edgeR_analysis.R" \
     --annotation "${test_dir}/annotation.gff3" \
     --gene_sets "${test_dir}/pathways.gmt" \
     --output_dir "${test_dir}/results" \
-    --control_group baseline \
+    --contrasts "${test_dir}/contrasts.tsv" \
     --strip_id_versions
 
 awk -F '\t' '
@@ -144,7 +146,7 @@ Rscript "${script_dir}/edgeR_analysis.R" \
     --quant_manifest "${test_dir}/custom_manifest.tsv" \
     --gene_sets "${test_dir}/direct_pathways.gmt" \
     --output_dir "${test_dir}/direct_results" \
-    --control_group baseline \
+    --contrasts "${test_dir}/contrasts.tsv" \
     --quant_id_column custom_feature \
     --quant_count_column custom_abundance
 

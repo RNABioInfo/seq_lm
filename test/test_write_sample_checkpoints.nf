@@ -6,6 +6,7 @@ include { ChunkQCResult ; QuantifiedSample ; Sample } from '../lib/sample.nf'
 include { file_identity ; sha256_file ; write_sample_checkpoints } from '../lib/sample_checkpoints.nf'
 
 workflow {
+    def strand_specificity: String = (params as Map).get('strand_specificity', 'forward') as String
     def root: Path = java.nio.file.Files.createTempDirectory('seq-lm-checkpoint-writer-')
     def bam_dir: Path = root.resolve('bams')
     def genome: Path = root.resolve('genome.fa')
@@ -60,14 +61,17 @@ workflow {
             collected.toList().toSorted { left, right -> left.batch_index <=> right.batch_index }
         },
         channel.value([genome: file_identity(genome), annotation: file_identity(annotation)]),
+        strand_specificity,
     )
     written
         .map { outputs ->
-            def sample_dir: Path = outputs instanceof Collection ? outputs.iterator().next() : outputs
+            def sample_dir: Path = outputs.iterator().next()
             def final_marker: Path = sample_dir.resolve('FINAL')
             assert java.nio.file.Files.isRegularFile(final_marker)
             assert !java.nio.file.Files.exists(sample_dir.resolve('manifest.in.json'))
             def manifest: Map = new groovy.json.JsonSlurper().parse(final_marker) as Map
+            assert manifest.schema_version == 2
+            assert manifest.quantification_settings == [strand_specificity: strand_specificity]
             assert java.nio.file.Files.readString(sample_dir.resolve('quantification/final.quant')).contains('\t10\n')
             assert java.nio.file.Files.readString(sample_dir.resolve('qc/nanoplot/chunk_2.tsv.gz')) == 'nanoplot-old'
             assert java.nio.file.Files.isRegularFile(sample_dir.resolve('qc/nanoplot/chunk_3.tsv.gz'))
