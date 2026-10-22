@@ -5,6 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+import colorcet as cc
+import numpy as np
+import pandas as pd
 from bokeh.layouts import gridplot
 from bokeh.models import (
     ColorBar,
@@ -14,21 +17,17 @@ from bokeh.models import (
     LinearColorMapper,
     Span,
 )
-import colorcet as cc
 from ezcharts.components.ezchart import EZChart
 from ezcharts.layout.snippets import Tabs
 from ezcharts.layout.snippets.table import DataTable
 from ezcharts.plots import BokehPlot
-import numpy as np
-import pandas as pd
 
 from .differential_plots import (
-    _empty_plot,
+    NONSIGNIFICANT_COLOR,
     ContrastResult,
     DifferentialResult,
-    NONSIGNIFICANT_COLOR,
+    _empty_plot,
 )
-
 
 GSVA_SCORES_LONG_FILE = "gsva_scores_long.tsv"
 GSVA_COVERAGE_FILE = "gsva_gene_set_coverage.tsv"
@@ -284,16 +283,20 @@ def create_score_heatmap(
     condition_colors: dict[str, str],
     max_gene_sets: int = MAX_HEATMAP_GENE_SETS,
 ) -> BokehPlot:
-    """Create a row-standardized heatmap of the most variable GSVA scores."""
+    """Create a row-standardized GSVA heatmap with a condition strip above it."""
     matrix = _score_matrix(data)
     variability = matrix.var(axis=1, ddof=1).fillna(0)
-    selected = variability.sort_values(ascending=False, kind="mergesort").head(
-        max_gene_sets
-    ).index.tolist()
+    selected = (
+        variability.sort_values(ascending=False, kind="mergesort")
+        .head(max_gene_sets)
+        .index.tolist()
+    )
     matrix = matrix.loc[selected]
+
     means = matrix.mean(axis=1)
     standard_deviations = matrix.std(axis=1).replace(0, np.nan)
     z_scores = matrix.sub(means, axis=0).div(standard_deviations, axis=0).fillna(0)
+
     labels = _display_labels(data)
     melted = (
         z_scores.rename_axis("gene_set")
@@ -301,27 +304,40 @@ def create_score_heatmap(
         .melt(id_vars="gene_set", var_name="sample", value_name="z_score")
     )
     melted["display_label"] = melted["gene_set"].map(labels)
+
     metadata = data.scores_long.drop_duplicates("sample").set_index("sample")
     sample_order = matrix.columns.tolist()
+
     limit = max(float(melted["z_score"].abs().max()), 1.0)
     mapper = LinearColorMapper(
         palette=cc.b_diverging_bwr_20_95_c54,
         low=-limit,
         high=limit,
     )
-    suffix = f" (top {len(selected)} by variance)" if len(data.gene_set_order) > len(selected) else ""
+    suffix = (
+        f" (top {len(selected)} by variance)"
+        if len(data.gene_set_order) > len(selected)
+        else ""
+    )
+
     heatmap = BokehPlot(
         title=f"GSVA scores across samples{suffix}",
         x_range=sample_order,
         y_range=list(reversed([labels[gene_set] for gene_set in selected])),
         x_axis_location="above",
-        x_axis_label="Sample",
         y_axis_label="Gene set",
         height=max(440, 22 * len(selected) + 140),
         sizing_mode="stretch_width",
         tools="pan,wheel_zoom,save,reset",
     )
-    rectangles = heatmap._fig.rect(
+    h = heatmap._fig
+
+    h.xaxis.visible = False
+    h.grid.grid_line_color = None
+    h.min_border_top = 0
+    h.margin = 0
+
+    rectangles = h.rect(
         x="sample",
         y="display_label",
         width=0.98,
@@ -330,7 +346,7 @@ def create_score_heatmap(
         fill_color={"field": "z_score", "transform": mapper},
         line_color=None,
     )
-    heatmap._fig.add_tools(
+    h.add_tools(
         HoverTool(
             renderers=[rectangles],
             tooltips=[
@@ -340,43 +356,63 @@ def create_score_heatmap(
             ],
         )
     )
-    heatmap._fig.add_layout(ColorBar(color_mapper=mapper, title="Row z-score"), "right")
-    heatmap._fig.xaxis.major_label_orientation = np.pi / 4
-    heatmap._fig.grid.grid_line_color = None
+    h.add_layout(
+        ColorBar(color_mapper=mapper, title="Row z-score"),
+        "right",
+    )
 
     annotation = BokehPlot(
-        x_range=heatmap._fig.x_range,
+        x_range=h.x_range,
         y_range=(0, 1),
-        height=90,
+        x_axis_location="above",
+        x_axis_label="Sample",
+        height=160,
         sizing_mode="stretch_width",
         tools="",
     )
-    annotation._fig.grid.visible = False
-    annotation._fig.xaxis.visible = False
-    annotation._fig.yaxis.visible = False
+    a = annotation._fig
+
+    # Move the overall title above the sample labels and annotation.
+    a.title = h.title
+    h.title = None
+
+    a.xaxis.major_label_orientation = np.pi / 4
+    a.yaxis.visible = False
+    a.grid.visible = False
+    a.min_border_bottom = 0
+    a.margin = 0
+
     for group in metadata["group"].drop_duplicates():
-        samples = [sample for sample in sample_order if metadata.at[sample, "group"] == group]
-        annotation._fig.rect(
+        samples = [
+            sample for sample in sample_order if metadata.at[sample, "group"] == group
+        ]
+        a.rect(
             x=samples,
             y=[0.5] * len(samples),
             width=0.98,
-            height=0.7,
+            height=1.0,
             fill_color=condition_colors[group],
             line_color=None,
             legend_label=group,
         )
-    annotation._fig.legend.title = "Condition"
-    annotation._fig.legend.orientation = "horizontal"
-    annotation._fig.legend.location = "center"
+
+    legend = a.legend[0]
+    a.center.remove(legend)
+    legend.title = "Condition"
+    legend.orientation = "vertical"
+    legend.location = "top_left"
+    a.add_layout(legend, "left")
 
     combined = BokehPlot()
     combined._fig = gridplot(
-        [[annotation._fig], [heatmap._fig]],
+        [[a], [h]],
         toolbar_location="right",
         merge_tools=True,
         sizing_mode="stretch_width",
     )
-    combined.report_height = heatmap._fig.height + annotation._fig.height + 40
+    combined._fig.spacing = 0
+    combined.report_height = h.height + a.height + 40
+
     return combined
 
 
@@ -390,9 +426,8 @@ def create_score_distribution(
     if subset.empty:
         raise ValueError(f"Unknown GSVA gene set: {gene_set}")
     groups = subset["group"].drop_duplicates().tolist()
-    labels = _display_labels(data)
     plot = BokehPlot(
-        title=f"Raw GSVA scores — {labels[gene_set]}",
+        title="Raw GSVA scores",
         x_axis_label="Group",
         y_axis_label="GSVA score",
         x_range=(0.5, len(groups) + 0.5),
@@ -500,12 +535,12 @@ def create_limma_volcano(
     prepared = prepare_limma_volcano(analysis, condition_colors, padj_cutoff)
     if prepared.empty:
         return _empty_plot(
-            f"GSVA limma volcano — {analysis.label}",
+            f"GSVA limma: {analysis.label}",
             "No gene sets were tested by limma for this contrast.",
             height=460,
         )
     plot = BokehPlot(
-        title=f"GSVA limma volcano — {analysis.label}",
+        title=f"GSVA limma: {analysis.label}",
         x_axis_label=(
             f"GSVA score difference ({analysis.contrast.target_group} − "
             f"{analysis.contrast.reference_group})"
@@ -585,7 +620,7 @@ def create_limma_heatmap(
     selected = _select_limma_heatmap_gene_sets(analysis, padj_cutoff)
     if not selected:
         return _empty_plot(
-            f"Differential GSVA scores — {analysis.label}",
+            f"Within contrast GSVA scores: {analysis.label}",
             f"No gene sets pass BH-adjusted p-value ≤ {padj_cutoff:g}.",
             height=440,
         )
@@ -614,7 +649,7 @@ def create_limma_heatmap(
         high=limit,
     )
     heatmap = BokehPlot(
-        title=f"Differential GSVA scores — {analysis.label}",
+        title=f"Within contrast GSVA scores: {analysis.label}",
         x_range=sample_order,
         y_range=list(reversed([labels[gene_set] for gene_set in selected])),
         x_axis_location="above",
@@ -744,14 +779,14 @@ def add_gsva_scores(
 ) -> None:
     """Add raw-score plot-type tabs and the long gene-set dropdown."""
     tabs = Tabs()
-    with tabs.add_tab("Heatmap"):
+    with tabs.add_tab("Samples Heatmap"):
         heatmap = create_score_heatmap(data, condition_colors)
         EZChart(
             heatmap,
             "epi2melabs",
             height=f"{getattr(heatmap, 'report_height', 720)}px",
         )
-    with tabs.add_tab("Distributions"):
+    with tabs.add_tab("Grouped Distributions"):
         distribution_tabs = Tabs()
         with distribution_tabs.add_dropdown_menu("Gene set", change_header=True):  # type: ignore
             for gene_set in data.gene_set_order:
@@ -761,7 +796,7 @@ def add_gsva_scores(
                         "epi2melabs",
                         height="500px",
                     )
-    with tabs.add_tab("Coverage"):
+    with tabs.add_tab("Coverage Metrics"):
         DataTable.from_pandas(
             data.coverage.drop(columns="description"),
             use_index=False,
@@ -775,7 +810,7 @@ def add_gsva_differential(
 ) -> None:
     """Add across-contrast, contrast, and plot-type tabs for GSVA limma."""
     tabs = Tabs()
-    with tabs.add_tab("Across contrasts"):
+    with tabs.add_tab("Contrasts Overview"):
         summary = create_multi_contrast_dot_plot(data, padj_cutoff)
         EZChart(
             summary,
@@ -785,7 +820,7 @@ def add_gsva_differential(
     with tabs.add_tab("Contrasts"):
         contrast_tabs = Tabs()
         for analysis in data.contrasts:
-            with contrast_tabs.add_tab(analysis.label):
+            with contrast_tabs.add_dropdown_tab(analysis.label):
                 plot_tabs = Tabs()
                 with plot_tabs.add_tab("Volcano"):
                     EZChart(

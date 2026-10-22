@@ -288,5 +288,5 @@ def test_temporal_analysis_writes_one_shared_gene_set_dropdown(tmp_path):
     assert html.count(">Gene set<") == 1
     assert "GSVA score over time" in html
     assert "Gene expression over time" in html
-    assert tp.TEMPORAL_CAVEAT in html
+    assert tp.TEMPORAL_NOTE in html
     assert "Gene z-score" in html

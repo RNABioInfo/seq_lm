@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from html import escape
 from pathlib import Path
 
+import numpy as np
+import pandas as pd
 from bokeh.layouts import column
 from bokeh.models import (
     BoxAnnotation,
@@ -19,17 +21,14 @@ from bokeh.models import (
 from ezcharts.components.ezchart import EZChart
 from ezcharts.layout.snippets import Tabs
 from ezcharts.plots import BokehPlot
-import numpy as np
-import pandas as pd
 
 from .differential_plots import (
-    _display_labels,
-    _empty_plot,
+    NONSIGNIFICANT_COLOR,
     ContrastResult,
     DifferentialResult,
-    NONSIGNIFICANT_COLOR,
+    _display_labels,
+    _empty_plot,
 )
-
 
 FRY_RESULTS_FILE = "fry_results.tsv"
 GENE_SET_RESOLUTION_FILE = "gene_set_resolution.tsv"
@@ -350,7 +349,7 @@ def create_signed_significance_plot(
     )
     if prepared.empty:
         return _empty_plot(
-            f"fry directional enrichment — {analysis.label}",
+            f"fry enrichment: {analysis.label}",
             "No gene sets were tested for this contrast.",
             height=420,
         )
@@ -369,8 +368,8 @@ def create_signed_significance_plot(
     ) * 1.12
     plot_height = max(420, 27 * len(prepared) + 150)
     plot = BokehPlot(
-        title=f"fry signed directional significance — {analysis.label}{suffix}",
-        x_axis_label="Signed -log10(directional FDR)",
+        title=f"fry enrichment: {analysis.label}{suffix}",
+        x_axis_label="Signed -log10 (directional FDR)",
         y_axis_label="Gene set",
         x_range=(-extent, extent),
         y_range=list(reversed(prepared["gene_set"].tolist())),
@@ -791,9 +790,9 @@ def add_gene_set_enrichment(
     """Add contrast and plot-type tabs for directional fry enrichment."""
     contrast_tabs = Tabs()
     for analysis in analyses:
-        with contrast_tabs.add_tab(analysis.label):
+        with contrast_tabs.add_dropdown_tab(analysis.label):
             plot_tabs = Tabs()
-            with plot_tabs.add_tab("Directional summary"):
+            with plot_tabs.add_tab("Enrichment results"):
                 signed = create_signed_significance_plot(
                     analysis,
                     condition_colors,
@@ -804,5 +803,5 @@ def add_gene_set_enrichment(
                     "epi2melabs",
                     height=f"{getattr(signed, 'report_height', 520)}px",
                 )
-            with plot_tabs.add_tab("Barcode"):
+            with plot_tabs.add_tab("Barcode Plot"):
                 add_gene_set_barcode_dropdown(analysis, condition_colors)

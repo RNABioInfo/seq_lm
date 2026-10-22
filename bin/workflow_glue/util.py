@@ -1,4 +1,5 @@
 """The odd helper function."""
+from logging import Logger
 
 import argparse
 import logging
@@ -16,7 +17,7 @@ def get_main_logger(name):
     return logging.getLogger(name)
 
 
-def get_named_logger(name):
+def get_named_logger(name) -> Logger:
     """Create a logger with a name.
 
     :param name: name of logger.
@@ -26,7 +27,7 @@ def get_named_logger(name):
     return logger
 
 
-def wf_parser(name):
+def wf_parser(name) -> argparse.ArgumentParser:
     """Make an argument parser for a workflow command."""
     return argparse.ArgumentParser(
         name,

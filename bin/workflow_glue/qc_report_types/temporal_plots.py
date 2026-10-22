@@ -5,6 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+import colorcet as cc
+import numpy as np
+import pandas as pd
 from bokeh.layouts import column
 from bokeh.models import (
     ColorBar,
@@ -13,12 +16,9 @@ from bokeh.models import (
     HoverTool,
     LinearColorMapper,
 )
-import colorcet as cc
 from ezcharts.components.ezchart import EZChart
 from ezcharts.layout.snippets import Tabs
 from ezcharts.plots import BokehPlot
-import numpy as np
-import pandas as pd
 
 from .differential_plots import (
     DifferentialResult,
@@ -27,9 +27,8 @@ from .differential_plots import (
 )
 from .gsva_plots import GSVAResult
 
-
 GENE_SET_RESOLUTION_FILE = "gene_set_resolution.tsv"
-TEMPORAL_CAVEAT = "Heatmap colors are gene-wise z-scores."
+TEMPORAL_NOTE = "Gene-wise z-scores."
 
 
 @dataclass
@@ -324,7 +323,7 @@ def create_temporal_score_plot(
     """Create mean GSVA score, SD whiskers, and raw samples over time."""
     summary, raw = prepare_temporal_scores(data, gene_set, condition_colors)
     plot = BokehPlot(
-        title=f"GSVA score over time — {gene_set}",
+        title=f"GSVA score over time: {gene_set}",
         x_axis_label="Elapsed time (min)",
         y_axis_label="GSVA score",
         height=470,
@@ -501,7 +500,7 @@ def create_temporal_gene_plot(
     )
     plot_height = max(420, min(1200, 20 * len(feature_order) + 120))
     plot = BokehPlot(
-        title=f"Gene expression over time — {gene_set}",
+        title=f"Gene expression over time of genes within: {gene_set}",
         x_range=time_order,
         y_range=list(
             reversed([row_labels[feature_id] for feature_id in feature_order])
@@ -553,14 +552,14 @@ def create_temporal_view(
     score_plot = create_temporal_score_plot(data, gene_set, condition_colors)
     gene_plot = create_temporal_gene_plot(data, gene_set)
     note = Div(
-        text=f"<p>{TEMPORAL_CAVEAT}</p>",
+        text=f"<p>{TEMPORAL_NOTE}</p>",
         sizing_mode="stretch_width",
     )
     combined = BokehPlot()
     combined._fig = column(
-        note,
         score_plot._fig,
         gene_plot._fig,
+        note,
         sizing_mode="stretch_width",
     )
     combined.report_height = score_plot.report_height + gene_plot.report_height + 80

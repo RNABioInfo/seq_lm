@@ -1,17 +1,16 @@
 """Create the live QC, differential-analysis, and enrichment report."""
 
-from html import escape
 import json
-from pathlib import Path
 import re
+from html import escape
+from pathlib import Path
 
 from ezcharts.components.reports import labs
 from ezcharts.layout.snippets import Tabs
 from ezcharts.layout.snippets.table import DataTable
 
-from .report_layout import apply_report_branding, labs_report
-from .util import get_named_logger, wf_parser  # noqa: ABS101
-
+from .qc_report_types.base_metrics import create_nanoplot_metrics_table
+from .qc_report_types.biotype_plot import add_transcript_biotype_composition
 from .qc_report_types.differential_plots import (
     add_differential_analysis,
     load_differential_results,
@@ -26,26 +25,26 @@ from .qc_report_types.gsva_plots import (
     add_gsva_scores,
     load_gsva_results,
 )
-from .qc_report_types.temporal_plots import (
-    add_temporal_analysis,
-    load_temporal_results,
-)
+from .qc_report_types.histogram_plots import add_sample_hists
 from .qc_report_types.ica_monitoring import load_ica_monitoring_results
 from .qc_report_types.imodulon_plots import (
     add_imodulon_analysis,
     load_imodulon_results,
 )
+from .qc_report_types.kde_plots import add_sample_2d_kdes, create_2d_kde_html
+from .qc_report_types.parse_inputs import load_qc_samples
+from .qc_report_types.result_types import FlagstatResult, SampleQCResult
 from .qc_report_types.sankey_plot import (
     add_sample_read_fate_sankeys,
     create_read_fate_sankey_html,
     create_sample_read_fate_sankey_html,
 )
-from .qc_report_types.parse_inputs import load_qc_samples
-from .qc_report_types.kde_plots import add_sample_2d_kdes, create_2d_kde_html
-from .qc_report_types.base_metrics import create_nanoplot_metrics_table
-from .qc_report_types.histogram_plots import add_sample_hists
-from .qc_report_types.biotype_plot import add_transcript_biotype_composition
-from .qc_report_types.result_types import FlagstatResult, SampleQCResult
+from .qc_report_types.temporal_plots import (
+    add_temporal_analysis,
+    load_temporal_results,
+)
+from .report_layout import apply_report_branding, labs_report
+from .util import get_named_logger, wf_parser  # noqa: ABS101
 
 __all__ = [
     "FlagstatResult",
@@ -413,24 +412,19 @@ def main(args):
         "workflow",
     )
 
-    with report.add_section("Analysis", "Analysis"):  # type: ignore
+    with report.add_section("Analysis", "Analysis"):
         primary_tabs = Tabs()
-        with primary_tabs.add_tab("Quality Control"):
+        with primary_tabs.add_tab("Quality Control"): 
             qc_tabs = Tabs()
-            with qc_tabs.add_tab("Read flow"):
+            with qc_tabs.add_tab("Read Flow"): 
                 add_sample_read_fate_sankeys(samples.sample_results)
             if transcript_biotypes is not None:
-                with qc_tabs.add_tab("Transcript biotypes"):
+                with qc_tabs.add_tab("Transcript Biotypes"): 
                     add_transcript_biotype_composition(
                         transcript_biotypes,
                         samples.sample_results,
                     )
-            with qc_tabs.add_tab("Metrics"):
-                DataTable.from_pandas(
-                    create_nanoplot_metrics_table(samples.sample_results),
-                    use_index=False,
-                )
-            with qc_tabs.add_tab("Read length"):
+            with qc_tabs.add_tab("Read Length"):
                 add_sample_hists(
                     samples.sample_results,
                     x_column="lengths",
@@ -438,7 +432,7 @@ def main(args):
                     x_axis_label="Read length",
                     y_axis_label="Number of reads",
                 )
-            with qc_tabs.add_tab("Read quality"):
+            with qc_tabs.add_tab("Read Quality"):
                 add_sample_2d_kdes(
                     samples.sample_results,
                     x_column="lengths",
@@ -447,7 +441,7 @@ def main(args):
                     x_axis_label="Read length",
                     y_axis_label="Read quality",
                 )
-            with qc_tabs.add_tab("Mapping quality"):
+            with qc_tabs.add_tab("Mapping Quality"):
                 add_sample_2d_kdes(
                     samples.sample_results,
                     x_column="lengths",
@@ -456,11 +450,16 @@ def main(args):
                     x_axis_label="Read length",
                     y_axis_label="Mapping quality",
                 )
+            with qc_tabs.add_tab("Metrics Summary"):
+                DataTable.from_pandas(
+                    create_nanoplot_metrics_table(samples.sample_results),
+                    use_index=False,
+                )
             with qc_tabs.add_tab("Samples"):
                 DataTable.from_pandas(samples.samples_df)
 
         if differential is not None:
-            with primary_tabs.add_tab("Differential Analysis"):
+            with primary_tabs.add_tab("Differential Expression"):
                 add_differential_analysis(
                     differential,
                     args.lfc_cutoff,
@@ -468,7 +467,7 @@ def main(args):
                     stability_results,
                 )
 
-            if args.gene_set_enrichment:
+            if args.gene_set_enrichment and gsva_results and fry_results:
                 with primary_tabs.add_tab("Gene Set Enrichment"):
                     analysis_tabs = Tabs()
                     with analysis_tabs.add_tab("GSVA scores"):
@@ -489,15 +488,15 @@ def main(args):
                             args.padj_cutoff,
                         )
 
-                if args.temporal_analysis:
-                    with primary_tabs.add_tab("Temporal Analysis"):
+                if args.temporal_analysis and temporal_results:
+                    with primary_tabs.add_tab("Time Course"):
                         add_temporal_analysis(
                             temporal_results,
                             differential.condition_colors,
                         )
 
         if imodulon_results is not None:
-            with primary_tabs.add_tab("iModulon Analysis"):
+            with primary_tabs.add_tab("Independent Components"):
                 add_imodulon_analysis(
                     imodulon_results,
                 )
@@ -505,7 +504,7 @@ def main(args):
                 with primary_tabs.add_tab("ICA Monitoring"):
                     DataTable.from_pandas(ica_monitoring_results, use_index=False)
 
-    write_report(  # type: ignore
+    write_report( 
         report,
         args.report,
         args.latest_batch,

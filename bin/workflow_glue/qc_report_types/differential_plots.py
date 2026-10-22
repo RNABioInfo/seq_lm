@@ -5,6 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+import colorcet as cc
+import numpy as np
+import pandas as pd
 from bokeh.layouts import gridplot
 from bokeh.models import (
     ColorBar,
@@ -15,16 +18,12 @@ from bokeh.models import (
     Span,
 )
 from bokeh.palettes import Turbo256
-import colorcet as cc
 from ezcharts.components.ezchart import EZChart
 from ezcharts.layout.snippets import Tabs
 from ezcharts.layout.snippets.table import DataTable
 from ezcharts.plots import BokehPlot
-import numpy as np
-import pandas as pd
 from scipy.cluster.hierarchy import leaves_list, linkage
 from sklearn.decomposition import PCA
-
 
 FEATURE_COUNTS_FILE = "feature_counts.tsv"
 BCV_DATA_FILE = "edgeR_bcv_data.tsv"
@@ -724,6 +723,14 @@ def create_mds_plot(data: DifferentialResult) -> BokehPlot:
             line_alpha=0.45,
             legend_label=group,
         )
+
+        fig = plot._fig
+        legend = fig.legend[0]
+
+        fig.center.remove(legend)
+        legend.orientation = "vertical"
+        fig.add_layout(legend, "right")
+
         plot._fig.add_tools(
             HoverTool(
                 renderers=[points],
@@ -770,6 +777,13 @@ def create_bcv_plot(data: DifferentialResult) -> BokehPlot:
         line_width=2.5,
         legend_label="Trended",
     )
+
+    fig = plot._fig
+    legend = fig.legend[0]
+    fig.center.remove(legend)
+    legend.orientation = "vertical"
+    fig.add_layout(legend, "right")
+
     common_bcv = float(bcv_data["common_bcv"].iloc[0])
     x_limits = bcv_data["average_log_cpm"].agg(["min", "max"])
     plot._fig.line(
@@ -995,7 +1009,7 @@ def create_heatmap_plot(
     padj_cutoff: float,
     top_n: int = 20,
 ) -> BokehPlot:
-    """Create a row-z-scored log2(CPM + 1) heatmap for one contrast."""
+    """Create a row-z-scored heatmap with a condition strip above it."""
     selected = select_heatmap_genes(
         contrast,
         data.condition_colors,
@@ -1005,7 +1019,7 @@ def create_heatmap_plot(
     )
     if selected.empty:
         return _empty_plot(
-            f"Top differential genes — {contrast.label}",
+            f"Top {top_n} differential genes: {contrast.label}",
             (
                 "No genes pass both "
                 f"|log2FC| ≥ {lfc_cutoff:g} and FDR ≤ {padj_cutoff:g}."
@@ -1022,16 +1036,23 @@ def create_heatmap_plot(
 
     feature_ids = selected["feature_id"].tolist()
     labels = selected.set_index("feature_id")["display_label"].to_dict()
+
     log_counts = np.log2(data.feature_counts.loc[feature_ids, sample_order] + 1)
     row_means = log_counts.mean(axis=1)
     row_std = log_counts.std(axis=1).replace(0, np.nan)
     z_scores = log_counts.sub(row_means, axis=0).div(row_std, axis=0).fillna(0)
+
     feature_ids = cluster_heatmap_rows(z_scores)
     z_scores = z_scores.loc[feature_ids]
+
     melted = (
         z_scores.rename_axis("feature_id")
         .reset_index()
-        .melt(id_vars="feature_id", var_name="sample", value_name="z_score")
+        .melt(
+            id_vars="feature_id",
+            var_name="sample",
+            value_name="z_score",
+        )
     )
     melted["display_label"] = melted["feature_id"].map(labels)
 
@@ -1041,30 +1062,25 @@ def create_heatmap_plot(
         low=-z_limit,
         high=z_limit,
     )
+
     heatmap = BokehPlot(
-        title=f"Top differential genes — {contrast.label}",
+        title=f"Top {top_n} differential genes: {contrast.label}",
         x_range=sample_order,
-        y_range=list(reversed([labels[feature_id] for feature_id in feature_ids])),
+        y_range=list(reversed([labels[fid] for fid in feature_ids])),
         x_axis_location="above",
-        x_axis_label="Sample",
         y_axis_label="Gene",
         height=max(440, 22 * len(feature_ids) + 120),
         sizing_mode="stretch_width",
         tools="pan,wheel_zoom,save,reset",
     )
-    heatmap._fig.grid.grid_line_color = None
-    heatmap._fig.xaxis.major_label_orientation = np.pi / 4
-    heatmap._fig.add_tools(
-        HoverTool(
-            tooltips=[
-                ("Gene", "@display_label"),
-                ("Feature ID", "@feature_id"),
-                ("Sample", "@sample"),
-                ("Row z-score", "@z_score{0.000}"),
-            ]
-        )
-    )
-    heatmap._fig.rect(
+    h = heatmap._fig
+
+    h.grid.grid_line_color = None
+    h.xaxis.visible = False
+    h.min_border_top = 0
+    h.margin = 0
+
+    cells = h.rect(
         x="sample",
         y="display_label",
         width=0.98,
@@ -1073,46 +1089,76 @@ def create_heatmap_plot(
         fill_color={"field": "z_score", "transform": mapper},
         line_color=None,
     )
-    heatmap._fig.add_layout(
+    h.add_tools(
+        HoverTool(
+            renderers=[cells],
+            tooltips=[
+                ("Gene", "@display_label"),
+                ("Feature ID", "@feature_id"),
+                ("Sample", "@sample"),
+                ("Row z-score", "@z_score{0.000}"),
+            ],
+        )
+    )
+    h.add_layout(
         ColorBar(color_mapper=mapper, title="Row z-score"),
         "right",
     )
 
     annotation = BokehPlot(
-        x_range=heatmap._fig.x_range,
+        x_range=h.x_range,
         y_range=(0, 1),
-        height=90,
+        x_axis_location="above",
+        x_axis_label="Sample",
+        height=160,
         sizing_mode="stretch_width",
         tools="",
     )
-    annotation._fig.grid.visible = False
-    annotation._fig.xaxis.visible = False
-    annotation._fig.yaxis.visible = False
+    a = annotation._fig
+
+    # Move the overall title above the sample labels and annotation.
+    a.title = h.title
+    h.title = None
+
+    a.xaxis.major_label_orientation = np.pi / 4
+    a.yaxis.visible = False
+    a.grid.visible = False
+    a.min_border_bottom = 0
+    a.margin = 0
+
     for group in (contrast.reference_group, contrast.target_group):
         group_samples = [
             sample for sample in sample_order if metadata.at[sample, "group"] == group
         ]
-        annotation._fig.rect(
+        a.rect(
             x=group_samples,
             y=[0.5] * len(group_samples),
             width=0.98,
-            height=0.7,
+            height=1.0,
             fill_color=data.condition_colors[group],
             line_color=None,
             legend_label=group,
         )
-    annotation._fig.legend.title = "Condition"
-    annotation._fig.legend.orientation = "horizontal"
-    annotation._fig.legend.location = "center"
 
+    # Place the condition legend outside the strip, at its upper left.
+    legend = a.legend[0]
+    a.center.remove(legend)
+    legend.title = "Condition"
+    legend.orientation = "vertical"
+    legend.location = "top_left"
+    a.add_layout(legend, "left")
+
+    # The grid aligns the annotation and heatmap plotting frames.
     combined = BokehPlot()
     combined._fig = gridplot(
-        [[annotation._fig], [heatmap._fig]],
+        [[a], [h]],
         toolbar_location="right",
         merge_tools=True,
         sizing_mode="stretch_width",
     )
-    combined.report_height = heatmap._fig.height + annotation._fig.height + 40
+    combined._fig.spacing = 0
+    combined.report_height = h.height + a.height + 40
+
     return combined
 
 
@@ -1131,49 +1177,49 @@ def add_differential_analysis(
         )
     tabs = Tabs()
     with tabs.add_tab("Overview"):
-        EZChart(create_pca_plot(data), "epi2melabs", height="460px")
         EZChart(create_mds_plot(data), "epi2melabs", height="460px")
         EZChart(create_bcv_plot(data), "epi2melabs", height="460px")
 
     with tabs.add_tab("Contrasts"):
         contrast_tabs = Tabs()
-        for contrast in data.contrasts:
-            with contrast_tabs.add_tab(contrast.label):
-                plot_tabs = Tabs()
-                with plot_tabs.add_tab("MA plot"):
-                    EZChart(
-                        create_ma_plot(
+        with contrast_tabs.add_dropdown_menu("Sample", change_header=True): # type: ignore
+            for contrast in data.contrasts:
+                with contrast_tabs.add_dropdown_tab(contrast.label):
+                    plot_tabs = Tabs()
+                    with plot_tabs.add_tab("MA plot"):
+                        EZChart(
+                            create_ma_plot(
+                                contrast,
+                                data.condition_colors,
+                                lfc_cutoff,
+                                padj_cutoff,
+                            ),
+                            "epi2melabs",
+                            height="460px",
+                        )
+                    with plot_tabs.add_tab("Volcano"):
+                        EZChart(
+                            create_volcano_plot(
+                                contrast,
+                                data.condition_colors,
+                                lfc_cutoff,
+                                padj_cutoff,
+                            ),
+                            "epi2melabs",
+                            height="460px",
+                        )
+                    with plot_tabs.add_tab("Heatmap"):
+                        heatmap = create_heatmap_plot(
+                            data,
                             contrast,
-                            data.condition_colors,
                             lfc_cutoff,
                             padj_cutoff,
-                        ),
-                        "epi2melabs",
-                        height="460px",
-                    )
-                with plot_tabs.add_tab("Volcano"):
-                    EZChart(
-                        create_volcano_plot(
-                            contrast,
-                            data.condition_colors,
-                            lfc_cutoff,
-                            padj_cutoff,
-                        ),
-                        "epi2melabs",
-                        height="460px",
-                    )
-                with plot_tabs.add_tab("Heatmap"):
-                    heatmap = create_heatmap_plot(
-                        data,
-                        contrast,
-                        lfc_cutoff,
-                        padj_cutoff,
-                    )
-                    EZChart(
-                        heatmap,
-                        "epi2melabs",
-                        height=f"{getattr(heatmap, 'report_height', 720)}px",
-                    )
+                        )
+                        EZChart(
+                            heatmap,
+                            "epi2melabs",
+                            height=f"{getattr(heatmap, 'report_height', 720)}px",
+                        )
 
     with tabs.add_tab("Result Stability"):
         DataTable.from_pandas(stability_results, use_index=False)

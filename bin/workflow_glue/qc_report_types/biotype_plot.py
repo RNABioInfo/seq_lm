@@ -25,7 +25,7 @@ BIOTYPE_COLORS = {
     "Other": "#999999",
     "Unknown": "#4D4D4D",
 }
-CAPTION = "Unknown denotes targets without one unambiguous annotation biotype."
+CAPTION = "Unknown denotes records which cannot be assigned unambiguously."
 
 
 def load_transcript_biotypes(path: Path | str) -> pd.DataFrame:
@@ -142,6 +142,15 @@ def create_transcript_biotype_plot(
             legend_label=biotype,
             source=source,
         )
+
+        fig = plot._fig
+        legend = fig.legend[0]
+
+        fig.center.remove(legend)
+        legend.orientation = "horizontal"
+        legend.location = "top_left"
+        fig.add_layout(legend, "above")
+
         plot._fig.add_tools(
             HoverTool(
                 renderers=[bars],

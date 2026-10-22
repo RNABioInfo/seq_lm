@@ -1,8 +1,7 @@
 import ezcharts as ezc
 import pandas as pd
-
-from ezcharts.layout.snippets import Tabs
 from ezcharts.components.ezchart import EZChart
+from ezcharts.layout.snippets import Tabs
 
 from .result_types import SampleQCResult
 
@@ -13,7 +12,7 @@ def create_hist_plot(
     title: str,
     x_axis_label: str | None = None,
     y_axis_label: str | None = None,
-    bins: int = 100,
+    bins: int | str = "auto",
 ):
     """Create a one-dimensional histogram from one numeric column."""
     x_axis_label = x_axis_label or x_column
@@ -24,7 +23,7 @@ def create_hist_plot(
     else:
         plot_data = pd.Series(dtype=float)
 
-    plot = ezc.histplot(data=plot_data, bins=bins)
+    plot = ezc.histplot(data=plot_data, bins=bins) #type: ignore
     plot.title = {"text": title}
     plot._fig.xaxis.axis_label = x_axis_label
     plot._fig.yaxis.axis_label = y_axis_label

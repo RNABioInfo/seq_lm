@@ -65,7 +65,7 @@ class IModulonResult:
 def component_label(data: IModulonResult, component: str) -> str:
     metadata = data.provenance["model"].get("component_metadata", {})
     name = metadata.get(component, {}).get("name", "")
-    return f"{component} — {name}" if name and name != component else component
+    return f"{component} – {name}" if name and name != component else component
 
 
 def annotate_components(data: IModulonResult) -> None:
@@ -692,11 +692,11 @@ def create_activity_heatmap(data: IModulonResult, selected: list[str]) -> BokehP
         palette=cc.b_diverging_bwr_20_95_c54, low=-limit, high=limit
     )
     plot = BokehPlot(
-        title="Control-centered iModulon activities",
+        title="Control-centered component activities",
         x_range=(-0.5, len(labels) - 0.5),
         y_range=[component_label(data, key) for key in reversed(selected)],
         x_axis_location="above",
-        x_axis_label="Biological sample",
+        x_axis_label="Sample",
         y_axis_label="Component",
         height=max(430, len(selected) * 20 + 150),
         sizing_mode="stretch_width",
@@ -739,7 +739,7 @@ def create_component_distribution(data: IModulonResult, component: str) -> Bokeh
     rows = data.activities.loc[data.activities["component_id"].eq(component)].copy()
     groups, colors = list(data.groups), _colors(data.groups)
     plot = BokehPlot(
-        title=f"Biological sample activities — {component_label(data, component)}",
+        title=f"Biological sample activities: {component_label(data, component)}",
         x_range=(0.5, len(groups) + 0.5),
         x_axis_label="Group",
         y_axis_label="Control-centered activity",
@@ -803,7 +803,7 @@ def create_volcano(rows: pd.DataFrame, label: str, cutoff: float) -> BokehPlot:
     ].copy()
     if tested.empty:
         return _empty(
-            f"Differential activity — {label}",
+            f"Differential activity: {label}",
             "No components have an available Welch test for this contrast.",
         )
     # Preserve positive values exactly; zero is a numerical underflow sentinel.
@@ -817,9 +817,9 @@ def create_volcano(rows: pd.DataFrame, label: str, cutoff: float) -> BokehPlot:
         "#888888",
     )
     plot = BokehPlot(
-        title=f"Differential activity — {label}",
-        x_axis_label="Activity difference (target − control)",
-        y_axis_label="−log10 adjusted p-value",
+        title=f"Differential activity: {label}",
+        x_axis_label="Activity difference (target - control)",
+        y_axis_label="-log10 adjusted p-value",
         height=500,
         sizing_mode="stretch_width",
         tools="pan,wheel_zoom,box_zoom,save,reset",
@@ -896,7 +896,7 @@ def create_timecourse(data: IModulonResult, component: str) -> BokehPlot:
             )
     summary = pd.DataFrame(summaries).sort_values("time")
     plot = BokehPlot(
-        title=f"Activity over elapsed time — {component_label(data, component)}",
+        title=f"Activity over elapsed time: {component_label(data, component)}",
         x_axis_label="Elapsed time (min)",
         y_axis_label="Control-centered activity",
         height=480,
@@ -959,12 +959,12 @@ def create_time_effects(data: IModulonResult, component: str) -> BokehPlot:
     rows = rows.sort_values("time")
     if rows.empty:
         return _empty(
-            f"Activity differences over time — {component}",
+            f"Activity differences over time: {component}",
             "No non-control groups are available.",
         )
     rows["color"] = np.where(rows["is_significant"], "#B2182B", "#777777")
     plot = BokehPlot(
-        title=f"Target-minus-control activity difference — {component_label(data, component)}",
+        title=f"Target group minus control activity differences: {component_label(data, component)}",
         x_axis_label="Target elapsed time (min)",
         y_axis_label="Activity difference",
         height=420,
@@ -1007,13 +1007,13 @@ def create_component_effects(data: IModulonResult, component: str) -> BokehPlot:
     rows = data.differential.loc[data.differential["component_id"].eq(component)].copy()
     if rows.empty:
         return _empty(
-            f"Activity differences — {component}",
+            f"Activity differences: {component}",
             "No non-control groups are available.",
         )
     rows["x"] = np.arange(1, len(rows) + 1)
     rows["color"] = np.where(rows["is_significant"], "#B2182B", "#777777")
     plot = BokehPlot(
-        title=f"Target-minus-control activity differences — {component_label(data, component)}",
+        title=f"Target group minus control activity differences: {component_label(data, component)}",
         x_range=(0.5, len(rows) + 0.5),
         x_axis_label="Target group",
         y_axis_label="Activity difference",
@@ -1130,7 +1130,7 @@ def create_time_heatmap(data: IModulonResult) -> BokehPlot:
         palette=cc.b_diverging_bwr_20_95_c54, low=-limit, high=limit
     )
     plot = BokehPlot(
-        title="Mean iModulon activity over elapsed time",
+        title="Mean component activity over elapsed time",
         x_range=[str(int(value)) for value in times],
         y_range=[component_label(data, key) for key in reversed(data.components)],
         x_axis_label="Elapsed time (min)",
@@ -1221,14 +1221,14 @@ def add_imodulon_analysis(data: IModulonResult) -> None:
             _add_component_annotations(data)
         return
     tabs = Tabs()
-    with tabs.add_tab("Activities"):
+    with tabs.add_tab("Sample component activities"):
         pages = Tabs()
         for start in range(0, len(data.components), 50):
             selected = list(data.components[start : start + 50])
             label = f"{start + 1}–{start + len(selected)}"
             with pages.add_tab(label):
                 _wrap(create_activity_heatmap(data, selected))
-    with tabs.add_tab("Time course details" if timecourse else "Component details"):
+    with tabs.add_tab("Time course" if timecourse else "Component details"):
         if timecourse:
             _wrap(create_time_heatmap(data))
         selector = Tabs()
@@ -1251,7 +1251,7 @@ def add_imodulon_analysis(data: IModulonResult) -> None:
                     height = 950 if timecourse else 900
                     combined.report_height = height
                     _wrap(combined, height)
-    with tabs.add_tab("Differential activity"):
+    with tabs.add_dropdown_tab("Differential activity"):
         contrasts = list(
             data.differential.groupby(["target_group", "control_group"], sort=False)
         )
