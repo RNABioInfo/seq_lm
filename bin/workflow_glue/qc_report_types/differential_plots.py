@@ -724,13 +724,6 @@ def create_mds_plot(data: DifferentialResult) -> BokehPlot:
             legend_label=group,
         )
 
-        fig = plot._fig
-        legend = fig.legend[0]
-
-        fig.center.remove(legend)
-        legend.orientation = "vertical"
-        fig.add_layout(legend, "right")
-
         plot._fig.add_tools(
             HoverTool(
                 renderers=[points],
@@ -742,8 +735,13 @@ def create_mds_plot(data: DifferentialResult) -> BokehPlot:
                 ],
             )
         )
-    plot._fig.legend.title = "Condition"
-    plot._fig.legend.location = "top_right"
+    # Move the completed legend once, after all conditions have been added.
+    legend = plot._fig.legend[0]
+    plot._fig.center.remove(legend)
+    legend.title = "Condition"
+    legend.orientation = "vertical"
+    legend.location = "top_right"
+    plot._fig.add_layout(legend, "right")
     return plot
 
 

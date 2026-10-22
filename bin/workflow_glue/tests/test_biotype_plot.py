@@ -76,6 +76,13 @@ def test_plot_has_fixed_stack_order_hover_caption_and_sample_order():
     titles = [title.text for title in plot._fig.select({"type": Title})]
     assert bp.CAPTION in titles
     assert plot._fig.xaxis[0].formatter.format == "0%"
+    assert len(plot._fig.legend) == 1
+    legend = plot._fig.legend[0]
+    assert plot._fig.above.count(legend) == 1
+    assert legend not in plot._fig.center
+    assert [item.label["value"] for item in legend.items] == list(BIOTYPE_ORDER)
+    assert legend.orientation == "horizontal"
+    assert legend.click_policy == "hide"
 
 
 def test_zero_read_sample_is_annotated():

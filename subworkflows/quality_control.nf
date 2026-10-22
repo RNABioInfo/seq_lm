@@ -110,7 +110,7 @@ process samtools_flagstat_qc {
 
     script:
     def flagstat: String = flagstat_file_name(merged_bam.batch_index, merged_bam.sample.name)
-        """
-        samtools flagstat -@ ${task.cpus - 1} -O tsv ${merged_bam.bam} > ${flagstat}
-        """
+    """
+    samtools flagstat -@ ${task.cpus - 1} -O tsv ${merged_bam.bam} > ${flagstat}
+    """
 }

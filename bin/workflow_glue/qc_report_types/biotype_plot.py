@@ -143,14 +143,6 @@ def create_transcript_biotype_plot(
             source=source,
         )
 
-        fig = plot._fig
-        legend = fig.legend[0]
-
-        fig.center.remove(legend)
-        legend.orientation = "horizontal"
-        legend.location = "top_left"
-        fig.add_layout(legend, "above")
-
         plot._fig.add_tools(
             HoverTool(
                 renderers=[bars],
@@ -180,10 +172,14 @@ def create_transcript_biotype_plot(
 
     plot._fig.xaxis.formatter = NumeralTickFormatter(format="0%")
     plot._fig.grid.grid_line_alpha = 0.15
-    plot._fig.legend.title = "Transcript biotype"
-    plot._fig.legend.orientation = "horizontal"
-    plot._fig.legend.location = "top_left"
-    plot._fig.legend.click_policy = "hide"
+    # Move the completed legend once, after all biotypes have been added.
+    legend = plot._fig.legend[0]
+    plot._fig.center.remove(legend)
+    legend.title = "Transcript biotype"
+    legend.orientation = "horizontal"
+    legend.location = "top_left"
+    legend.click_policy = "hide"
+    plot._fig.add_layout(legend, "above")
     plot._fig.add_layout(
         Title(
             text=CAPTION,

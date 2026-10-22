@@ -256,6 +256,12 @@ def test_mds_plot_uses_exported_edge_r_coordinates(tmp_path):
         for sample in source.data.get("sample", [])
     }
     assert samples == {"control_1", "control_2", "treated_1", "treated_2"}
+    assert len(plot._fig.legend) == 1
+    legend = plot._fig.legend[0]
+    assert plot._fig.right.count(legend) == 1
+    assert legend not in plot._fig.center
+    assert [item.label["value"] for item in legend.items] == list(data.condition_colors)
+    assert legend.orientation == "vertical"
 
 
 def test_overview_orders_pca_mds_and_bcv(tmp_path, monkeypatch):
