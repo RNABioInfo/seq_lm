@@ -284,6 +284,19 @@ def patch_bokeh_resources():
 
 
 def labs_report(labs_module, title, workflow_name, params_path, versions_path, version):
-    """Create the report with the project's pinned ezCharts API."""
+    """Create a portable report whose plots can render inside hidden tabs."""
+    from bokeh.models import Plot
+
+    class CanvasLabsReport(labs_module.LabsReport):
+        """Avoid WebGL rendering failures in initially hidden report panels."""
+
+        def write(self, path):
+            # ezCharts defaults to WebGL, which fails on zero-sized hidden tabs.
+            # Include plots nested in layouts, such as annotated heatmaps.
+            for chart in self.get_bokeh_charts():
+                for plot in chart.plot._fig.select({"type": Plot}):
+                    plot.output_backend = "canvas"
+            super().write(path)
+
     patch_bokeh_resources()
-    return labs_module.LabsReport(title, workflow_name, params_path, versions_path, version)
+    return CanvasLabsReport(title, workflow_name, params_path, versions_path, version)
