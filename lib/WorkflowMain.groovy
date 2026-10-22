@@ -50,7 +50,7 @@ class WorkflowMain {
             System.exit(0)
         }
 
-        if (workflow.session.config.conda.enabled) {
+        if (workflow.session.config.conda?.enabled) {
             log.error 'This workflow requires Docker, Singularity, or Apptainer; Conda is not supported.'
             System.exit(1)
         }
