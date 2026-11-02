@@ -181,8 +181,8 @@ def test_temporal_gene_summary_and_heatmap_include_z_scores_and_hover():
     )
     gene_plot = tp.create_temporal_gene_plot(data, "set_a")
 
-    assert score_plot._fig.title.text == "GSVA score over time — set_a"
-    assert gene_plot._fig.title.text == "Gene expression over time — set_a"
+    assert score_plot._fig.title.text == "GSVA score over time: set_a"
+    assert gene_plot._fig.title.text == "Gene expression over time of genes within: set_a"
     assert gene_plot._fig.x_range.factors == ["0", "15", "45"]
     assert gene_plot._fig.yaxis[0].axis_label == "Gene"
     assert any(

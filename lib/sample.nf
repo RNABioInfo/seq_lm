@@ -22,6 +22,7 @@ record SampleChunk {
 }
 
 record SampleBatch {
+    observation: Map?
     batch_index: Integer
     chunks: List<SampleChunk>
     experiment_sample_count: Integer
@@ -34,18 +35,21 @@ record SampleBatchSize {
 }
 
 record SampleChunkBAMGroup {
+    observation: Map?
     batch_index: Integer
     sample: Sample
     bams: List<Path>
 }
 
 record ChunkBAM {
+    observation: Map?
     batch_index: Integer
     sample: Sample
     bam: Path
 }
 
 record CollatedChunkBAM {
+    observation: Map?
     batch_index: Integer
     sample: Sample
     bam: Path
@@ -58,6 +62,7 @@ record CollatedChunkBAMBatch {
 }
 
 record CumulativeCollatedBAMGroup {
+    observation: Map?
     batch_index: Integer
     sample: Sample
     bams: List<CollatedChunkBAM>
@@ -70,24 +75,28 @@ record CumulativeCollatedBAMSnapshot {
 }
 
 record CumulativeCollatedBAM {
+    observation: Map?
     batch_index: Integer
     sample: Sample
     bam: Path
 }
 
 record QuantifiedSample {
+    observation: Map?
     batch_index: Integer
     sample: Sample
     counts: Path
 }
 
 record QuantifiedSampleBatch {
+    observation: Map?
     batch_index: Integer
     report_sequence: Integer
     samples: List<QuantifiedSample>
 }
 
 record DifferentialExpressionBatch {
+    observation: Map?
     batch_index: Integer
     analysis_index: Integer
     report_sequence: Integer
@@ -101,27 +110,11 @@ record QuantifiedSampleUpdateBatch {
 }
 
 record DifferentialExpressionResult {
+    observation: Map?
     batch_index: Integer
     analysis_index: Integer
     report_sequence: Integer
     results: Path
-}
-
-record StabilityComparisonInput {
-    batch_index: Integer
-    analysis_index: Integer
-    baseline: Boolean
-    previous_results: Path
-    current_results: Path
-}
-
-record StabilityAudit {
-    batch_index: Integer
-    analysis_index: Integer
-    behavior: String
-    contrast_rows: List<Map>
-    sample_rows: List<Map>
-    config: Map
 }
 
 /**

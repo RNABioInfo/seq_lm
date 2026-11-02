@@ -3,7 +3,7 @@ nextflow.enable.types = true
 
 include { Sample ; GeneContrast ; QuantifiedSampleBatch } from '../lib/sample.nf'
 include { resolve_gene_contrasts ; gene_contrast_groups ; resolve_ica_groups ; select_analysis_batch ; gene_contrast_tsv ; parse_delimited_rows } from '../lib/gene_contrasts.nf'
-include { stability_config ; apply_run_stability_actions ; read_stability_tsv ; write_stability_tsv } from '../lib/stability.nf'
+include { apply_acquisition_actions ; read_monitoring_tsv ; write_monitoring_tsv } from '../lib/acquisition_actions.nf'
 include { parse_sample_sheet ; sample_sheet_has_order_column } from '../lib/bam_ingress.nf'
 
 workflow {
@@ -71,12 +71,12 @@ workflow {
     }
     def defaults: List<GeneContrast> = resolve_gene_contrasts(fallback_samples, null)
     assert defaults.size() == 3 && defaults*.reference_group.unique() == ['control']
-    assert stability_config([contrasts: contrasts], samples) != stability_config([contrasts: defaults], samples)
+    assert contrasts*.reference_group != defaults*.reference_group
     def run_rows: List<Map> = [
         [sample: 'selected', group: 'challenge', bam_dir: root.toString(), protocol_run_id: 'shared', effectively_live: true, eligible: true, newly_eligible: true],
         [sample: 'unselected', group: 'QC only', bam_dir: root.toString(), protocol_run_id: 'shared', effectively_live: true, eligible: false, newly_eligible: false],
     ]
-    assert apply_run_stability_actions(run_rows, 'log', [:]) == null
+    assert apply_acquisition_actions(run_rows, 'log', [:]) == null
     assert !run_rows[0].run_eligible && run_rows[0].action_result == 'waiting_for_run_stability'
     assert run_rows[0].run_blocking_samples == 'QC only/unselected'
     def escaped_sample: Sample = record(
@@ -92,8 +92,8 @@ workflow {
     def canonical: Path = root.resolve('contrasts.tsv')
     java.nio.file.Files.writeString(canonical, gene_contrast_tsv(escaped))
     assert parse_delimited_rows(canonical.text, '\t', true, false)[0].target_group == escaped_sample.group
-    write_stability_tsv(canonical, ['group', 'sample'], [[group: escaped_sample.group, sample: 'quoted']])
-    assert read_stability_tsv(canonical)[0].group == escaped_sample.group
+    write_monitoring_tsv(canonical, ['group', 'sample'], [[group: escaped_sample.group, sample: 'quoted']])
+    assert read_monitoring_tsv(canonical)[0].group == escaped_sample.group
     assert parse_delimited_rows('group\tsample\nA\t\n', '\t', true, false)[0].sample == ''
     def sample_sheet: Path = root.resolve('samples.csv')
     java.nio.file.Files.writeString(sample_sheet, "alias,group,bam_dir,order\nquoted,\"escaped \"\" group\",${root},\nbaseline,baseline,${root},\n")

@@ -82,6 +82,7 @@ for sample_index in $(seq 1 6); do
 done
 
 Rscript "${script_dir}/edgeR_analysis.R" \
+    --min_read_count 0 \
     --quant_manifest "${test_dir}/manifest.tsv" \
     --annotation "${test_dir}/annotation.gff3" \
     --gene_sets "${test_dir}/pathways.gmt" \
@@ -143,6 +144,7 @@ test -s "${test_dir}/results/group_challenge_vs_baseline/edgeR_results.tsv"
 test -s "${test_dir}/results/group_challenge_vs_baseline/fry_signed_significance.png"
 
 Rscript "${script_dir}/edgeR_analysis.R" \
+    --min_read_count 0 \
     --quant_manifest "${test_dir}/custom_manifest.tsv" \
     --gene_sets "${test_dir}/direct_pathways.gmt" \
     --output_dir "${test_dir}/direct_results" \

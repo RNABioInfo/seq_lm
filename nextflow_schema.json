@@ -163,7 +163,7 @@
       "title": "Run Monitoring Options",
       "type": "object",
       "fa_icon": "fas fa-chart-line",
-      "description": "Track DEA or ICA convergence and optionally terminate an acquisition when all required live samples satisfy the selected stopping method.",
+      "description": "Track curve-based R precision forecasts or ICA convergence and optionally terminate an acquisition when all required live samples satisfy the selected stopping method.",
       "properties": {
         "monitoring_behavior": {
           "type": "string",
@@ -175,44 +175,6 @@
           "default": "disabled",
           "description": "Action for the selected stopping method: disabled, log eligibility without stopping, or terminate eligible MinKNOW acquisitions (requires live analysis and credentials). All required live samples sharing an acquisition must be eligible."
         },
-        "num_stable_batches": {
-          "type": "integer",
-          "minimum": 1,
-          "default": 3,
-          "description": "DEA: consecutive successful comparisons. ICA monitoring: informative depth increases in the convergence window, requiring this many plus one snapshots."
-        },
-        "stability_max_feature_diff_fraction": {
-          "type": "number",
-          "minimum": 0,
-          "maximum": 1,
-          "default": 0.05,
-          "description": "Maximum fraction of filtered features added or dropped between DE snapshots."
-        },
-        "stability_max_median_abs_lfc_delta": {
-          "type": "number",
-          "minimum": 0,
-          "default": 0.05,
-          "description": "Maximum median absolute change in log2 fold change between DE snapshots."
-        },
-        "stability_min_jaccard_similarity": {
-          "type": "number",
-          "minimum": 0,
-          "maximum": 1,
-          "default": 0.95,
-          "description": "Minimum Jaccard similarity of sufficiently large DE-call sets."
-        },
-        "stability_min_de_calls_for_fraction_metrics": {
-          "type": "integer",
-          "minimum": 1,
-          "default": 20,
-          "description": "DE-call union size at which fractional set-stability metrics replace the stability_max_small_set_call_changes rule."
-        },
-        "stability_max_small_set_call_changes": {
-          "type": "integer",
-          "minimum": 0,
-          "default": 1,
-          "description": "Maximum absolute DE-call transitions allowed when the call union is small."
-        },
         "stopping_method": {
           "type": "string",
           "enum": [
@@ -220,19 +182,7 @@
             "ica"
           ],
           "default": "dea",
-          "description": "Analysis controlling stop eligibility: dea uses differential-expression stability; ica uses the ICA monitoring metric and requires every model component in every required sample to converge."
-        },
-        "ica_max_fold_change": {
-          "type": "number",
-          "minimum": 1,
-          "default": 1.05,
-          "description": "ICA monitoring metric: maximum multiplicative change in each component contribution to reconstructed expression across the informative checkpoint window. Automatically accounts for gene weights and log base; 1 means no change. This is a convergence heuristic, not a confidence bound."
-        },
-        "ica_min_read_growth_fraction": {
-          "type": "number",
-          "exclusiveMinimum": 0,
-          "default": 0.1,
-          "description": "ICA monitoring: minimum fractional increase in assigned abundance since the last accepted checkpoint. 0.1 means 10% more assigned reads; unchanged snapshots never advance the window."
+          "description": "Stopping algorithm: dea forecasts the reduction in aggregate logFC uncertainty using the fitted R-versus-depth curve and a calibrated error margin; ica monitors component convergence."
         }
       }
     },
@@ -410,6 +360,101 @@
           "help_text": "The ICA control group is included automatically. Unset or whitespace-only values include all samples."
         }
       }
+    },
+    "dea_monitoring_options": {
+      "title": "DEA Stopping Options",
+      "type": "object",
+      "description": "Validated only when DEA stopping is selected and monitoring is enabled.",
+      "properties": {
+        "dea_gain_cutoff": {
+          "type": "number",
+          "default": 0.01,
+          "description": "Maximum relative reduction in aggregate R over the configured forecast horizon. 0.01 means 1%; equality continues sequencing.",
+          "exclusiveMinimum": 0,
+          "exclusiveMaximum": 1
+        },
+        "dea_information_radius_scale": {
+          "type": "number",
+          "default": 1.0,
+          "description": "Positive reference radius in log2FC units for the custom bounded aggregate; this is a chosen scale, not estimated from data.",
+          "exclusiveMinimum": 0
+        },
+        "dea_min_points": {
+          "type": "integer",
+          "default": 6,
+          "description": "Minimum informative R observations; at least six.",
+          "minimum": 6
+        },
+        "dea_min_seconds": {
+          "type": "integer",
+          "default": 3600,
+          "description": "Minimum elapsed monitoring time; at least 3600 seconds.",
+          "minimum": 3600
+        },
+        "dea_confirmations": {
+          "type": "integer",
+          "default": 3,
+          "description": "Consecutive qualifying checkpoints with fresh reads required for R stopping.",
+          "exclusiveMinimum": 0
+        },
+        "dea_interruption_fraction": {
+          "type": "number",
+          "default": 0.25,
+          "description": "Enter interruption state below this fraction of the preserved healthy rate over the forecast horizon.",
+          "exclusiveMinimum": 0,
+          "exclusiveMaximum": 1
+        },
+        "dea_recovery_fraction": {
+          "type": "number",
+          "default": 0.5,
+          "description": "Fraction of preserved healthy reads per minute required during recovery.",
+          "exclusiveMinimum": 0,
+          "exclusiveMaximum": 1
+        },
+        "dea_forecast_minutes": {
+          "type": "integer",
+          "default": 30,
+          "minimum": 1,
+          "description": "Forecast horizon in minutes. Automatic R stopping requires observation gaps no longer than this horizon."
+        },
+        "dea_max_processing_lag_seconds": {
+          "type": "integer",
+          "default": 600,
+          "minimum": 1,
+          "description": "Maximum delay from data represented by a DEA snapshot to completion of its R check; independent of MinKNOW output cadence."
+        },
+        "dea_recovery_intervals": {
+          "type": "integer",
+          "default": 2,
+          "description": "Consecutive productive arrival intervals required for recovery; their total duration must also cover one third of the forecast horizon.",
+          "exclusiveMinimum": 0
+        }
+      }
+    },
+    "ica_monitoring_options": {
+      "title": "ICA Stopping Options",
+      "type": "object",
+      "description": "Validated only when ICA stopping is selected and monitoring is enabled.",
+      "properties": {
+        "num_stable_batches": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 3,
+          "description": "ICA only: number of informative stable updates required."
+        },
+        "ica_max_fold_change": {
+          "type": "number",
+          "minimum": 1,
+          "default": 1.05,
+          "description": "ICA monitoring metric: maximum multiplicative change in each component contribution to reconstructed expression across the informative checkpoint window. Automatically accounts for gene weights and log base; 1 means no change. This is a convergence heuristic, not a confidence bound."
+        },
+        "ica_min_read_growth_fraction": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "default": 0.1,
+          "description": "ICA monitoring: minimum fractional increase in assigned abundance since the last accepted checkpoint. 0.1 means 10% more assigned reads; unchanged snapshots never advance the window."
+        }
+      }
     }
   },
   "allOf": [
@@ -553,6 +598,49 @@
     },
     {
       "$ref": "#/definitions/imodulon_analysis_options"
+    },
+    {
+      "if": {
+        "properties": {
+          "monitoring_behavior": {
+            "enum": [
+              "log",
+              "terminate"
+            ]
+          },
+          "stopping_method": {
+            "const": "dea"
+          }
+        },
+        "required": [
+          "monitoring_behavior"
+        ]
+      },
+      "then": {
+        "$ref": "#/definitions/dea_monitoring_options"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "monitoring_behavior": {
+            "enum": [
+              "log",
+              "terminate"
+            ]
+          },
+          "stopping_method": {
+            "const": "ica"
+          }
+        },
+        "required": [
+          "monitoring_behavior",
+          "stopping_method"
+        ]
+      },
+      "then": {
+        "$ref": "#/definitions/ica_monitoring_options"
+      }
     }
   ],
   "docs": {

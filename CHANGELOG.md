@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+- **Breaking:** Use only the uncertainty-versus-depth curve for DEA termination
+  forecasts and calibrate its own empirical error margin. Remove the gene-model
+  read-depth projection and its fitted-mean/dispersion TSV exports. Publish
+  `curve_gain` and curve-only monitoring state version 3; earlier state is rejected.
+
+- Validate stopping settings only for the enabled DEA or ICA method; remove
+  obsolete-name migration checks and skip inactive stopping configuration.
+
+- Reuse the existing stable BAM trigger for post-DEA R checks; remove the separate
+  timed watcher and global R batch barriers. Forecast from duration-weighted
+  arrival rates, with configurable horizon and explicit cadence/lag guards.
+
+- **Breaking:** Replace DEA result-stability stopping with 95% edgeR QL-profile radii and a
+  causal configurable-horizon marginal-improvement forecast (30-minute default); default cutoff 1%.
+- Use independent two-group fits, timestamped BAM-triggered snapshots, explicit
+  pause/recovery protection, and current-format persistent monitoring state.
+- Retain ICA stopping as an alternative and preserve GSVA/fry/ICA analysis.
+- Use `stopping_method=dea` and the `dea_` parameter, method and package prefix
+  for precision monitoring. Remove old DEA stability thresholds, executable and
+  audit reader without aliases. Rename readiness checking to `check-de-readiness`.
+- Add precision/model exports, monitoring plots and saved-checkpoint evaluation.
+- Existing R/report containers are sufficient; no image publication is required.
+
 - Run cumulative Oarfish quantification whenever paired genome and GTF/GFF3
   references are available, independently of differential expression, and add
   annotation-based transcript-biotype composition to Quality Control → Read

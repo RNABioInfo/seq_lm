@@ -43,11 +43,12 @@ readiness. ICA selection is independent and can still include those groups.
 Without this file, at least two `control` samples are required and each
 non-control group is compared against `control`.
 
-Every DEA snapshot contains `contrasts.tsv` with columns `contrast_id`,
+Every fitted DEA snapshot contains `contrasts.tsv` with columns `contrast_id`,
 `target_group`, and `reference_group`. Result directories use those IDs; the
 report and stability monitor read explicit labels rather than decoding directory
-names. DE stability configuration includes the contrast definitions; changing
-them resets the baseline and streaks. Groups absent from all gene contrasts
+names. Requested comparisons and deferred statuses remain in
+`requested_contrasts.tsv` and `contrast_status.tsv`. R monitoring fingerprints include the contrast definitions; changing
+them resets its history and eligibility. Groups absent from all gene contrasts
 cannot become eligible through DEA monitoring. Active unselected samples still
 block stopping a shared MinKNOW run.
 
@@ -128,81 +129,18 @@ group. Each other group is tested separately against the control group.
 Oarfish's EM-estimated `num_reads` values are consumed by the edgeR analysis,
 which rebuilds the current count matrix for every complete live batch.
 
-### Differential-expression stability
+### R-based differential-expression termination
 
-`--monitoring_behavior` controls automatic depth decisions and defaults
-to `disabled`. `log` performs a dry run and records when a protocol run would
-stop. `terminate` groups active live samples by their discovered MinKNOW
-`protocol_run_id` and calls `seq-run-manager stop` once for a run only when
-every participating sample is eligible in the same analysis snapshot. After
-a successful request, it atomically creates a `STOP` file in every participating
-sample's `bam_dir`. These pollers drain pending BAMs and close; subsequent
-snapshots do not repeat the stop request. It requires `--minknow_client_certificate`,
-`--minknow_client_private_key`, and `--minknow_ca_certificate`; the MinKNOW
-manager defaults to `host.docker.internal:9501` and can be changed with
-`--minknow_host` and `--minknow_port`.
+The old consecutive-result stability algorithm has been removed. Select
+`--stopping_method dea` for the model-based interval forecast, or `ica` for the
+separate component convergence method. The default R cutoff is a 1% expected
+reduction in aggregate uncertainty over the configurable forecast horizon (30 minutes by default). Monitoring remains
+disabled until `--monitoring_behavior log` or `terminate` is selected.
 
-For every sample, startup discovery inspects the direct parent of `bam_dir` for
-exactly one `*sample_sheet*.csv` file and matches `alias` to its `sample_id`.
-Missing, ambiguous, malformed, or unmatched metadata disables termination only
-for that sample and produces a warning. Only configured seqLM samples with
-resolved metadata participate in run grouping; additional unconfigured barcodes
-are not discovered. Failed MinKNOW stop requests also warn, mark every
-participating sample as `stop_failed`, create no `STOP` files, and retry when
-all participating samples are eligible in a later snapshot. A failure to create
-markers after a successful stop fails the workflow with the affected paths;
-repair those directories and create the missing `STOP` files before resuming.
-
-Every successful edgeR snapshot is compared with the previous successful
-snapshot. The checks cover filtered-feature identity, median absolute logFC
-change, and DE-call Jaccard similarity. Deferred DEA-readiness batches
-neither increment nor reset stability. The first successful snapshot is only a
-baseline. With the default `--num_stable_batches 3`, at least four successful
-edgeR snapshots are therefore required.
-
-Streaks are tracked independently for every non-control-versus-control
-contrast. A treated sample becomes eligible when its own group contrast has
-reached the threshold. A control sample becomes eligible only when every
-contrast involving the control group has reached it. Individual eligibility is
-preserved independently of run readiness. An eligible treated sample waits if
-another active live sample in its run remains ineligible. Other protocol runs
-are assessed independently.
-
-Only effectively live, non-restored samples without an existing `STOP*` file
-participate in run readiness and receive new termination actions. Final,
-restored, and already closed samples do not block termination. In `log` mode,
-known runs use the same membership and readiness rule without making requests
-or creating markers; readiness is logged for each ready snapshot. For samples
-without run metadata, dry-run logging reports individual eligibility only and
-does not claim that their run is ready.
-
-Immutable audit files are published for every analyzed snapshot:
-
-```text
-<out_dir>/stability/batch_<analysis_index>/
-  config.json
-  contrast_stability.tsv
-  sample_stability.tsv
-```
-
-`sample_stability.tsv` includes the optional `protocol_run_id` and the result
-of each attempted termination action. `eligible` remains the individual sample
-decision. The appended `run_eligible` column records readiness of its active run,
-and `run_blocking_samples` lists ineligible members as `group/sample` labels.
-An eligible sample blocked by another member has action result
-`waiting_for_run_stability`. Excluded and unmapped rows have `run_eligible=false`
-and no blocking list.
-
-They contain metric values, individual checks, consecutive streaks, required
-sample contrasts, eligibility transitions, and action results. A complete current
-audit and its DE snapshot seed the next invocation; changing the behavior,
-thresholds, sample structure, or protocol-run mappings resets the streak with a
-warning. Missing audits start a fresh stability window.
-
-Run `bash test/run_stability_test.sh` to exercise the stability integration
-scenarios and ingress stop/drain regression using a fake run manager. The local
-test environment requires Nextflow and Python with pandas; no MinKNOW hardware
-or credentials are used.
+See [R-based termination](dea_termination.md) for the calculation, BAM-triggered
+observation clock, independent contrasts, interruption/recovery guards,
+MinKNOW acquisition actions, restart format and container requirements. The
+old DEA parameters, executable and audit format are not supported.
 
 Read names must be globally unique across the BAM chunks for a sample. This is
 normally guaranteed by Nanopore UUID read identifiers. It ensures that all

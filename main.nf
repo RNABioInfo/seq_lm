@@ -3,7 +3,7 @@
 nextflow.enable.types = true
 
 include {
-    bam_ingress ;
+    bam_ingress ; capture_dea_input ;
     get_samples ;
     sample_sheet_has_order_column ;
     validate_samples ;
@@ -40,14 +40,11 @@ include { quantification } from './subworkflows/quantification.nf'
 include { differential_expression } from './subworkflows/differential_expression.nf'
 include { resolve_gene_contrasts ; gene_contrast_groups ; resolve_ica_groups ; select_analysis_batch } from './lib/gene_contrasts.nf'
 include { order_batches } from './lib/util.nf'
-include {
-    differential_stability ;
-    discover_stability_state ;
-    stability_config
-} from './lib/stability.nf'
+include { dea_monitoring } from './lib/dea_monitoring.nf'
 include {
     discover_sample_checkpoints ;
     file_identity ;
+    sha256_file ;
     next_analysis_snapshot_index ;
     sample_checkpoint_key ;
     write_sample_checkpoints
@@ -73,6 +70,7 @@ process prepare_chunk_bam {
         batch_index: input_group.batch_index,
         sample: input_group.sample,
         bam: file(chunk_bam_name(input_group.batch_index, input_group.sample)),
+        observation: input_group.observation,
     )
 
     script:
@@ -160,10 +158,10 @@ process qc_report {
     has_transcript_biotypes: Boolean
     differential_results: Path
     differential_analysis_note: String
-    stability_results: Path
+    monitoring_results: Path
     ica_results: Path
     has_differential_results: Boolean
-    has_stability_results: Boolean
+    has_monitoring_results: Boolean
     has_ica_results: Boolean
     ica_analysis_index: Integer
     first_report_revision: Integer
@@ -172,7 +170,7 @@ process qc_report {
     stageAs qc_results, 'qc_results'
     stageAs transcript_biotypes, 'transcript_biotypes.tsv'
     stageAs differential_results, 'differential_results'
-    stageAs stability_results, 'stability_results.tsv'
+    stageAs monitoring_results, 'monitoring_results'
     stageAs ica_results, 'ica_results'
 
     output:
@@ -197,8 +195,8 @@ process qc_report {
     def readiness_args: String = differential_analysis_note
         ? "--dea-readiness-notice ${shell_quote(differential_analysis_note)}"
         : ''
-    def stability_args: String = has_stability_results
-        ? '--stability-results stability_results.tsv'
+    def stability_args: String = has_monitoring_results
+        ? '--monitoring-results monitoring_results'
         : ''
     def ica_args: String = has_ica_results
         ? "--imodulon-results ica_results --imodulon-batch ${qc_report_inputs.latest_batch_index} --imodulon-sequence ${qc_report_inputs.report_sequence} --imodulon-analysis-index ${ica_analysis_index}"
@@ -227,7 +225,7 @@ process qc_report {
             ${readiness_args} \
             ${stability_args} \
             ${ica_args} \
-            --stability-behavior ${params.monitoring_behavior} \
+            --monitoring-behavior ${params.monitoring_behavior} \
             --stopping-method ${params.stopping_method} \
             --lfc-cutoff ${params.de_lfc_cutoff} \
             --padj-cutoff ${params.de_padj_cutoff}
@@ -258,7 +256,7 @@ workflow sample_pipeline {
     active_samples: List<Sample>
     stability_behavior: String
     stability_settings: Map
-    initial_stability_state: Map
+    dea_observations: Map
     minknow_connection: Map
     ica_matrix: Path
     ica_gene_map: Path
@@ -276,7 +274,11 @@ workflow sample_pipeline {
          * each complete batch. Keep this flow in channel operators; only use
          * Groovy helpers for naming and report-state formatting.
          */
-    sample_batch_size_ch = sample_batches.map { batch ->
+    observed_sample_batches_ch = sample_batches.map { batch ->
+        if (batch.get('observation') != null) capture_dea_input(dea_observations,batch.batch_index,batch.observation)
+        return batch
+    }
+    sample_batch_size_ch = observed_sample_batches_ch.map { batch ->
         record(
             batch_index: batch.batch_index,
             active_sample_count: batch.chunks.count { chunk -> !chunk.bam_paths.isEmpty() },
@@ -284,7 +286,7 @@ workflow sample_pipeline {
         )
     }
 
-    sample_chunk_bam_group_ch = sample_batches.flatMap { batch ->
+    sample_chunk_bam_group_ch = observed_sample_batches_ch.flatMap { batch ->
         batch.chunks
             .findAll { chunk -> !chunk.bam_paths.isEmpty() }
             .collect { chunk ->
@@ -292,6 +294,7 @@ workflow sample_pipeline {
                     batch_index: batch.batch_index,
                     sample: chunk.sample,
                     bams: chunk.bam_paths,
+                    observation: batch.observation,
                 )
             }
     }
@@ -307,6 +310,7 @@ workflow sample_pipeline {
             reference_genome,
             reference_annotation,
             strand_specificity,
+            all_samples,
         )
         quantified_samples_ch = quantification_outputs.quantifications
         quantified_sample_batches_ch = quantification_outputs.batches
@@ -355,50 +359,25 @@ workflow sample_pipeline {
                 }
             )
             if (stability_behavior != 'disabled' && stability_settings.method == 'dea') {
-                stability_audits_ch = differential_stability(
-                    differential_results_ch,
-                    all_samples,
-                    active_samples,
-                    stability_behavior,
-                    stability_settings,
-                    initial_stability_state,
-                    minknow_connection,
+                dea_snapshots_ch = differential_outputs.precision_results
+                dea_audits_ch = dea_monitoring(
+                    dea_snapshots_ch, all_samples, active_samples, stability_behavior,
+                    stability_settings, dea_observations, minknow_connection,
                 )
                 differential_reports_with_stability_ch = differential_report_batches_ch
-                    .filter { report_batch -> report_batch.has_differential_results }
                     .map { report_batch -> tuple(report_batch.batch_index, report_batch) }
-                    .join(
-                        stability_audits_ch.map { audit ->
-                            tuple(audit.batch_index, audit.sample_stability)
-                        },
-                        by: 0,
-                    )
-                    .map { _batch_index: Integer, report_batch, sample_stability_path ->
+                    .join(dea_audits_ch.map { audit -> tuple(audit.batch_index, audit.monitoring_results) }, by: 0)
+                    .map { _batch_index: Integer, report_batch, monitoring_path ->
                         record(
                             batch_index: report_batch.batch_index,
                             report_sequence: report_batch.report_sequence,
                             differential_analysis_note: report_batch.differential_analysis_note,
-                            has_differential_results: true,
+                            has_differential_results: report_batch.has_differential_results,
                             results: report_batch.results,
-                            stability_results: sample_stability_path,
-                            has_stability_results: true,
+                            monitoring_results: monitoring_path,
+                            has_monitoring_results: true,
                         )
                     }
-                    .mix(
-                        differential_report_batches_ch
-                            .filter { report_batch -> !report_batch.has_differential_results }
-                            .map { report_batch ->
-                                record(
-                                    batch_index: report_batch.batch_index,
-                                    report_sequence: report_batch.report_sequence,
-                                    differential_analysis_note: report_batch.differential_analysis_note,
-                                    has_differential_results: false,
-                                    results: report_batch.results,
-                                    stability_results: optional_file(),
-                                    has_stability_results: false,
-                                )
-                            }
-                    )
             }
             else {
                 differential_reports_with_stability_ch = differential_report_batches_ch.map { report_batch ->
@@ -408,8 +387,8 @@ workflow sample_pipeline {
                         differential_analysis_note: report_batch.differential_analysis_note,
                         has_differential_results: report_batch.has_differential_results,
                         results: report_batch.results,
-                        stability_results: optional_file(),
-                        has_stability_results: false,
+                        monitoring_results: optional_file(),
+                        has_monitoring_results: false,
                     )
                 }
             }
@@ -433,8 +412,8 @@ workflow sample_pipeline {
                         differential_analysis_note: differential_report.differential_analysis_note,
                         has_differential_results: differential_report.has_differential_results,
                         results: differential_report.results,
-                        stability_results: differential_report.stability_results,
-                        has_stability_results: differential_report.has_stability_results,
+                        monitoring_results: differential_report.monitoring_results,
+                        has_monitoring_results: differential_report.has_monitoring_results,
                     )
                 }
         }
@@ -447,8 +426,8 @@ workflow sample_pipeline {
                     differential_analysis_note: '',
                     has_differential_results: false,
                     results: optional_file(),
-                    stability_results: optional_file(),
-                    has_stability_results: false,
+                    monitoring_results: optional_file(),
+                    has_monitoring_results: false,
                 )
             }
         }
@@ -485,7 +464,7 @@ workflow sample_pipeline {
                             batch_index: batch_index, report_sequence: report.report_sequence,
                             biotypes: report.biotypes, differential_analysis_note: report.differential_analysis_note,
                             has_differential_results: report.has_differential_results, results: report.results,
-                            stability_results: audit.sample_stability, has_stability_results: true,
+                            monitoring_results: audit.sample_stability, has_monitoring_results: true,
                             ica_results: report.ica_results, has_ica_results: true,
                             ica_analysis_index: report.ica_analysis_index,
                         )
@@ -501,8 +480,8 @@ workflow sample_pipeline {
                     differential_analysis_note: report.differential_analysis_note,
                     has_differential_results: report.has_differential_results,
                     results: report.results,
-                    stability_results: report.stability_results,
-                    has_stability_results: report.has_stability_results,
+                    monitoring_results: report.monitoring_results,
+                    has_monitoring_results: report.has_monitoring_results,
                     ica_results: optional_file(),
                     has_ica_results: false,
                     ica_analysis_index: 0,
@@ -629,10 +608,10 @@ workflow sample_pipeline {
             true,
             qc_report_ready_ch.map { result -> result.differential_results },
             qc_report_ready_ch.map { result -> result.differential_analysis_note },
-            qc_report_ready_ch.map { result -> result.stability_results },
+            qc_report_ready_ch.map { result -> result.monitoring_results },
             qc_report_ready_ch.map { result -> result.ica_results },
             qc_report_ready_ch.map { result -> result.has_differential_results },
-            qc_report_ready_ch.map { result -> result.has_stability_results },
+            qc_report_ready_ch.map { result -> result.has_monitoring_results },
             qc_report_ready_ch.map { result -> result.has_ica_results },
             qc_report_ready_ch.map { result -> result.ica_analysis_index },
             first_report_revision,
@@ -701,6 +680,9 @@ workflow {
         termination_requested: params.monitoring_behavior == 'terminate',
         detect_minknow_completion: params.detect_minknow_completion,
         minknow_completion_settle_seconds: params.minknow_completion_settle_seconds,
+        dea_event_mode: params.live_analysis && params.monitoring_behavior != 'disabled' && params.stopping_method == 'dea',
+        dea_state_directory: params.live_analysis && params.monitoring_behavior != 'disabled' && params.stopping_method == 'dea'
+            ? output_root.resolve('termination/dea').toString() : null,
     )
     all_samples = get_samples(ingress_args)
     validate_samples(all_samples, params.differential_expression && !params.gene_contrast_file && !ica_enabled)
@@ -732,29 +714,33 @@ workflow {
     first_analysis_index = params.differential_expression
         ? next_analysis_snapshot_index(output_root)
         : 0
+    def dea_monitoring_enabled: Boolean = params.monitoring_behavior != 'disabled' && params.stopping_method == 'dea'
+    def ica_monitoring_enabled: Boolean = params.monitoring_behavior != 'disabled' && params.stopping_method == 'ica'
     stability_parameter_values = [
         contrasts: gene_contrasts,
         method: params.stopping_method as String,
-        ica_max_fold_change: params.ica_max_fold_change,
-        ica_min_read_growth_fraction: params.ica_min_read_growth_fraction,
+        ica_max_fold_change: ica_monitoring_enabled ? params.ica_max_fold_change : null,
+        ica_min_read_growth_fraction: ica_monitoring_enabled ? params.ica_min_read_growth_fraction : null,
         behavior: params.monitoring_behavior as String,
-        num_stable_batches: params.num_stable_batches as Integer,
-        max_feature_diff_fraction: params.stability_max_feature_diff_fraction,
-        max_median_abs_lfc_delta: params.stability_max_median_abs_lfc_delta,
-        min_jaccard_similarity: params.stability_min_jaccard_similarity,
-        max_fdr: params.de_padj_cutoff,
-        min_abs_lfc: params.de_lfc_cutoff,
-        min_de_calls_for_fraction_metrics: params.stability_min_de_calls_for_fraction_metrics as Integer,
-        max_small_set_call_changes: params.stability_max_small_set_call_changes as Integer,
+        num_stable_batches: ica_monitoring_enabled ? (params.num_stable_batches as Integer) : null,
+        live_analysis: params.live_analysis,
+        output_root: output_root.toString(),
+        command: projectDir.resolve('bin/dea-termination').toString(),
+        identities: [model_settings: [min_read_count: params.min_read_count,
+                         min_replicate_sample_count: params.min_replicate_sample_count,
+                         de_lfc_cutoff: params.de_lfc_cutoff, de_padj_cutoff: params.de_padj_cutoff,
+                         strand_specificity: params.strand_specificity],
+                     genome: reference_genome ? sha256_file(reference_genome) : null,
+                     annotation: reference_annotation ? sha256_file(reference_annotation) : null,
+                     controls: restored_quantifications.collect { quant -> [key: "${quant.sample.group}/${quant.sample.name}", sha256: sha256_file(quant.counts)] },
+                     algorithm: ['bin/dea_termination/engine.py','bin/dea_termination/forecast.py','bin/dea_termination/cli.py','bin/de_analysis/profile_intervals.R','bin/de_analysis/edgeR_analysis.R','bin/check-de-readiness','lib/LiveBamWatcher.groovy','lib/bam_ingress.nf','lib/dea_monitoring.nf','lib/acquisition_actions.nf','subworkflows/quantification.nf','subworkflows/differential_expression.nf'].collectEntries { source: String -> [(source): sha256_file(projectDir.resolve(source))] }],
+        dea_config: dea_monitoring_enabled ? [gain_cutoff: params.dea_gain_cutoff, information_radius_scale: params.dea_information_radius_scale,
+            horizon_seconds: (params.dea_forecast_minutes as Number) * 60, max_processing_lag_seconds: params.dea_max_processing_lag_seconds, min_points: params.dea_min_points,
+            earliest_seconds: params.dea_min_seconds, confirmations: params.dea_confirmations,
+            interruption_fraction: params.dea_interruption_fraction, recovery_fraction: params.dea_recovery_fraction,
+            recovery_intervals: params.dea_recovery_intervals] : [:],
     ]
-    stability_parameter_values.config = stability_config(stability_parameter_values, all_samples)
-    initial_stability_state = params.monitoring_behavior == 'disabled' || params.stopping_method != 'dea'
-        ? [previous_results: optional_file(), streaks: [:], eligible: [:]]
-        : discover_stability_state(
-            output_root,
-            first_analysis_index,
-            stability_parameter_values.config,
-        )
+    dea_observations = [:]
     minknow_connection = [
         command: 'seq-run-manager',
         host: params.minknow_host as String,
@@ -801,7 +787,7 @@ workflow {
         checkpoint_state.active,
         params.monitoring_behavior,
         stability_parameter_values,
-        initial_stability_state,
+        dea_observations,
         minknow_connection,
         ica_enabled ? file(params.ica_matrix, checkIfExists: true) : optional_file(),
         ica_enabled && params.ica_gene_map ? file(params.ica_gene_map, checkIfExists: true) : optional_file(),

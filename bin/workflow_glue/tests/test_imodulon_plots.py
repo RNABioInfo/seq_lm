@@ -290,7 +290,7 @@ def test_ready_snapshot_and_plots_support_literal_na_and_irregular_time(tmp_path
     )
     assert (
         create_volcano(data.differential, "all", data.cutoff)._fig.xaxis.axis_label
-        == "Activity difference (target − control)"
+        == "Activity difference (target - control)"
     )
     assert create_multi_contrast_effects(data)._fig.x_range.factors == [
         "early vs control",
@@ -332,7 +332,7 @@ def test_single_comparison_uses_one_direct_contrast(tmp_path):
         create_volcano(
             contrasts[0][1], "treated vs control", data.cutoff
         )._fig.title.text
-        == "Differential activity — treated vs control"
+        == "Differential activity: treated vs control"
     )
     validate_imodulon_timecourse(data)
 
@@ -436,25 +436,25 @@ def test_qc_report_adds_active_ica_details_main_tab(tmp_path, monkeypatch, tempo
     monkeypatch.chdir(tmp_path)
     qc_report.main(args)
     html = report.read_text()
-    assert ">iModulon Analysis</button>" in html
-    assert html.find("Quality Control") < html.find("iModulon Analysis")
-    assert (">Time course details</button>" in html) == temporal
+    assert ">Independent Components</button>" in html
+    assert html.find("Quality Control") < html.find("Independent Components")
+    assert (">Time course</button>" in html) == temporal
     assert (">Component details</button>" in html) != temporal
-    assert ">Time course</button>" not in html
+    assert ">Time course details</button>" not in html
     assert "Component annotations" in html
     assert "singular_value_index" not in html
     assert "residual_sum_squares" not in html
     assert "Statistical availability" not in html
     assert "Differential activity" in html
     assert ("Elapsed time (min)" in html) == temporal
-    assert html.count("Mean iModulon activity over elapsed time") == int(temporal)
-    assert "iM-A — GbdR" in html
+    assert ("Mean component activity over elapsed time" in html) == temporal
+    assert "iM-A – GbdR" in html
     assert "Glycine Betaine Catabolism" in html
     assert "Function &lt;unknown&gt;" in html
     assert ">Overview</button>" not in html
     assert ">Methods</button>" not in html
     assert "Search components" in html
-    assert '"iModulon Analysis"' in html
+    assert html.count(">Independent Components</button>") == 1
 
 
 def test_ica_timecourse_is_inferred_from_complete_order_metadata(tmp_path):
@@ -681,7 +681,7 @@ def test_component_annotations_preserve_ids_and_expose_names(tmp_path):
     data = load_imodulon_results(root)
     assert data.components == ("iM-A", "NA")
     heatmap = create_activity_heatmap(data, list(data.components))._fig
-    assert heatmap.y_range.factors == ["NA — GbdR", "iM-A — GbdR"]
+    assert heatmap.y_range.factors == ["NA – GbdR", "iM-A – GbdR"]
     assert heatmap.renderers[0].glyph.y == "component_label"
     assert data.activities.loc[0, "component_description"] == "Glycine Betaine Catabolism"
     assert "GbdR" in create_component_distribution(data, "iM-A")._fig.title.text

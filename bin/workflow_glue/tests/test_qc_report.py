@@ -13,6 +13,51 @@ from workflow_glue.qc_report_types import histogram_plots, kde_plots  # noqa: E4
 from workflow_glue.transcript_biotypes import BIOTYPE_ORDER  # noqa: E402
 
 
+@pytest.mark.parametrize("refresh_seconds", [0, 5])
+def test_report_uses_canvas_for_hidden_and_nested_bokeh_plots(tmp_path, refresh_seconds):
+    """Static reports and live snapshots avoid zero-sized WebGL canvases."""
+    import re
+
+    from bokeh.layouts import gridplot
+    from ezcharts.components.ezchart import EZChart
+    from ezcharts.components.reports import labs
+    from ezcharts.layout.snippets import Tabs
+    from ezcharts.plots import BokehPlot
+
+    from workflow_glue.report_layout import labs_report
+
+    params = tmp_path / "params.json"
+    params.write_text("{}")
+    versions = tmp_path / "versions"
+    versions.mkdir()
+    (versions / "versions.txt").write_text("qc_report,test\n")
+    report = labs_report(labs, "Test report", "qc_report", params, versions, "test")
+    plots = [BokehPlot(title=f"Plot {index}") for index in range(3)]
+    for plot in plots:
+        plot._fig.scatter([1, 2], [3, 4])
+    assert all(plot._fig.output_backend == "webgl" for plot in plots)
+
+    with report.add_section("Charts", "charts"):
+        tabs = Tabs()
+        tabs.add_tab("Initially visible")
+        with tabs.add_tab("Initially hidden"):
+            EZChart(plots[0])
+            combined = BokehPlot()
+            combined._fig = gridplot([[plots[1]._fig, plots[2]._fig]])
+            EZChart(combined)
+
+    report_path = tmp_path / "qc_report.html"
+    qc_report.write_report(report, report_path, 0, refresh_seconds)
+
+    assert all(plot._fig.output_backend == "canvas" for plot in plots)
+    if refresh_seconds:
+        state = json.loads((tmp_path / "qc_report_state.json").read_text())
+        report_path = tmp_path / state["snapshot"]
+    html = report_path.read_text()
+    assert "Plot 0" in html and "Plot 1" in html and "Plot 2" in html
+    assert re.search(r'"output_backend"\s*:\s*"webgl"', html) is None
+
+
 def test_write_report_uses_live_shell_and_versioned_snapshot(tmp_path):
     """Live reports refresh their frame and preserve active tab selections."""
 
@@ -73,8 +118,7 @@ def test_write_report_rebrands_labs_header(tmp_path):
     assert "data:image/png;base64," in html
     assert "#004191" in html
     assert (
-        "Long-read RNA sequencing quality control, differential expression, "
-        "and gene set enrichment."
+        "ONT transcriptome sequencing quality control, and functional analysis."
     ) in html
     assert "Oxford Nanopore Technologies" not in html
 
@@ -109,8 +153,7 @@ def test_write_report_adds_dea_readiness_notice_to_subtitle(tmp_path, notice):
     html = report_path.read_text()
     assert "Workflow results." not in html
     assert (
-        "Long-read RNA sequencing quality control, differential expression, "
-        "and gene set enrichment."
+        "ONT transcriptome sequencing quality control, and functional analysis."
     ) in html
     assert notice in html
     assert 'class="seq-lm-dea-readiness-notice"' in html
@@ -251,17 +294,19 @@ def write_differential_results(path):
     )
 
 
-def write_stability_results(path):
-    """Write the matching sample-level stability audit."""
-    path.write_text(
-        "analysis_index\tbatch_index\tgroup\tsample\tbam_dir\t"
-        "effectively_live\trequired_contrasts\tconsecutive_stable_batches\t"
-        "eligible\tnewly_eligible\tbehavior\taction_result\n"
-        "3\t2\tcontrol\tcontrol_1\t/data/control_1\ttrue\t"
-        "group_time_point_1_vs_control\t2\tfalse\tfalse\tlog\tnone\n"
-        "3\t2\ttime_point_1\ttreatment_1\t/data/treatment_1\ttrue\t"
-        "group_time_point_1_vs_control\t3\ttrue\ttrue\tlog\tlogged\n"
+def write_monitoring_results(path):
+    """Write the current R audit directory, including its offline plot data."""
+    path.mkdir()
+    (path / "audit.json").write_text(
+        json.dumps({"forecast_method": "depth_curve", "config": {"gain_cutoff": .01, "horizon_seconds": 1800}})
     )
+    pd.DataFrame([
+        dict(group="control",sample="control_1",method="dea",metric="R_information",eligible="false",consecutive_confirmations=0,reason="fixed",behavior="log",action_result="none"),
+        dict(group="time_point_1",sample="treatment_1",method="dea",metric="R_information",eligible="true",consecutive_confirmations=3,reason="marginal_precision",behavior="log",action_result="logged"),
+    ]).to_csv(path/"sample_monitoring.tsv",sep="\t",index=False)
+    pd.DataFrame([dict(contrast_id="pair",elapsed_seconds=600,assigned_monitored_reads=10000,R_information=1.,fit_R=1.,curve_gain=.008,predicted_conservative_gain=.01,
+                       actual_gain_next_horizon=.005,fraction_R_le_05=.5,fraction_R_le_1=.8,eligible=False)]).to_csv(path/"forecast_history.tsv",sep="\t",index=False)
+    pd.DataFrame([dict(contrast_id="pair",sample="treatment_1",elapsed_seconds=600,predicted_increment=1000)]).to_csv(path/"read_rate_history.tsv",sep="\t",index=False)
 
 
 def test_create_hist_plot_uses_length_values_only(monkeypatch):
@@ -386,8 +431,8 @@ def test_qc_report_writes_html(tmp_path):
     )
     differential_results = tmp_path / "differential_results"
     write_differential_results(differential_results)
-    stability_results = tmp_path / "sample_stability.tsv"
-    write_stability_results(stability_results)
+    monitoring_results = tmp_path / "dea_monitoring"
+    write_monitoring_results(monitoring_results)
     transcript_biotypes = tmp_path / "transcript_biotypes.tsv"
     write_transcript_biotypes(transcript_biotypes)
 
@@ -402,8 +447,8 @@ def test_qc_report_writes_html(tmp_path):
     write_nanoplot(tmp_path / "qc_results/nanoplot/QC_only/omitted/nanoplot_data_chunk_0.tsv.gz", [])
     with samples.open("a") as handle:
         handle.write("omitted\tQC_only\t\t1\t0\tqc_results\n")
-    with stability_results.open("a") as handle:
-        handle.write("3\t2\tQC_only\tomitted\t/data/omitted\ttrue\t\t0\tfalse\tfalse\tlog\tnone\n")
+    with (monitoring_results/"sample_monitoring.tsv").open("a") as handle:
+        handle.write("QC_only\tomitted\tdea\tR_information\tfalse\t0\tnot_required\tlog\tnone\n")
     composition = pd.read_csv(transcript_biotypes, sep="\t")
     composition = pd.concat([composition, pd.DataFrame([
         {"name": "omitted", "group": "QC_only", "biotype": biotype, "num_reads": 0, "fraction": 0}
@@ -423,9 +468,9 @@ def test_qc_report_writes_html(tmp_path):
             "2",
             "--differential-results",
             str(differential_results),
-            "--stability-results",
-            str(stability_results),
-            "--stability-behavior",
+            "--monitoring-results",
+            str(monitoring_results),
+            "--monitoring-behavior",
             "log",
             "--transcript-biotypes",
             str(transcript_biotypes),
@@ -445,9 +490,9 @@ def test_qc_report_writes_html(tmp_path):
     assert ">iModulon Analysis</button>" not in html
     assert (
         html.find("Quality Control")
-        < html.find("Differential Analysis")
+        < html.find("Differential Expression")
         < html.find("Gene Set Enrichment")
-        < html.find("Temporal Analysis")
+        < html.find("Time Course")
     )
     assert "control/control_1" in html
     assert "time_point_1/treatment_1" in html
@@ -466,36 +511,35 @@ def test_qc_report_writes_html(tmp_path):
     assert "updatemenus" not in html
     assert "'type': 'sankey'" in html
     assert "Transcript biotype composition" in html
-    assert "Unknown denotes targets without one unambiguous annotation biotype." in html
     assert "Fractions are EM-estimated Oarfish abundance" not in html
     assert "Protein-coding" in html
     assert "Unknown" in html
     assert (
-        html.find(">Read flow<")
-        < html.find(">Transcript biotypes<")
-        < html.find(">Metrics<")
+        html.find(">Read Flow<")
+        < html.find(">Transcript Biotypes<")
+        < html.find(">Metrics Summary<")
     )
     assert "Read length vs Read quality" in html
-    assert "PCA of log2(CPM + 1)" in html
+    assert "PCA of log2(CPM + 1)" not in html
     assert "edgeR MDS of leading logFC" in html
     assert "edgeR biological coefficient of variation (BCV)" in html
     assert "logFC vs logCPM" in html
     assert "Volcano plot" in html
-    assert "Top differential genes" in html
-    assert "Result Stability" in html
-    assert "#Stable consec. batches" in html
-    assert "fry signed directional significance" in html
-    assert "Gene-set barcode and enrichment worm" in html
+    assert "differential genes:" in html
+    assert "DEA Termination" in html
+    assert "Consecutive confirmations" in html
+    assert "fry enrichment:" in html
+    assert "Gene-set barcode and enrichment:" in html
     assert "GSVA scores across samples" in html
     assert "Raw GSVA scores" in html
-    assert "GSVA limma volcano" in html
+    assert "GSVA limma:" in html
     assert "GSVA score difference" in html
     assert "GSVA limma across contrasts" in html
-    assert "Differential GSVA scores" in html
+    assert "Within contrast GSVA scores:" in html
     assert "GSVA score over time" in html
     assert "Gene expression over time" in html
     assert "Gene z-score" in html
-    assert "Heatmap colors are gene-wise z-scores." in html
+    assert "Row z-score" in html
     assert "Time (min)" in html
     assert "Carbon response" in html
     assert "Mixed response" in html
@@ -542,7 +586,7 @@ def test_qc_report_writes_html(tmp_path):
         monkeypatch.chdir(tmp_path)
         qc_report.main(differential_only_args)
     differential_only_html = differential_only_report.read_text()
-    assert ">Differential Analysis<" in differential_only_html
+    assert ">Differential Expression<" in differential_only_html
     assert ">Gene Set Enrichment<" not in differential_only_html
     assert ">Temporal Analysis<" not in differential_only_html
 
@@ -567,7 +611,7 @@ def test_qc_report_writes_html(tmp_path):
         qc_report.main(qc_only_args)
     qc_only_html = qc_only_report.read_text()
     assert ">Quality Control<" in qc_only_html
-    assert ">Differential Analysis<" not in qc_only_html
+    assert ">Differential Expression<" not in qc_only_html
     assert ">Gene Set Enrichment<" not in qc_only_html
     assert ">Temporal Analysis<" not in qc_only_html
     assert "Transcript biotype composition" not in qc_only_html
@@ -594,9 +638,9 @@ def test_qc_report_writes_html(tmp_path):
         qc_report.main(biotype_only_args)
     biotype_only_html = biotype_only_report.read_text()
     assert ">Quality Control<" in biotype_only_html
-    assert ">Differential Analysis<" not in biotype_only_html
+    assert ">Differential Expression<" not in biotype_only_html
     assert "Transcript biotype composition" in biotype_only_html
-    assert ">Transcript biotypes<" in biotype_only_html
+    assert ">Transcript Biotypes<" in biotype_only_html
 
 
 def test_gene_set_report_requires_differential_results():

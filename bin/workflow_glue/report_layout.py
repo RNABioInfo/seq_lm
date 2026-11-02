@@ -7,8 +7,7 @@ import re
 
 _BRAND_COLOR = "#004191"
 _REPORT_SUBHEADLINE = (
-    "Long-read RNA sequencing quality control, differential expression, "
-    "and gene set enrichment."
+    "ONT transcriptome sequencing quality control, and functional analysis."
 )
 # Keep the report portable and container-safe by embedding the supplied PNG.
 _BRAND_LOGO_DATA_URI = (

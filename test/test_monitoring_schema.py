@@ -6,7 +6,6 @@ from pathlib import Path
 import pytest
 from jsonschema import Draft7Validator
 
-
 SCHEMA = json.loads((Path(__file__).resolve().parents[1] / "nextflow_schema.json").read_text())
 VALIDATOR = Draft7Validator(SCHEMA)
 BASE = {
@@ -30,7 +29,7 @@ def test_ica_stopping_does_not_require_dea():
 
 @pytest.mark.parametrize("values", [
     {"stopping_method": "unknown"},
-    {"stopping_method": "dea"},
+    {"stopping_method": "r"},
     {"ica_analysis": False},
     {"ica_matrix": ""},
     {"ica_max_fold_change": 0.95},
@@ -57,3 +56,19 @@ def test_minknow_completion_options():
     for value in [0, -1, 1.5, "30", None, True]:
         assert list(VALIDATOR.iter_errors(BASE | {"minknow_completion_settle_seconds": value}))
     assert list(VALIDATOR.iter_errors(BASE | {"detect_minknow_completion": "true"}))
+
+
+def test_dea_parameter_names():
+    valid = BASE | {"stopping_method":"dea", "differential_expression":True,
+                    "dea_gain_cutoff":0.01, "dea_forecast_minutes":30}
+    VALIDATOR.validate(valid)
+
+
+def test_only_active_stopping_settings_are_validated():
+    dea = BASE | {"stopping_method":"dea","differential_expression":True}
+    VALIDATOR.validate(dea | {"ica_max_fold_change":"unused", "ica_min_read_growth_fraction":None, "num_stable_batches":False})
+    VALIDATOR.validate(BASE | {"dea_gain_cutoff":"unused", "dea_forecast_minutes":None})
+    VALIDATOR.validate(BASE | {"monitoring_behavior":"disabled", "dea_gain_cutoff":"unused", "dea_forecast_minutes":None, "ica_max_fold_change":False, "num_stable_batches":0})
+    assert list(VALIDATOR.iter_errors(dea | {"dea_gain_cutoff":1}))
+    assert list(VALIDATOR.iter_errors(dea | {"dea_forecast_minutes":0}))
+    assert list(VALIDATOR.iter_errors(dea | {"dea_min_points":5}))

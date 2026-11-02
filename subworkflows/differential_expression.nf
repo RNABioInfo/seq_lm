@@ -33,6 +33,7 @@ workflow differential_expression {
             analysis_index: next_analysis_index,
             report_sequence: quant_batch.report_sequence,
             samples: quant_batch.samples,
+            observation: quant_batch.observation,
         )
         next_analysis_index += 1
         return differential_batch
@@ -42,7 +43,9 @@ workflow differential_expression {
         differential_batches_ch,
         min_read_count,
         min_replicate_sample_count,
+        contrasts,
     )
+
     readiness_status_ch = checked_quantified_sample_batches_ch.map { checked ->
         def readiness_text: String = checked.readiness.text.trim().toLowerCase()
         def readiness_notices: Map<String, String> = [
@@ -57,6 +60,7 @@ workflow differential_expression {
         }
         tuple(checked.batch_index, readiness_text == 'ready', readiness_notices[readiness_text] ?: '')
     }
+
     readiness_decisions_ch = differential_batches_ch
         .map { quant_batch -> tuple(quant_batch.batch_index, quant_batch) }
         .join(readiness_status_ch, by: 0)
@@ -67,6 +71,7 @@ workflow differential_expression {
                 differential_analysis_note: differential_analysis_note,
             )
         }
+
     ready_quantified_sample_batches_ch = readiness_decisions_ch
         .filter { decision -> decision.differential_analysis_ready }
         .map { decision -> decision.quant_batch }
@@ -88,13 +93,24 @@ workflow differential_expression {
         gene_sets,
         annotation,
         de_lfc_cutoff,
+        min_read_count,
+        min_replicate_sample_count,
     )
+
+    fitted_results_ch = edgeR_results_ch.filter { result -> !result.results.resolve('analysis_deferred.txt').exists() }
+    model_deferred_reports_ch = edgeR_results_ch
+        .filter { result -> result.results.resolve('analysis_deferred.txt').exists() }
+        .map { result -> record(batch_index: result.batch_index, report_sequence: result.report_sequence,
+            differential_analysis_note: 'For DEA, no contrast currently has sufficient read depth and retained features.',
+            has_differential_results: false, results: result.results) }
+
     if (gene_set_enrichment) {
-        analysis_results_ch = run_gene_set_variation_analysis(edgeR_results_ch)
+        analysis_results_ch = run_gene_set_variation_analysis(fitted_results_ch)
     }
     else {
-        analysis_results_ch = edgeR_results_ch
+        analysis_results_ch = fitted_results_ch
     }
+
     completed_report_batches_ch = analysis_results_ch.map { result ->
         record(
             batch_index: result.batch_index,
@@ -107,7 +123,14 @@ workflow differential_expression {
 
     emit:
     results = analysis_results_ch
-    report_batches = completed_report_batches_ch.mix(deferred_report_batches_ch)
+    precision_results = edgeR_results_ch.mix(
+        readiness_decisions_ch.filter { decision -> !decision.differential_analysis_ready }
+            .map { decision -> record(batch_index: decision.quant_batch.batch_index,
+                analysis_index: decision.quant_batch.analysis_index,
+                report_sequence: decision.quant_batch.report_sequence, observation: decision.quant_batch.observation, results: optional_file()) }
+    )
+    report_batches = completed_report_batches_ch.mix(deferred_report_batches_ch).mix(model_deferred_reports_ch)
+
 }
 
 /** Check read depth and shared feature IDs before launching edgeR. */
@@ -120,6 +143,7 @@ process check_differential_analysis_readiness {
     quant_batch: DifferentialExpressionBatch
     min_read_count: Integer
     min_replicate_sample_count: Integer
+    contrasts: List<GeneContrast>
 
     stage:
     stageAs quant_batch.samples*.counts, 'quant/input?.quant'
@@ -138,13 +162,17 @@ process check_differential_analysis_readiness {
         }
         .join('\n')
     def quoted_manifest_rows: String = shell_quote(manifest_rows)
-    """
+    def contrast_rows: String = gene_contrast_tsv(contrasts)
+    
+        """
         printf 'name\\tgroup\\tcount_file\\n' > quant_manifest.tsv
         printf '%s\\n' ${quoted_manifest_rows} >> quant_manifest.tsv
 
-        stability_read_count \
+        printf '%s' ${shell_quote(contrast_rows)} > contrasts.tsv
+        check-de-readiness \
             --min_read_count ${min_read_count} \
             --min_replicate_sample_count ${min_replicate_sample_count} \
+            --contrasts contrasts.tsv \
             --metadata quant_manifest.tsv \
             --counts_dir quant \
             > differential_analysis_ready.txt
@@ -156,7 +184,6 @@ process run_differential_expression_edgeR {
     label 'seq_lm_dea'
     container 'rnabioinfo/seq_lm_dea_r:v1.0.0'
     cpus 1
-    maxForks 1
 
     input:
     quant_batch: DifferentialExpressionBatch
@@ -164,6 +191,8 @@ process run_differential_expression_edgeR {
     gene_sets: Path
     annotation: Path
     de_lfc_cutoff: Number
+    min_read_count: Integer
+    min_replicate_sample_count: Integer
 
     stage:
     stageAs quant_batch.samples*.counts, 'quant/input?.quant'
@@ -174,6 +203,7 @@ process run_differential_expression_edgeR {
         analysis_index: quant_batch.analysis_index,
         report_sequence: quant_batch.report_sequence,
         results: file(differential_expression_results_dir(quant_batch.analysis_index)),
+        observation: quant_batch.observation,
     )
 
     script:
@@ -200,6 +230,8 @@ process run_differential_expression_edgeR {
             --output_dir ${results_dir} \
             ${gene_set_args} \
             --annotation ${annotation} \
+            --min_read_count ${min_read_count} \
+            --min_replicate_sample_count ${min_replicate_sample_count} \
             --lfc ${de_lfc_cutoff}
         """
 }
@@ -223,6 +255,7 @@ process run_gene_set_variation_analysis {
         analysis_index: differential_result.analysis_index,
         report_sequence: differential_result.report_sequence,
         results: file(differential_expression_results_dir(differential_result.analysis_index)),
+        observation: differential_result.observation,
     )
 
     script:

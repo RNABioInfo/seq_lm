@@ -563,8 +563,7 @@ def _create_barcode_plot(
     gene_set: str,
     state: dict,
 ) -> BokehPlot:
-    """Create one limma-style barcode/worm plot for a selected gene set."""
-    row = analysis.fry_results.set_index("gene_set").loc[gene_set]
+    """Create one limma-style barcode plot for a selected gene set."""
     details = Div(text=state["summary"], sizing_mode="stretch_width")
     bar_source = ColumnDataSource(state["bars"])
     worm_source = ColumnDataSource(state["worm"])
@@ -573,8 +572,8 @@ def _create_barcode_plot(
     y_range = Range1d(0, state["y_end"])
     plot = BokehPlot(
         title=(
-            "Gene-set barcode and enrichment worm — "
-            f"{row['display_label']} — {analysis.label}"
+            "Gene-set barcode and enrichment: "
+            f"{analysis.label}"
         ),
         x_axis_label=(
             f"{analysis.contrast.reference_group} (negative logFC) \u2190 "

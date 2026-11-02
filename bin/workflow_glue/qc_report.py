@@ -12,9 +12,10 @@ from ezcharts.layout.snippets.table import DataTable
 from .qc_report_types.base_metrics import create_nanoplot_metrics_table
 from .qc_report_types.biotype_plot import add_transcript_biotype_composition
 from .qc_report_types.differential_plots import (
+    add_dea_monitoring,
     add_differential_analysis,
+    load_dea_monitoring,
     load_differential_results,
-    load_stability_results,
 )
 from .qc_report_types.gene_set_plots import (
     add_gene_set_enrichment,
@@ -356,7 +357,7 @@ def main(args):
     logger = get_named_logger("SeqLMReport")
     samples = load_qc_samples(args.samples)
     differential = None
-    stability_results = None
+    monitoring_results = None
     fry_results = None
     gsva_results = None
     temporal_results = None
@@ -368,10 +369,10 @@ def main(args):
             args.differential_results,
             samples.samples_df,
         )
-        stability_results = load_stability_results(
-            args.stability_results if args.stopping_method == "dea" else None,
+        monitoring_results = load_dea_monitoring(
+            args.monitoring_results if args.stopping_method == "dea" else None,
             differential.sample_metadata,
-            args.stability_behavior,
+            args.monitoring_behavior,
             samples.samples_df,
         )
         if args.gene_set_enrichment:
@@ -398,9 +399,9 @@ def main(args):
             args.imodulon_analysis_index,
             samples.samples_df,
         )
-        if args.stopping_method == "ica" and args.stability_results is not None:
+        if args.stopping_method == "ica" and args.monitoring_results is not None:
             ica_monitoring_results = load_ica_monitoring_results(
-                args.stability_results, imodulon_results, args.stability_behavior, samples.samples_df,
+                args.monitoring_results, imodulon_results, args.monitoring_behavior, samples.samples_df,
             )
 
     report = labs_report(
@@ -464,7 +465,7 @@ def main(args):
                     differential,
                     args.lfc_cutoff,
                     args.padj_cutoff,
-                    stability_results,
+                    monitoring_results,
                 )
 
             if args.gene_set_enrichment and gsva_results and fry_results:
@@ -495,6 +496,9 @@ def main(args):
                             differential.condition_colors,
                         )
 
+        if differential is None and args.stopping_method == "dea" and args.monitoring_results is not None:
+            with primary_tabs.add_tab("DEA Termination"):
+                add_dea_monitoring(load_dea_monitoring(args.monitoring_results, None, args.monitoring_behavior, samples.samples_df))
         if imodulon_results is not None:
             with primary_tabs.add_tab("Independent Components"):
                 add_imodulon_analysis(
@@ -559,11 +563,11 @@ def argparser():
         ),
     )
     parser.add_argument(
-        "--stability-results",
+        "--monitoring-results",
         help="Per-sample stability audit TSV for the represented DEA or ICA snapshot.",
     )
     parser.add_argument(
-        "--stability-behavior",
+        "--monitoring-behavior",
         choices=("disabled", "log", "terminate"),
         default="disabled",
         help="Configured stability behavior [default: %(default)s].",

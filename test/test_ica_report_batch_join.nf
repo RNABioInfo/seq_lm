@@ -6,8 +6,8 @@ include { join_ica_report_batches } from '../modules/ica_report_batches.nf'
 
 workflow {
     reports = channel.of(
-        [batch_index: 4, report_sequence: 1, biotypes: file('b4.tsv'), differential_analysis_note: '', has_differential_results: false, results: file('OPTIONAL_FILE'), stability_results: file('OPTIONAL_FILE'), has_stability_results: false],
-        [batch_index: 2, report_sequence: 0, biotypes: file('b2.tsv'), differential_analysis_note: '', has_differential_results: false, results: file('OPTIONAL_FILE'), stability_results: file('OPTIONAL_FILE'), has_stability_results: false],
+        [batch_index: 4, report_sequence: 1, biotypes: file('b4.tsv'), differential_analysis_note: '', has_differential_results: false, results: file('OPTIONAL_FILE'), monitoring_results: file('OPTIONAL_FILE'), has_monitoring_results: false],
+        [batch_index: 2, report_sequence: 0, biotypes: file('b2.tsv'), differential_analysis_note: '', has_differential_results: false, results: file('OPTIONAL_FILE'), monitoring_results: file('OPTIONAL_FILE'), has_monitoring_results: false],
     )
     snapshots = channel.of(
         [batch_index: 2, report_sequence: 0, analysis_index: 10, results: file('ica_10')],

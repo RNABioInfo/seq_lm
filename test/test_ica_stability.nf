@@ -3,7 +3,7 @@ nextflow.enable.types = true
 
 include { Sample } from '../lib/sample.nf'
 include { assess_ica_monitoring ; new_ica_monitoring_state ; ica_monitoring } from '../lib/ica_stability.nf'
-include { read_stability_tsv } from '../lib/stability.nf'
+include { read_monitoring_tsv } from '../lib/acquisition_actions.nf'
 
 def snapshot(root: Path, index: Integer, depth: Number, values: Map, scales: Map, extra: Map = [:]) -> Path {
     def path: Path = root.resolve("snapshot_${index}_${System.nanoTime()}")
@@ -121,11 +121,11 @@ workflow {
     ica_audits.collect().view { audits ->
         audits = audits.toSorted { left, right -> left.analysis_index <=> right.analysis_index }
         assert audits.size() == 4
-        assert read_stability_tsv(audits[2].sample_stability).find { row: Map -> row.group == 'treated' }.action_result == 'none'
-        assert read_stability_tsv(audits[3].sample_stability).every { row: Map -> row.action_result == 'stop_created' }
+        assert read_monitoring_tsv(audits[2].sample_stability).find { row: Map -> row.group == 'treated' }.action_result == 'none'
+        assert read_monitoring_tsv(audits[3].sample_stability).every { row: Map -> row.action_result == 'stop_created' }
         assert java.nio.file.Files.readAllLines(calls).size() == 1
         assert samples.every { sample -> java.nio.file.Files.isRegularFile(sample.bam_dir.resolve('STOP')) }
-        assert read_stability_tsv(audits[3].component_stability).size() == 6
+        assert read_monitoring_tsv(audits[3].component_stability).size() == 6
         'Verified ICA metric, all-component gating, history safeguards, and shared-run termination'
     }
 }

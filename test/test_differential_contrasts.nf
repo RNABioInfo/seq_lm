@@ -5,6 +5,10 @@ include { Sample ; QuantifiedSampleBatch ; GeneContrast } from '../lib/sample.nf
 include { resolve_gene_contrasts ; gene_contrast_groups ; select_analysis_batch } from '../lib/gene_contrasts.nf'
 include { differential_expression } from '../subworkflows/differential_expression.nf'
 
+params {
+    test_gsva: Boolean = true
+}
+
 workflow {
     def root: Path = java.nio.file.Files.createTempDirectory('seq-lm-explicit-de-')
     def annotation: Path = root.resolve('annotation.gtf')
@@ -43,7 +47,7 @@ workflow {
     def batch: QuantifiedSampleBatch = record(batch_index: 0, report_sequence: 0, samples: quantified)
     def selected: QuantifiedSampleBatch = select_analysis_batch(batch, gene_contrast_groups(contrasts))
     assert selected.samples.size() == 6
-    outputs = differential_expression(channel.of(selected), contrasts, 0, annotation, gene_sets, true, 1.0, 100, 2)
+    outputs = differential_expression(channel.of(selected), contrasts, 0, annotation, gene_sets, params.test_gsva, 1.0, 100, 2)
     outputs.results.view { result ->
         assert result.batch_index == 0 && result.report_sequence == 0
         def definition: String = result.results.resolve('contrasts.tsv').text
@@ -53,7 +57,8 @@ workflow {
         [1, 2].each { index: Integer ->
             assert result.results.resolve("contrast_${index}/edgeR_results.tsv").exists()
             assert result.results.resolve("contrast_${index}/fry_results.tsv").exists()
-            assert result.results.resolve("contrast_${index}/gsva_limma_results.tsv").exists()
+            assert result.results.resolve("contrast_${index}/precision.tsv").exists()
+            if (params.test_gsva) assert result.results.resolve("contrast_${index}/gsva_limma_results.tsv").exists()
         }
         def forward: Map = result.results
             .resolve('contrast_1/edgeR_results.tsv')
@@ -67,12 +72,14 @@ workflow {
         forward.each { feature: String, value: Double ->
             assert Math.abs(value + (reverse[feature] as Double)) < 1e-8
         }
-        def scores: Map = result.results
-            .resolve('contrast_1/gsva_limma_results.tsv')
-            .splitCsv(header: true, sep: '\t')
-            .collectEntries { row -> [(row.gene_set): row.effect_size.toDouble()] }
-        assert scores.UP > 0 && scores.DOWN < 0
-        return "Explicit DEA/fry/GSVA contrasts passed without control; low-depth QC-only group excluded: ${result.results}"
+        if (params.test_gsva) {
+            def scores: Map = result.results
+                .resolve('contrast_1/gsva_limma_results.tsv')
+                .splitCsv(header: true, sep: '\t')
+                .collectEntries { row -> [(row.gene_set): row.effect_size.toDouble()] }
+            assert scores.UP > 0 && scores.DOWN < 0
+        }
+        return "Explicit DEA/fry/precision contrasts passed (GSVA=${params.test_gsva}); low-depth QC-only group excluded: ${result.results}"
     }
     outputs.report_batches.view { report ->
         assert report.has_differential_results

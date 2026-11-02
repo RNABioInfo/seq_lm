@@ -13,8 +13,8 @@ workflow {
     def reports: List<Map> = [0, 1].collect { index: Integer ->
         [batch_index: index + 2, report_sequence: index, biotypes: file('biotypes.tsv'),
          differential_analysis_note: '', has_differential_results: false,
-         results: file('OPTIONAL_FILE'), stability_results: file('OPTIONAL_FILE'),
-         has_stability_results: false, ica_results: file('ica'), has_ica_results: true,
+         results: file('OPTIONAL_FILE'), monitoring_results: file('OPTIONAL_FILE'),
+         has_monitoring_results: false, ica_results: file('ica'), has_ica_results: true,
          ica_analysis_index: index + 10]
     }
     def snapshots: List<Map> = [0, 1].collect { index: Integer ->

@@ -122,5 +122,7 @@ workflow {
     java.nio.file.Files.createDirectories(output_root.resolve('differential_expression/batch_2'))
     java.nio.file.Files.createDirectories(output_root.resolve('differential_expression/batch_5'))
     assert next_analysis_snapshot_index(output_root) == 6
+    java.nio.file.Files.createDirectories(output_root.resolve('termination/dea/batch_9'))
+    assert next_analysis_snapshot_index(output_root) == 10
     channel.of('sample checkpoint helpers passed').view()
 }

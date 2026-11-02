@@ -57,21 +57,19 @@ def sha256_file(path: Path) -> String {
 }
 
 def next_analysis_snapshot_index(output_root: Path) -> Integer {
-    def differential_root: Path = output_root.resolve('differential_expression')
-    if (!java.nio.file.Files.isDirectory(differential_root)) {
-        return 0
-    }
     def indices: List<Integer> = []
-    java.nio.file.Files
-        .newDirectoryStream(differential_root)
-        .withCloseable { entries ->
-            entries.each { entry: Path ->
-                def matcher = entry.fileName.toString() =~ /^batch_(\d+)$/
-                if (matcher.matches() && java.nio.file.Files.isDirectory(entry)) {
-                    indices.add(matcher.group(1).toInteger())
+    [output_root.resolve('differential_expression'), output_root.resolve('termination/dea')].each { root: Path ->
+        if (java.nio.file.Files.isDirectory(root)) {
+            java.nio.file.Files.newDirectoryStream(root).withCloseable { entries ->
+                entries.each { entry: Path ->
+                    def matcher = entry.fileName.toString() =~ /^batch_(\d+)$/
+                    if (matcher.matches() && java.nio.file.Files.isDirectory(entry)) {
+                        indices.add(matcher.group(1).toInteger())
+                    }
                 }
             }
         }
+    }
 
     return indices.empty ? 0 : indices.max() + 1
 }
@@ -106,6 +104,7 @@ def discover_sample_checkpoints(samples: List<Sample>, output_root: Path, genome
         }
 
         validate_checkpoint_manifest(manifest, sample, sample_dir, genome, annotation, strand_specificity)
+
         def qc_results: List<ChunkQCResult> = (manifest.qc as List).collect { qc: Map ->
             def nanoplot: Path = sample_dir.resolve(qc.nanoplot as String).normalize()
             def flagstat: Path = sample_dir.resolve(qc.flagstat as String).normalize()
@@ -117,6 +116,7 @@ def discover_sample_checkpoints(samples: List<Sample>, output_root: Path, genome
                 flagstat: file(flagstat),
             )
         }
+
         def counts: Path = sample_dir.resolve(manifest.quantification.path as String).normalize()
         restored.add(
             [sample: sample, quantification: record(batch_index: 0, sample: sample, counts: file(counts)), qc_results: qc_results]
@@ -210,7 +210,7 @@ def checkpoint_static_manifest(sample, reference_identity: Map, strand_specifici
 }
 
 /**
- * Materialize one durable, self-validating sample result bundle. The FINAL
+ * Validate and write sample bundle checkpoints. The FINAL
  * manifest is created only after every artifact has been copied and hashed.
  */
 process write_sample_checkpoints {
@@ -246,18 +246,22 @@ process write_sample_checkpoints {
         .collect { quantified_sample, index ->
             [value: quantified_sample, input_index: index + 1]
         }
+
     def indexed_qc_results: List = qc_results
         .toList()
         .withIndex()
         .collect { qc_result, index ->
             [value: qc_result, input_index: index + 1]
         }
+
     def quantifications_by_sample: Map<String,List> = indexed_quantifications.groupBy { indexed_quantification ->
         sample_checkpoint_key(indexed_quantification.value.sample)
     }
+
     def qc_by_sample: Map<String,List> = indexed_qc_results.groupBy { indexed_qc_result ->
         sample_checkpoint_key(indexed_qc_result.value.sample)
     }
+
     def commands: List<String> = []
     quantifications_by_sample.each { key: String, sample_quantifications: List ->
         def final_quantification = sample_quantifications.max { indexed_result ->
@@ -274,6 +278,7 @@ process write_sample_checkpoints {
         def sorted_qc: List = sample_qc.toSorted { left, right ->
             left.value.batch_index <=> right.value.batch_index
         }
+
         def qc_manifest: List = sorted_qc.collect { indexed_qc ->
             def qc = indexed_qc.value
             def qc_index: Integer = indexed_qc.input_index
@@ -287,30 +292,37 @@ process write_sample_checkpoints {
             )
             [batch_index: qc.batch_index, nanoplot: nanoplot_path, flagstat: flagstat_path]
         }
+
         def manifest: Map = checkpoint_static_manifest(sample, reference_identity, strand_specificity)
         def quantification_sha256_placeholder: String = '__SEQ_LM_QUANTIFICATION_SHA256__'
+
         manifest.quantification = [
             path: 'quantification/final.quant',
             sha256: quantification_sha256_placeholder,
         ]
+
         manifest.qc = qc_manifest.withIndex().collect { qc, index ->
             qc + [
                 nanoplot_sha256: "__SEQ_LM_NANOPLOT_SHA256_${index}__",
                 flagstat_sha256: "__SEQ_LM_FLAGSTAT_SHA256_${index}__",
             ]
         }
+
         def manifest_json: String = groovy.json.JsonOutput.prettyPrint(
             groovy.json.JsonOutput.toJson(manifest)
         )
+
         def quoted_manifest: String = "'" + manifest_json.replace("'", "'\"'\"'") + "'"
         commands.add(
             "cp checkpoint_inputs/quant/input${quant_index}.quant ${sample_dir}/quantification/final.quant"
         )
+        
         commands.add("printf '%s\\n' ${quoted_manifest} > ${sample_dir}/manifest.in.json")
         commands.add(
             "sha256sum ${sample_dir}/quantification/final.quant | " +
                 "{ read -r checksum _; sed -i.bak 's/${quantification_sha256_placeholder}/'\"\${checksum}\"'/' ${sample_dir}/manifest.in.json; rm ${sample_dir}/manifest.in.json.bak; }"
         )
+
         sorted_qc.withIndex().each { indexed_qc, index ->
             def qc = indexed_qc.value
             def nanoplot_path: String = "${sample_dir}/qc/nanoplot/chunk_${qc.batch_index}.tsv.gz"
@@ -324,6 +336,7 @@ process write_sample_checkpoints {
                     "{ read -r checksum _; sed -i.bak 's/__SEQ_LM_FLAGSTAT_SHA256_${index}__/'\"\${checksum}\"'/' ${sample_dir}/manifest.in.json; rm ${sample_dir}/manifest.in.json.bak; }"
             )
         }
+        
         commands.add("mv ${sample_dir}/manifest.in.json ${sample_dir}/FINAL")
     }
     """

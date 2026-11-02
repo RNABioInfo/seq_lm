@@ -187,11 +187,13 @@ Keep the terminal open. In **Workflows → Import workflow**, enter
 `https://github.com/rnabioinfo/seq_lm`, then select **Run this workflow** and fill
 in the inputs. Repeat the launch command after restarting EPI2ME.
 
-## Stability monitoring and MinKNOW termination
+## Sequencing termination
 
 Set `monitoring_behavior = "log"` to record stop eligibility, or `"terminate"`
 to stop eligible acquisitions. Select `stopping_method = "dea"` (the default)
-for differential-expression stability, or `"ica"` for iModulon convergence.
+for the curve-based R precision forecast (30-minute default), or `"ica"` for iModulon convergence.
+DEA stopping uses the fitted uncertainty-versus-depth curve plus a margin learned
+from completed curve forecasts. See [DEA termination](docs/dea_termination.md).
 ICA monitoring requires enabled ICA analysis and its model, and checks every
 component for every required sample. Termination also requires live analysis and
 MinKNOW credentials. See [ICA monitoring](docs/imodulon_analysis.md#sequencing-termination)
@@ -216,8 +218,8 @@ minknow_ca_certificate = "/path/to/minknow_cert.crt"
 
 Each BAM directory's parent must contain one matching MinKNOW `*sample_sheet*.csv`.
 The workflow creates `STOP` only after MinKNOW confirms termination. See the
-[monitoring guide](docs/differential_expression.md#differential-expression-stability)
-for sample matching, stability criteria, and connection setup.
+[DEA monitoring guide](docs/dea_termination.md)
+for uncertainty calculation, interruption guards, outputs, and container requirements.
 
 ## Analysis and live-run parameters
 
@@ -272,20 +274,23 @@ Values belong in the config's `params` block. Defaults are from `nextflow.config
 | `ica_min_read_count` | `10000` | Minimum assigned abundance in every sample for ICA readiness. |
 | `ica_padj_cutoff` | `0.05` | Maximum BH-adjusted p-value for component activity tests. |
 
-**Stability monitoring**
+**Termination monitoring**
 
 | Parameter | Default | Description |
 | --- | --- | --- |
-| `monitoring_behavior` | `"disabled"` | Stability action: disabled, log, or terminate. |
-| `stopping_method` | `"dea"` | Analysis controlling stopping: dea or ica. |
+| `monitoring_behavior` | `"disabled"` | Monitoring action: disabled, log, or terminate. |
+| `stopping_method` | `"dea"` | Curve-based R precision forecast or ICA convergence: dea or ica. |
+| `dea_gain_cutoff` | `0.01` | Maximum predicted reduction in aggregate R over the configured horizon; 0.01 means 1%. |
+| `dea_information_radius_scale` | `1.0` | Declared aggregation scale in log2FC units. |
+| `dea_forecast_minutes` | `30` | Forecast horizon; observation gaps must be no longer than this for automatic stopping. |
+| `dea_max_processing_lag_seconds` | `600` | Maximum processing lag, independent of file-output interval. |
+| `dea_min_points` / `dea_min_seconds` | `6` / `3600` | Minimum informative observations and elapsed time. |
+| `dea_confirmations` | `3` | Consecutive qualifying checkpoints with fresh reads. |
+| `dea_interruption_fraction` / `dea_recovery_fraction` | `0.25` / `0.5` | Drop and recovery fractions relative to healthy production. |
+| `dea_recovery_intervals` | `2` | Consecutive productive arrival intervals, also spanning at least one third of the horizon. |
 | `ica_max_fold_change` | `1.05` | Largest allowed component-wise reconstructed expression change across the ICA checkpoint window. |
 | `ica_min_read_growth_fraction` | `0.1` | Minimum assigned-abundance increase for a new ICA checkpoint; 0.1 means 10%. |
-| `num_stable_batches` | `3` | DEA: consecutive stable comparisons. ICA: informative updates in the window, requiring four checkpoints at the default. |
-| `stability_max_feature_diff_fraction` | `0.05` | Maximum fraction of filtered features added or removed. |
-| `stability_max_median_abs_lfc_delta` | `0.05` | Maximum median absolute change in log₂ fold change. |
-| `stability_min_jaccard_similarity` | `0.95` | Minimum overlap of sufficiently large DE-call sets. |
-| `stability_min_de_calls_for_fraction_metrics` | `20` | DE-call union size at which fractional metrics apply. |
-| `stability_max_small_set_call_changes` | `2` | Maximum DE-call changes for smaller call sets. |
+| `num_stable_batches` | `3` | ICA only: informative stable updates in its convergence window. |
 
 **MinKNOW connection**
 

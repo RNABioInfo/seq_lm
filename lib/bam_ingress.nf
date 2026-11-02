@@ -12,9 +12,12 @@ record BamIngressArgs {
     termination_requested: Boolean
     detect_minknow_completion: Boolean?
     minknow_completion_settle_seconds: Integer?
+    dea_event_mode: Boolean?
+    dea_state_directory: String?
 }
 
 record LiveSampleEvent {
+    accepted_at: Number?
     batch_index: Integer
     sample_index: Integer
     sample: Sample
@@ -23,6 +26,8 @@ record LiveSampleEvent {
 }
 
 record LivePathEvent {
+    accepted_at: Number?
+    bam_paths: List<Path>?
     source: String
     path: Path
 }
@@ -369,6 +374,9 @@ def sample_label(sample) -> String {
 }
 
 def mixed_analysis_ingress(samples: List<Sample>, ingress_args, experiment_sample_count: Integer) {
+    if (ingress_args.live_analysis && ingress_args.get('dea_event_mode')) {
+        return event_driven_dea_ingress(samples, ingress_args, experiment_sample_count)
+    }
     def live_samples: List<Sample> = samples.findAll { sample ->
         ingress_args.live_analysis && sample.is_live
     }
@@ -487,6 +495,125 @@ def mixed_analysis_ingress(samples: List<Sample>, ingress_args, experiment_sampl
     return channel.of(startup_batch).concat(live_batches_ch)
 }
 
+/** Monotonic frontier used to cancel stop actions on superseded inputs. */
+def capture_dea_input(observations: Map, batch_index: Integer, observation: Map) -> Void {
+    if (observations._started_at != null && observations._started_at != observation.started_at) {
+        error('R input observation origin changed.')
+    } 
+
+    observations[batch_index] = observation
+    observations._started_at = observation.started_at
+
+    if (observations._latest == null) observations._latest = [:]
+
+    observation.samples.each { key, value ->
+        def previous = observations._latest[key]
+        if (previous == null || value.version > previous.version) observations._latest[key] = value
+    }
+
+    observations._closed = ((observations._closed ?: []) + (observation.closed_samples ?: [])).unique()
+    return null
+}
+
+def persist_arrival_clock(clock: Path, started: Number, versions: Map) -> Void {
+    def temporary: Path = java.nio.file.Files.createTempFile(clock.parent, '.clock-', '.json')
+    java.nio.file.Files.writeString(temporary,new groovy.json.JsonBuilder([schema_version:2, started_at:started, next_versions:versions]).toString())
+    java.nio.file.Files.move(temporary,clock,java.nio.file.StandardCopyOption.ATOMIC_MOVE,java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+    return null
+}
+
+/** R mode reuses the established file trigger, with no analysis timer or sample barrier. */
+def event_driven_dea_ingress(samples: List<Sample>, args, experiment_count: Integer) {
+    def root: Path = Path.of(args.dea_state_directory as String)
+    java.nio.file.Files.createDirectories(root)
+
+    def clock: Path = root.resolve('clock.json')
+    def saved: Map = clock.exists() ? new groovy.json.JsonSlurper().parse(clock.toFile()) as Map : [:]
+
+    if (saved && saved.schema_version != 2) error('Timed R clock is incompatible with BAM-triggered monitoring; use a fresh output directory.')
+    if (saved && (!(saved.started_at instanceof Number) || !Double.isFinite((saved.started_at as Number).doubleValue()) || !(saved.next_versions instanceof Map))) error('Malformed BAM-triggered R clock; use a fresh output directory.')
+    
+    def started: Number = saved ? saved.started_at : System.currentTimeMillis()/1000.0
+    def temporary: Path = java.nio.file.Files.createTempFile(root, '.clock-', '.json')
+    
+    java.nio.file.Files.writeString(temporary, new groovy.json.JsonBuilder([schema_version:2, started_at:started,next_versions:saved.next_versions ?: [:]]).toString())
+    java.nio.file.Files.move(temporary,clock,java.nio.file.StandardCopyOption.ATOMIC_MOVE,java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+    
+    def versions: Map = saved.next_versions ?: [:]
+    def latest: Map = [:]
+    def closed: Set<String> = [] as Set<String>
+    def startup: List = []
+    def batch_index: Integer = 0
+
+    samples.each { sample ->
+        def key: String = sample_key(sample)
+        def paths: List<Path> = get_bam_files_in_dir(sample.bam_dir)
+        if (!versions.containsKey(key)) versions[key] = 0
+        if (!sample.is_live && paths.empty) error("Final sample '${sample_label(sample)}' must contain at least one BAM at startup.")
+        if (!sample.is_live || !get_stop_files_in_dir(sample.bam_dir).empty) closed.add(key)
+        
+        if (!paths.empty && (!sample.is_live || closed.contains(key))) {
+            def now: Number = System.currentTimeMillis()/1000.0
+            latest[key] = [version:versions[key], first_version:versions[key], available_at:now, baseline:true]
+            versions[key] += 1
+            startup.add(record(batch_index:batch_index,chunks:[make_sample_chunk(sample,paths)],experiment_sample_count:experiment_count,
+                observation:[started_at:started,observed_at:now,samples:[:]+latest,closed_samples:closed.toList(),terminal:false]))
+            batch_index += 1
+        }
+    }
+
+    persist_arrival_clock(clock, started, versions)
+    def first_versions: Map = samples.collectEntries { sample ->
+        def key: String = sample_key(sample)
+        [(key): latest.containsKey(key) ? latest[key].first_version : versions[key]]
+    }
+
+    def events = channel.empty()
+    samples.findAll { sample -> sample.is_live && !closed.contains(sample_key(sample)) }.each { sample ->
+        events = events.mix(make_live_analysis_ingress_channel(sample,samples.indexOf(sample),[],samples.size(),
+            args.bam_poll_interval_ms,args.bam_stability_polls,
+            [enabled: args.get('detect_minknow_completion') != false, group_ready:true, run_dir:sample.minknow_run_dir,
+             protocol_run_id:sample.protocol_run_id,settle_seconds:args.get('minknow_completion_settle_seconds') ?: 30]))
+    }
+
+    def updates = events.flatMap { event ->
+        def key: String = sample_key(event.sample)
+        def now: Number = event.accepted_at ?: System.currentTimeMillis() / 1000.0
+
+        if (event.is_stop) {
+            closed.add(key)
+            // One terminal notification drains results; it is not a fitted observation.
+            def index: Integer = batch_index
+            batch_index += 1
+            return [record(batch_index:index, chunks:[],experiment_sample_count:experiment_count,
+                observation:[started_at:started,observed_at:now,samples:[:]+latest,closed_samples:closed.toList(),terminal:true])]
+        }
+
+        latest[key] = [version:versions[key],first_version:first_versions[key],available_at:now,baseline:versions[key] == first_versions[key]]
+        versions[key] += 1
+
+        persist_arrival_clock(clock, started, versions)
+        def index: Integer = batch_index
+        batch_index += 1
+
+        return [
+            record(
+                batch_index: index,
+                chunks: [event.chunk],
+                experiment_sample_count: experiment_count,
+                observation: [
+                    started_at: started,
+                    observed_at: now,
+                    samples: [:]+latest,
+                    closed_samples: closed.toList(),
+                    terminal: false]
+            )
+        ]
+    }
+
+    return channel.fromList(startup).concat(updates)
+}
+
 def make_live_analysis_ingress_channel(
     sample,
     sample_index: Integer,
@@ -532,25 +659,33 @@ def make_live_analysis_ingress_channel(
                 error,
             )
         }
-        .map { event -> make_live_path_event(event.source as String, event.path as Path) }
+        .map { event -> record(
+            source:event.source as String,path:event.path as Path,
+            bam_paths:event.paths ?: [event.path],
+            accepted_at:event.accepted_at) 
+        }
         .flatMap { event ->
             if (is_stop_path(event.path) || event.source == 'minknow-final-summary') {
                 log_sample_stop(sample, event.path, event.source, batch_index, live_sample_count)
                 return [make_live_stop_event(batch_index, sample_index, sample)]
             }
+
             if (event.source != "poll") {
                 log.info(
                     "Ignoring non-poll live BAM path event for sample '${sample_label(sample)}': " + "source=${event.source}, path=${event.path}."
                 )
                 return []
             }
+
             if (!is_bam_path(event.path)) {
                 log.info(
                     "Ignoring non-BAM live path event for sample '${sample_label(sample)}': " + "source=${event.source}, path=${event.path}."
                 )
                 return []
             }
-            if (!accepted_bam_paths.add(path_key(event.path))) {
+            
+            def fresh_paths: List<Path> = event.bam_paths.findAll { path -> accepted_bam_paths.add(path_key(path)) }
+            if (fresh_paths.empty) {
                 log.info(
                     "Ignoring duplicate live BAM path event for sample '${sample_label(sample)}': " + "source=${event.source}, path=${event.path}."
                 )
@@ -564,7 +699,8 @@ def make_live_analysis_ingress_channel(
             return [make_sample_chunk_event(
                 batch_index,
                 sample_index,
-                make_sample_chunk(sample, [event.path]),
+                make_sample_chunk(sample, fresh_paths),
+                event.accepted_at ?: System.currentTimeMillis()/1000.0,
             )]
         }
 }
@@ -587,8 +723,8 @@ def is_bam_path(path: Path) -> Boolean {
     return path.name.endsWith('.bam')
 }
 
-def make_sample_chunk_event(batch_index: Integer, sample_index: Integer, chunk) -> LiveSampleEvent {
-    return record(batch_index: batch_index, sample_index: sample_index, sample: chunk.sample, chunk: chunk, is_stop: false)
+def make_sample_chunk_event(batch_index: Integer, sample_index: Integer, chunk, accepted_at: Number) -> LiveSampleEvent {
+    return record(batch_index: batch_index, sample_index: sample_index, sample: chunk.sample, chunk: chunk, is_stop: false, accepted_at:accepted_at)
 }
 
 def make_live_stop_event(batch_index: Integer, sample_index: Integer, sample) -> LiveSampleEvent {

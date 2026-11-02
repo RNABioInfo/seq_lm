@@ -1,0 +1,3 @@
+#!/usr/bin/env python3
+from dea_termination.cli import main
+main()

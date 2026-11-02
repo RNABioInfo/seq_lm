@@ -86,19 +86,6 @@ def validate_parameters(params_map: Map) -> Void {
         error('--stopping_method must be dea or ica.')
     }
 
-    ['ica_max_fold_change', 'ica_min_read_growth_fraction'].each { name: String ->
-        def value = params_map[name]
-        if (!(value instanceof Number) || !Double.isFinite((value as Number).doubleValue())) {
-            error("--${name} must be a finite number.")
-        }
-        if (name == 'ica_max_fold_change' && value < 1) {
-            error('--ica_max_fold_change must be at least 1.')
-        }
-        if (name == 'ica_min_read_growth_fraction' && value <= 0) {
-            error('--ica_min_read_growth_fraction must be greater than 0.')
-        }
-    }
-
     if (params_map.monitoring_behavior != 'disabled') {
         if (stopping_method == 'dea' && !params_map.differential_expression) {
             error('--monitoring_behavior with --stopping_method dea requires --differential_expression.')
@@ -106,6 +93,8 @@ def validate_parameters(params_map: Map) -> Void {
         if (stopping_method == 'ica' && !ica_analysis_enabled(params_map)) {
             error('--monitoring_behavior with --stopping_method ica requires enabled --ica_analysis and --ica_matrix.')
         }
+        if (stopping_method == 'dea') validate_dea_stopping_parameters(params_map)
+        else validate_ica_stopping_parameters(params_map)
     }
 
     if (params_map.monitoring_behavior == 'terminate' && !params_map.live_analysis) {
@@ -135,31 +124,6 @@ def validate_parameters(params_map: Map) -> Void {
             }
         }
     }
-    if (!(params_map.num_stable_batches instanceof Number) ||
-        !Double.isFinite((params_map.num_stable_batches as Number).doubleValue()) ||
-        params_map.num_stable_batches < 1 || params_map.num_stable_batches != Math.floor((params_map.num_stable_batches as Number).doubleValue())) {
-        error('--num_stable_batches must be a positive integer.')
-    }
-
-    def fraction_stability_params: Map<String,Float> = [
-        stability_max_feature_diff_fraction: params_map.stability_max_feature_diff_fraction,
-        stability_min_jaccard_similarity: params_map.stability_min_jaccard_similarity,
-    ]
-    fraction_stability_params.each { name: String, value: Float ->
-        if (value < 0 || value > 1) {
-            error("--${name} must be between 0 and 1.")
-        }
-    }
-    if (params_map.stability_max_median_abs_lfc_delta < 0) {
-        error('--stability_max_median_abs_lfc_delta must be nonnegative.')
-    }
-    if (params_map.stability_min_de_calls_for_fraction_metrics < 1) {
-        error('--stability_min_de_calls_for_fraction_metrics must be at least 1.')
-    }
-    if (params_map.stability_max_small_set_call_changes < 0) {
-        error('--stability_max_small_set_call_changes must be nonnegative.')
-    }
-
     if (params_map.gene_set_enrichment && !params_map.differential_expression) {
         error('--gene_set_enrichment requires --differential_expression.')
     }
@@ -179,5 +143,43 @@ def validate_parameters(params_map: Map) -> Void {
     }
     if (params_map.gene_set_enrichment && !params_map.gene_sets) {
         error('Gene-set enrichment requires --gene_sets.')
+    }
+}
+
+/** Validate only the settings consumed by active DEA monitoring. */
+def validate_dea_stopping_parameters(params_map: Map) -> Void {
+    ['dea_gain_cutoff', 'dea_information_radius_scale', 'dea_forecast_minutes', 'dea_max_processing_lag_seconds', 'dea_min_points',
+     'dea_min_seconds', 'dea_confirmations', 'dea_interruption_fraction', 'dea_recovery_fraction', 'dea_recovery_intervals'].each { name: String ->
+        def value = params_map[name]
+        if (!(value instanceof Number) || !Double.isFinite((value as Number).doubleValue()) || value <= 0) error("--${name} must be a positive finite number.")
+        if (name in ['dea_forecast_minutes', 'dea_max_processing_lag_seconds', 'dea_min_points', 'dea_min_seconds', 'dea_confirmations', 'dea_recovery_intervals'] && value != Math.floor((value as Number).doubleValue())) error("--${name} must be an integer.")
+        if (name in ['dea_gain_cutoff', 'dea_interruption_fraction', 'dea_recovery_fraction'] && value >= 1) error("--${name} must be less than one.")
+    }
+
+    if (params_map.dea_min_points < 6 || params_map.dea_min_seconds < 3600) {
+        error('R monitoring requires at least six points and at least one hour.')
+    }
+}
+
+/** ICA analysis settings are separate from these ICA stopping settings. */
+def validate_ica_stopping_parameters(params_map: Map) -> Void {
+    ['ica_max_fold_change', 'ica_min_read_growth_fraction'].each { name: String ->
+        def value = params_map[name]
+        
+        if (!(value instanceof Number) || !Double.isFinite((value as Number).doubleValue())) {
+            error("--${name} must be a finite number.")
+        }
+        if (name == 'ica_max_fold_change' && value < 1) {
+            error('--ica_max_fold_change must be at least 1.')
+        }
+        if (name == 'ica_min_read_growth_fraction' && value <= 0) {
+            error('--ica_min_read_growth_fraction must be greater than 0.')
+        }
+    }
+
+    if (!(params_map.num_stable_batches instanceof Number) ||
+        !Double.isFinite((params_map.num_stable_batches as Number).doubleValue()) ||
+        params_map.num_stable_batches < 1 || params_map.num_stable_batches != Math.floor((params_map.num_stable_batches as Number).doubleValue())) {
+        error('--num_stable_batches must be a positive integer.')
     }
 }

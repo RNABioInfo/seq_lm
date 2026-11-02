@@ -9,7 +9,8 @@ include {
     CumulativeCollatedBAMGroup ;
     QuantifiedSample ;
     QuantifiedSampleBatch ;
-    SampleBatchSize
+    SampleBatchSize ;
+    Sample
 } from '../lib/sample.nf'
 
 include { order_batches } from '../lib/util.nf'
@@ -19,11 +20,12 @@ include {
     cumulative_collated_bam_name ;
     oarfish_counts_file_name ;
     oarfish_out_name ;
-    shell_quote
+    shell_quote ;
+    safe_name
 } from '../modules/generic_helpers.nf'
 
 /**
- * Build cumulative per-sample Oarfish quantifications independently of DEA.
+ * Workflow for sample wise oarfish quantification
  * Complete batches contain the newest quantification for every experiment
  * sample, including restored or already stopped samples.
  */
@@ -35,10 +37,14 @@ workflow quantification {
     genome: Path
     annotation: Path
     strand_specificity: String
+    all_samples: List<Sample>
 
     main:
+    def dea_event_mode: Boolean = params.live_analysis && params.stopping_method == 'dea' && params.monitoring_behavior != 'disabled'
+
     collated_bams = collate_chunk_bam(merged_bams)
     def pending_merged_bam_batches: Map<Integer, Map> = [:]
+
     nonempty_merged_bam_batches_ch = collated_bams
         .map { merged_bam ->
             record(
@@ -86,9 +92,9 @@ workflow quantification {
             )
         }
 
-    merged_bam_batches_ch = order_batches(
-        nonempty_merged_bam_batches_ch.mix(empty_merged_bam_batches_ch)
-    )
+    merged_bam_batches_ch = dea_event_mode
+        ? independent_collated_batches(collated_bams, all_samples.size()).mix(empty_merged_bam_batches_ch)
+        : order_batches(nonempty_merged_bam_batches_ch.mix(empty_merged_bam_batches_ch))
 
     def cumulative_bam_state: Map<String, List<CollatedChunkBAM>> = [:]
     cumulative_snapshots_ch = merged_bam_batches_ch.map { batch ->
@@ -121,6 +127,7 @@ workflow quantification {
                 batch_index: joined.batch_index,
                 sample: joined.sample,
                 counts: joined.counts,
+                observation: joined.observation,
             )
             def pending_batch: Map = pending_quantified_sample_batches[joined.batch_index]
             if (pending_batch == null) {
@@ -162,18 +169,53 @@ workflow quantification {
             )
         }
 
-    ordered_quantified_sample_updates_ch = order_batches(
-        nonempty_quantified_sample_updates_ch.mix(empty_quantified_sample_updates_ch)
-    )
+    ordered_quantified_sample_updates_ch = dea_event_mode
+        ? nonempty_quantified_sample_updates_ch.mix(empty_quantified_sample_updates_ch)
+        : order_batches(nonempty_quantified_sample_updates_ch.mix(empty_quantified_sample_updates_ch))
 
     def latest_quantifications: Map<String, QuantifiedSample> = restored_quantifications.collectEntries { quantified_sample ->
         [(sample_key(quantified_sample.sample)): quantified_sample]
     }
+
     def next_report_sequence: Integer = 0
     quantified_sample_batches_ch = ordered_quantified_sample_updates_ch.flatMap { update_batch ->
         update_batch.samples.each { quantified_sample ->
-            latest_quantifications[sample_key(quantified_sample.sample)] = quantified_sample
+            def key: String = sample_key(quantified_sample.sample)
+            def old = latest_quantifications[key]
+            if (old == null || quantified_sample.batch_index > old.batch_index) {
+                latest_quantifications[key] = quantified_sample
+            }
         }
+
+        if (params.stopping_method == 'dea' && params.monitoring_behavior != 'disabled' && !latest_quantifications.isEmpty()) {
+
+            // Placeholders defer missing pairs without blocking other contrasts.
+            def template: Path = latest_quantifications.values().first().counts
+
+            all_samples.each { sample ->
+                def key: String = sample_key(sample)
+
+                if (!latest_quantifications.containsKey(key)) {
+                    def path: Path = Path.of(params.out_dir as String).toAbsolutePath().resolve('termination/dea/placeholders').resolve("${safe_name(sample.group)}_${safe_name(sample.name)}.quant")
+                    java.nio.file.Files.createDirectories(path.parent)
+
+                    def lines: List<String> = java.nio.file.Files.readAllLines(template)
+                    def count_column: Integer = lines[0].split('\t', -1).toList().indexOf('num_reads')
+
+                    if (count_column < 0) error('R placeholders require the Oarfish num_reads column.')
+                    def zero_lines: List<String> = [lines[0]] + lines.drop(1).collect { line: String ->
+                        def fields: List<String> = line.split('\t', -1).toList()
+                        fields[count_column] = '0'
+                        return fields.join('\t')
+                    }
+
+                    java.nio.file.Files.writeString(path, zero_lines.join('\n') + '\n')
+                    latest_quantifications[key] = record(batch_index: -1, sample: sample, counts: path)
+                }
+            }
+
+        }
+
         if (latest_quantifications.size() < update_batch.experiment_sample_count) {
             log.info(
                 "Deferring quantification summary for batch ${update_batch.batch_index}: " + "${latest_quantifications.size()} of ${update_batch.experiment_sample_count} sample(s) " + "have quantifications."
@@ -184,10 +226,14 @@ workflow quantification {
         def quant_batch = record(
             batch_index: update_batch.batch_index,
             report_sequence: next_report_sequence,
+            observation: [samples: latest_quantifications.collectEntries { key, value ->
+                [(key): value.observation?.samples?.get(key)]
+            }.findAll { key, value -> value != null }],
             samples: latest_quantifications.values().toList().toSorted { left, right ->
                 "${left.sample.group}/${left.sample.name}" <=> "${right.sample.group}/${right.sample.name}"
             },
         )
+
         next_report_sequence += 1
         return [quant_batch]
     }
@@ -204,11 +250,43 @@ workflow quantification {
     report_batches = transcript_biotype_report_batches_ch
 }
 
+/** Keep per-sample collation order -> unrelated slow samples never block. */
+def independent_collated_batches(collated_bams, experiment_count: Integer) {
+    def pending: Map = [:]
+    def next_versions: Map = [:]
+
+    return collated_bams.flatMap { bam ->
+        def key: String = sample_key(bam.sample)
+        def version: Integer = bam.observation.samples[key].version as Integer
+
+        if (!pending.containsKey(key)) { pending[key] = [:]; next_versions[key] = bam.observation.samples[key].first_version }
+
+        if (version < next_versions[key] || pending[key].containsKey(version)) error("Duplicate BAM version for ${key}: ${version}")
+
+        pending[key][version] = bam
+        def ready: List = []
+
+        def indices: List<Integer> = pending[key].keySet().toList().toSorted().withIndex()
+            .findAll { entry -> entry[0] == next_versions[key] + entry[1] }
+            .collect { entry -> entry[0] as Integer }
+
+        indices.each { index: Integer ->
+            def item = pending[key].remove(index)
+            ready.add(record(batch_index:item.batch_index,bams:[item],experiment_sample_count:experiment_count))
+        }
+
+        next_versions[key] += indices.size()
+        return ready
+    }
+
+}
+
 /** Fold one synchronized batch into the cumulative per-sample BAM state. */
 def accumulate_cumulative_bam_state(state: Map<String, List<CollatedChunkBAM>>, batch) {
     batch.bams.each { merged_bam ->
         def key: String = sample_key(merged_bam.sample)
         def previous_bams: List<CollatedChunkBAM> = state.containsKey(key) ? state[key] : []
+
         state[key] = (previous_bams.findAll { previous_bam ->
             previous_bam.batch_index != merged_bam.batch_index
         } + [merged_bam]).toSorted { left, right ->
@@ -220,10 +298,12 @@ def accumulate_cumulative_bam_state(state: Map<String, List<CollatedChunkBAM>>, 
         .collect { updated_bam ->
             def bams: List<CollatedChunkBAM> = state[sample_key(updated_bam.sample)]
             def latest_bam = bams[-1]
+
             record(
                 batch_index: batch.batch_index,
                 sample: latest_bam.sample,
                 bams: bams,
+                observation: updated_bam.observation,
             )
         }
         .toSorted { left, right ->
@@ -255,6 +335,7 @@ process collate_chunk_bam {
         batch_index: chunk_bam.batch_index,
         sample: chunk_bam.sample,
         bam: file(collated_chunk_bam_name(chunk_bam.batch_index, chunk_bam.sample)),
+        observation: chunk_bam.observation,
     )
 
     script:
@@ -285,6 +366,7 @@ process assemble_cumulative_collated_bam {
         batch_index: input_group.batch_index,
         sample: input_group.sample,
         bam: file(cumulative_collated_bam_name(input_group)),
+        observation: input_group.observation,
     )
 
     script:
@@ -321,6 +403,7 @@ process oarfish_quant {
         batch_index: merged_bam.batch_index,
         sample: merged_bam.sample,
         counts: file(oarfish_counts_file_name(merged_bam.batch_index, merged_bam.sample.name)),
+        observation: merged_bam.observation,
     )
 
     script:
@@ -330,6 +413,7 @@ process oarfish_quant {
     if (strand_filter == null) {
         error('--strand_specificity must be forward, reverse, or unstranded.')
     }
+    
     """
         oarfish \
             -j ${task.cpus} \

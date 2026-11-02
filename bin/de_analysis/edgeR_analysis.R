@@ -16,9 +16,12 @@ script_path = sub("^--file=", "", script_arg[[1]])
 script_dir = dirname(normalizePath(script_path))
 
 source(file.path(script_dir, "read_gmt.R"))
+source(file.path(script_dir, "profile_intervals.R"))
 source(file.path(script_dir, "..", "read_contrasts.R"))
 
 options = list(
+    make_option(c("--min_read_count"), type="integer", default=10000L),
+    make_option(c("--min_replicate_sample_count"), type="integer", default=2L),
     make_option(
         c("--quant_manifest"),
         type = "character"
@@ -758,6 +761,48 @@ counts = collect_counts(
     args$quant_id_column,
     args$quant_count_column
 )
+# Unavailable libraries are readiness information, never biological zeros in
+# enrichment or inference. Retain every requested contrast in the status export.
+requested_contrasts = contrasts
+write_tsv(requested_contrasts,file.path(output_dir,"requested_contrasts.tsv"))
+write_tsv(tibble(sample=quant_manifest$name,group=quant_manifest$group,
+                 assigned_reads=colSums(counts)),file.path(output_dir,"sample_depths.tsv"))
+status_rows = lapply(seq_len(nrow(requested_contrasts)), function(k) {
+    definition = requested_contrasts[k,,drop=FALSE]
+    selected = quant_manifest$group %in% c(definition$target_group,definition$reference_group)
+    pair = counts[,selected,drop=FALSE]
+    groups = factor(quant_manifest$group[selected])
+    depths = colSums(pair)
+    passing = tapply(depths>=args$min_read_count,groups,sum)
+    ready = all(depths>0) && all(passing>=args$min_replicate_sample_count)
+    reason = "insufficient_read_depth"
+    if (ready) {
+        ready = any(filterByExpr(DGEList(counts=pair,group=groups)))
+        reason = if (ready) "ready" else "no_retained_features"
+    }
+    if (!ready) {
+        directory = file.path(output_dir,definition$contrast_id)
+        dir.create(directory,recursive=TRUE,showWarnings=FALSE)
+        writeLines(reason,file.path(directory,"analysis_deferred.txt"))
+    }
+    definition$ready = ready
+    definition$reason = reason
+    definition
+})
+contrast_status = bind_rows(status_rows)
+write_tsv(contrast_status,file.path(output_dir,"contrast_status.tsv"))
+contrasts = requested_contrasts[contrast_status$ready,,drop=FALSE]
+write_tsv(contrasts,file.path(output_dir,"contrasts.tsv"))
+if (nrow(contrasts)==0L) {
+    writeLines("No contrast currently has sufficient read depth and retained features.",
+               file.path(output_dir,"analysis_deferred.txt"))
+    quit(save="no",status=0)
+}
+ready_groups = unique(c(contrasts$target_group,contrasts$reference_group))
+selected = quant_manifest$group %in% ready_groups
+quant_manifest = quant_manifest[selected,,drop=FALSE]
+counts = counts[,selected,drop=FALSE]
+
 annotation = read_annotation(
     args$annotation,
     args$annotation_id_attributes,
@@ -783,11 +828,21 @@ write_tsv(
 )
 
 dge_list = DGEList(counts = counts, group = sample_groups)
-keep = filterByExpr(dge_list)
-dge_list = dge_list[keep, , keep.lib.sizes = FALSE]
-dge_list = normLibSizes(dge_list)
+# The overview uses the union of pairwise retained genes; it is not a joint DE fit.
+keep = Reduce(`|`, lapply(seq_len(nrow(contrasts)), function(k) {
+    selected = quant_manifest$group %in% c(contrasts$target_group[k], contrasts$reference_group[k])
+    if (any(colSums(counts[,selected,drop=FALSE])==0)) return(rep(FALSE,nrow(counts)))
+    filterByExpr(DGEList(counts=counts[,selected,drop=FALSE], group=droplevels(sample_groups[selected])))
+}))
+if (!any(keep)) keep = rep(TRUE,nrow(counts)) # Overview only; pairwise inference remains deferred.
+dge_list = DGEList(counts=counts[keep,,drop=FALSE],group=sample_groups,
+                   lib.size=pmax(colSums(counts[keep,,drop=FALSE]),1))
+positive_libraries = colSums(dge_list$counts)>0
+normalized_positive = normLibSizes(dge_list[,positive_libraries,keep.lib.sizes=TRUE])
+dge_list$samples$norm.factors[positive_libraries] = normalized_positive$samples$norm.factors
 
 mds = plotMDS(dge_list, top = 500L, plot = FALSE)
+mds$var.explained[!is.finite(mds$var.explained)] = 0
 mds_data = tibble(
     sample = colnames(dge_list),
     group = as.character(sample_groups),
@@ -823,7 +878,7 @@ write_tsv(
     file.path(output_dir, "edgeR_bcv_data.tsv")
 )
 
-fit = glmQLFit(dge_list, design, robust = TRUE)
+overview_ids = rownames(dge_list)
 
 norm_feature_counts = as.data.frame(cpm(dge_list)) %>%
     rownames_to_column("feature_id")
@@ -878,14 +933,47 @@ if (!is.null(gene_sets_path)) {
 for (contrast_index in seq_len(nrow(contrasts))) {
     target_group = contrasts$target_group[[contrast_index]]
     reference_group = contrasts$reference_group[[contrast_index]]
-    contrast = numeric(ncol(design))
-    names(contrast) = colnames(design)
-    contrast[[target_group]] = 1
-    contrast[[reference_group]] = -1
-
     contrast_name = contrasts$contrast_id[[contrast_index]]
     contrast_dir = file.path(output_dir, contrast_name)
     dir.create(contrast_dir, recursive = TRUE, showWarnings = FALSE)
+
+    # Every inferential result uses this pair only, including its own TMM/EB fit.
+    selected = quant_manifest$group %in% c(target_group, reference_group)
+    pair_counts = counts[,selected,drop=FALSE]
+    pair_groups = droplevels(sample_groups[selected])
+    pair_manifest = quant_manifest[selected,,drop=FALSE]
+    depths = colSums(pair_counts)
+    passing = tapply(depths >= args$min_read_count, pair_groups, sum)
+    ready = all(passing >= args$min_replicate_sample_count) && all(depths > 0)
+    if (!ready) stop("Pairwise readiness changed during one immutable snapshot.")
+    dge_list = DGEList(counts=pair_counts, group=pair_groups)
+    pair_keep = filterByExpr(dge_list)
+    if (!any(pair_keep)) stop("Pairwise expression filtering changed during one immutable snapshot.")
+    dge_list = normLibSizes(dge_list[pair_keep,,keep.lib.sizes=FALSE])
+    design = model.matrix(~0 + pair_groups)
+    colnames(design) = levels(pair_groups)
+    dge_list = estimateDisp(dge_list, design, robust=TRUE)
+    fit = glmQLFit(dge_list, design, robust=TRUE)
+    contrast = setNames(as.numeric(colnames(design)==target_group)-as.numeric(colnames(design)==reference_group),colnames(design))
+    intervals = profile_intervals(fit,as.integer(pair_groups==target_group))
+    precision = data.frame(feature_id=rownames(pair_counts),R=NA_real_,ci_lower=NA_real_,ci_upper=NA_real_,
+                           unshrunk_logFC=NA_real_,stringsAsFactors=FALSE)
+    ii = match(rownames(fit$counts),precision$feature_id)
+    precision$R[ii] = intervals$R
+    precision$ci_lower[ii] = intervals$lower
+    precision$ci_upper[ii] = intervals$upper
+    precision$unshrunk_logFC[ii] = intervals$center
+    write_tsv(precision,file.path(contrast_dir,"precision.tsv"))
+    write_tsv(tibble(key=paste(pair_manifest$group,pair_manifest$name,sep="\t"),
+                     group=as.character(pair_groups),name=pair_manifest$name,assigned_reads=depths),
+              file.path(contrast_dir,"precision_samples.tsv"),quote="needed")
+    write_tsv(tibble(method="95% QL-profile test-inversion intervals",edgeR_version=as.character(packageVersion("edgeR")),
+                     design="two groups, no covariates",normalization="TMM",target=target_group,reference=reference_group,
+                     interval_scope="pointwise, conditional on fitted normalization and EB hyperparameters"),
+              file.path(contrast_dir,"precision_methods.tsv"))
+    saveRDS(list(dge=dge_list,fit=fit,intervals=intervals,universe=rownames(pair_counts),
+                 samples=pair_manifest,contrast=contrast,edgeR_version=as.character(packageVersion("edgeR"))),
+            file.path(contrast_dir,"precision_model.rds"))
 
     treated = glmTreat(fit, contrast = contrast, lfc = args$lfc)
     de_table = topTags(
@@ -894,6 +982,7 @@ for (contrast_index in seq_len(nrow(contrasts))) {
         sort.by = "none"
     )$table %>%
         rownames_to_column("feature_id")
+    de_table = tibble(feature_id=overview_ids) %>% left_join(de_table,by="feature_id")
     if (nrow(count_annotation) > 0L) {
         de_table = de_table %>%
             left_join(count_annotation, by = "feature_id")
@@ -904,6 +993,8 @@ for (contrast_index in seq_len(nrow(contrasts))) {
     )
 
     if (!is.null(gmt)) {
+        pair_coverage = make_gene_set_coverage(resolution$table,rownames(dge_list))
+        write_tsv(pair_coverage,file.path(contrast_dir,"gene_set_coverage.tsv"))
         tested_sets = lapply(
             resolved_gene_sets,
             function(genes) {
@@ -933,7 +1024,7 @@ for (contrast_index in seq_len(nrow(contrasts))) {
                 as.data.frame() %>%
                 rownames_to_column("gene_set") %>%
                 left_join(
-                    coverage %>%
+                    pair_coverage %>%
                         select(
                             gene_set,
                             description,

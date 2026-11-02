@@ -3,9 +3,8 @@ nextflow.enable.types = true
 /**
  * Join ordered quantification/analysis records to matching QC report inputs.
  *
- * Every reference-enabled report batch contains a transcript-biotype summary;
- * it may also carry matching DEA readiness/results and stability output. The
- * preassigned sequence preserves batch order when process runtimes differ.
+ * Every reference-enabled report batch contains a transcript-biotype summary.
+ * It may also contain matching DEA readiness/results and stability outputs.
  */
 workflow join_report_batches {
     take:
@@ -21,8 +20,8 @@ workflow join_report_batches {
             result.differential_analysis_note,
             result.has_differential_results,
             result.results,
-            result.stability_results,
-            result.has_stability_results,
+            result.monitoring_results,
+            result.has_monitoring_results,
             result.ica_results,
             result.has_ica_results,
             result.ica_analysis_index,
@@ -42,7 +41,7 @@ workflow join_report_batches {
             failOnDuplicate: true,
             failOnMismatch: true,
         )
-        .map { batch_index: Integer, report_sequence: Integer, transcript_biotypes_path, differential_analysis_note: String, has_differential_results: Boolean, differential_results_path, stability_results_path, has_stability_results: Boolean, ica_results_path, has_ica_results: Boolean, ica_analysis_index: Integer, report_inputs: Map, qc_results_path ->
+        .map { batch_index: Integer, report_sequence: Integer, transcript_biotypes_path, differential_analysis_note: String, has_differential_results: Boolean, differential_results_path, monitoring_results_path, has_monitoring_results: Boolean, ica_results_path, has_ica_results: Boolean, ica_analysis_index: Integer, report_inputs: Map, qc_results_path ->
             record(
                 batch_index: batch_index,
                 report_sequence: report_sequence,
@@ -52,8 +51,8 @@ workflow join_report_batches {
                 differential_analysis_note: differential_analysis_note,
                 has_differential_results: has_differential_results,
                 differential_results: differential_results_path,
-                stability_results: stability_results_path,
-                has_stability_results: has_stability_results,
+                monitoring_results: monitoring_results_path,
+                has_monitoring_results: has_monitoring_results,
                 ica_results: ica_results_path,
                 has_ica_results: has_ica_results,
                 ica_analysis_index: ica_analysis_index,
@@ -62,6 +61,7 @@ workflow join_report_batches {
 
     def pending_reports: Map<Integer, ?> = [:]
     def next_sequence_to_emit: Integer = 0
+    
     // The sentinel runs after channel completion, so gaps cannot silently leave
     // later reports buffered. It does not delay complete live reports.
     ordered_report_batches_ch = joined_report_batches_ch

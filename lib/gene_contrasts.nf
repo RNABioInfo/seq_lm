@@ -6,6 +6,7 @@ include { GeneContrast ; Sample ; QuantifiedSampleBatch } from './sample.nf'
 def resolve_gene_contrasts(samples: List<Sample>, contrast_file: Path?) -> List<GeneContrast> {
     def groups: Set<String> = samples*.group.toSet()
     def pairs: List<List<String>> = []
+
     if (contrast_file != null) {
         if (!contrast_file.exists() || !contrast_file.isFile()) {
             error("--gene_contrast_file must be an existing regular file: ${contrast_file}")
@@ -35,9 +36,11 @@ def resolve_gene_contrasts(samples: List<Sample>, contrast_file: Path?) -> List<
             .toSorted()
             .collect { group: String -> [group, 'control'] }
     }
+
     if (pairs.empty) {
         error('At least one gene contrast is required.')
     }
+
     def seen: Set<List<String>> = [] as Set<List<String>>
     return pairs
         .withIndex()
@@ -63,20 +66,24 @@ def parse_delimited_rows(text: String, separator: String, header: Boolean, strip
     if (quote_code == null) {
         error('CSV contains every private-use quote delimiter; cannot parse the file.')
     }
+
     def quote: String = Character.toString(quote_code)
     def normalized: String = text.replaceAll(/"((?:[^"]|"")*)"/) { _match: String, content: String ->
         quote + content.replace('""', '"') + quote
     }
+
     if (strip) {
         normalized = normalized.replaceAll(" *${quote}([^${quote}]*)${quote} *") { _match: String, content: String ->
             quote + content + quote
         }
     }
+
     def parser: nextflow.util.CsvParser = new nextflow.util.CsvParser().setQuote(quote).setSeparator(separator).setStrip(strip)
     def rows: List<List<String>> = normalized.split(/\r?\n/).findAll { line: String -> line.trim() != '' }.collect { line: String -> parser.parse(line) }
     if (!header || rows.empty) {
         return rows
     }
+
     def columns: List<String> = rows[0]
     return rows.drop(1).collect { row: List<String> ->
         columns.withIndex().collectEntries { column: String, index: Integer -> [(column): index < row.size() ? row[index] ?: '' : ''] }
@@ -91,16 +98,20 @@ def gene_contrast_groups(contrasts: List<GeneContrast>) -> Set<String> {
 def resolve_ica_groups(samples: List<Sample>, control_group: String, condition_groups: String?) -> Set<String> {
     def groups: Set<String> = samples*.group.toSet()
     def control: String = control_group.trim()
+
     if (!control || samples.count { sample -> sample.group == control } < 2) {
         error("ICA requires at least two samples in --ica_control_group '${control}'.")
     }
+
     if (condition_groups == null || condition_groups.trim() == '') {
         return groups
     }
+
     def conditions: List<String> = condition_groups.split(',', -1).collect { group: String -> group.trim() }
     if (conditions.any { group: String -> !group || !groups.contains(group) } || conditions.toSet().size() != conditions.size()) {
         error('--ica_condition_groups must contain distinct, nonempty sample-sheet group names.')
     }
+    
     return (conditions + [control]).toSet()
 }
 
@@ -110,6 +121,7 @@ def select_analysis_batch(batch, groups: Set<String>) -> QuantifiedSampleBatch {
         batch_index: batch.batch_index,
         report_sequence: batch.report_sequence,
         samples: batch.samples.findAll { sample -> groups.contains(sample.sample.group) },
+        observation: batch.observation,
     )
 }
 

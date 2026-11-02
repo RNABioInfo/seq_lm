@@ -1,10 +1,10 @@
-"""Tests for the DEA read-count stability command."""
+"""Tests for the DEA read-depth readiness command."""
 
 from pathlib import Path
 import subprocess
 import sys
 
-SCRIPT = Path(__file__).parents[2] / "stability_read_count"
+SCRIPT = Path(__file__).parents[2] / "check-de-readiness"
 
 
 def _write_count(path: Path, reads: int, feature_id: str = "tx1") -> None:
@@ -64,18 +64,18 @@ def _run_check(
     return result.stdout.strip()
 
 
-def test_stability_read_count_requires_enough_deep_samples_per_group(tmp_path):
+def test_de_readiness_requires_enough_deep_samples_per_group(tmp_path):
     assert (
         _run_check(tmp_path, [10000, 12000, 11000, 9000])
         == "insufficient_read_depth"
     )
 
 
-def test_stability_read_count_accepts_all_groups_at_threshold(tmp_path):
+def test_de_readiness_accepts_all_groups_at_threshold(tmp_path):
     assert _run_check(tmp_path, [10000, 12000, 11000, 13000]) == "ready"
 
 
-def test_stability_read_count_rejects_no_shared_feature_ids(tmp_path):
+def test_de_readiness_rejects_no_shared_feature_ids(tmp_path):
     """Disjoint quantification identifiers defer edgeR instead of crashing it."""
     assert (
         _run_check(
@@ -87,7 +87,7 @@ def test_stability_read_count_rejects_no_shared_feature_ids(tmp_path):
     )
 
 
-def test_stability_read_count_accepts_at_least_one_shared_feature_id(tmp_path):
+def test_de_readiness_accepts_at_least_one_shared_feature_id(tmp_path):
     assert (
         _run_check(
             tmp_path,

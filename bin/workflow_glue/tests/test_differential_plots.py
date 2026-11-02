@@ -34,7 +34,7 @@ def sample_metadata(include_second_target=False):
     return pd.DataFrame(rows)
 
 
-def write_edge_r_tree(
+def write_edge_dea_tree(
     path: Path,
     *,
     include_second_target: bool = False,
@@ -129,7 +129,7 @@ def test_condition_palette_is_deterministic_and_control_first():
 
 def test_load_differential_results_aligns_by_feature_id(tmp_path):
     """Current edgeR counts align explicitly by feature ID and sample name."""
-    metadata = write_edge_r_tree(tmp_path)
+    metadata = write_edge_dea_tree(tmp_path)
     data = dp.load_differential_results(tmp_path, metadata)
 
     assert data.feature_counts.index.tolist() == [
@@ -145,7 +145,7 @@ def test_load_differential_results_aligns_by_feature_id(tmp_path):
 
 
 def test_load_differential_results_requires_feature_ids(tmp_path):
-    metadata = write_edge_r_tree(tmp_path)
+    metadata = write_edge_dea_tree(tmp_path)
     counts_path = tmp_path / "feature_counts.tsv"
     counts = pd.read_csv(counts_path, sep="\t").drop(columns="feature_id")
     counts.to_csv(counts_path, sep="\t", index=False)
@@ -155,7 +155,7 @@ def test_load_differential_results_requires_feature_ids(tmp_path):
 
 def test_load_differential_results_rejects_sample_mismatch(tmp_path):
     """CPM columns must exactly match report sample names."""
-    metadata = write_edge_r_tree(tmp_path)
+    metadata = write_edge_dea_tree(tmp_path)
     counts_path = tmp_path / "feature_counts.tsv"
     counts = pd.read_csv(counts_path, sep="\t").drop(columns="treated_2")
     counts.to_csv(counts_path, sep="\t", index=False)
@@ -166,7 +166,7 @@ def test_load_differential_results_rejects_sample_mismatch(tmp_path):
 
 def test_classification_uses_both_cutoffs_and_condition_colors(tmp_path):
     """Only genes passing LFC and FDR are colored by contrast direction."""
-    metadata = write_edge_r_tree(tmp_path)
+    metadata = write_edge_dea_tree(tmp_path)
     data = dp.load_differential_results(tmp_path, metadata)
     contrast = data.contrasts[0]
 
@@ -188,7 +188,7 @@ def test_classification_uses_both_cutoffs_and_condition_colors(tmp_path):
 
 def test_heatmap_selection_ranks_effect_size_and_disambiguates_labels(tmp_path):
     """Heatmap genes are significant, direction-balanced, and uniquely labeled."""
-    metadata = write_edge_r_tree(tmp_path)
+    metadata = write_edge_dea_tree(tmp_path)
     data = dp.load_differential_results(tmp_path, metadata)
 
     selected = dp.select_heatmap_genes(
@@ -205,7 +205,7 @@ def test_heatmap_selection_ranks_effect_size_and_disambiguates_labels(tmp_path):
 
 def test_pca_uses_log_cpm_and_reports_explained_variance(tmp_path):
     """PCA axes expose explained variance and retain condition metadata."""
-    metadata = write_edge_r_tree(tmp_path)
+    metadata = write_edge_dea_tree(tmp_path)
     data = dp.load_differential_results(tmp_path, metadata)
     plot = dp.create_pca_plot(data)
 
@@ -222,7 +222,7 @@ def test_pca_uses_log_cpm_and_reports_explained_variance(tmp_path):
 
 def test_bcv_plot_uses_exported_tagwise_trended_and_common_values(tmp_path):
     """BCV overview plot exposes all three edgeR dispersion summaries."""
-    metadata = write_edge_r_tree(tmp_path)
+    metadata = write_edge_dea_tree(tmp_path)
     data = dp.load_differential_results(tmp_path, metadata)
     plot = dp.create_bcv_plot(data)
 
@@ -241,9 +241,9 @@ def test_bcv_plot_uses_exported_tagwise_trended_and_common_values(tmp_path):
     )
 
 
-def test_mds_plot_uses_exported_edge_r_coordinates(tmp_path):
+def test_mds_plot_uses_exported_edge_dea_coordinates(tmp_path):
     """MDS overview plot preserves edgeR coordinates and axis metadata."""
-    metadata = write_edge_r_tree(tmp_path)
+    metadata = write_edge_dea_tree(tmp_path)
     data = dp.load_differential_results(tmp_path, metadata)
     plot = dp.create_mds_plot(data)
 
@@ -266,7 +266,7 @@ def test_mds_plot_uses_exported_edge_r_coordinates(tmp_path):
 
 def test_overview_orders_pca_mds_and_bcv(tmp_path, monkeypatch):
     """The Overview tab places MDS between the PCA and BCV diagnostics."""
-    metadata = write_edge_r_tree(tmp_path)
+    metadata = write_edge_dea_tree(tmp_path)
     data = dp.load_differential_results(tmp_path, metadata)
     rendered_titles = []
 
@@ -278,89 +278,21 @@ def test_overview_orders_pca_mds_and_bcv(tmp_path, monkeypatch):
     monkeypatch.setattr(dp, "EZChart", record_chart)
     dp.add_differential_analysis(data, lfc_cutoff=1, padj_cutoff=0.05)
 
-    assert rendered_titles[:3] == [
-        "PCA of log2(CPM + 1)",
+    assert rendered_titles[:2] == [
         "edgeR MDS of leading logFC",
         "edgeR biological coefficient of variation (BCV)",
     ]
 
 
-def test_load_stability_results_places_streak_second_and_orders_samples(tmp_path):
-    """The stability table is sample ordered with its streak easy to scan."""
-    metadata = sample_metadata().rename(columns={"Name": "sample", "Group": "group"})
-    metadata = metadata.set_index("sample")
-    audit = tmp_path / "sample_stability.tsv"
-    pd.DataFrame(
-        [
-            {
-                "batch_index": 4,
-                "group": "treated",
-                "sample": "treated_2",
-                "effectively_live": "true",
-                "required_contrasts": "group_treated_vs_control",
-                "consecutive_stable_batches": "4",
-                "eligible": "true",
-                "behavior": "log",
-                "action_result": "would_stop",
-            },
-            {
-                "batch_index": 4,
-                "group": "control",
-                "sample": "control_1",
-                "effectively_live": "true",
-                "required_contrasts": "group_treated_vs_control",
-                "consecutive_stable_batches": "1",
-                "eligible": "false",
-                "behavior": "log",
-                "action_result": "none",
-            },
-            {
-                "batch_index": 4,
-                "group": "treated",
-                "sample": "treated_1",
-                "effectively_live": "false",
-                "required_contrasts": "group_treated_vs_control",
-                "consecutive_stable_batches": "3",
-                "eligible": "true",
-                "behavior": "log",
-                "action_result": "not_live",
-            },
-            {
-                "batch_index": 4,
-                "group": "control",
-                "sample": "control_2",
-                "effectively_live": "true",
-                "required_contrasts": "group_treated_vs_control",
-                "consecutive_stable_batches": "3",
-                "eligible": "true",
-                "behavior": "log",
-                "action_result": "stop_created",
-            },
-        ]
-    ).to_csv(audit, sep="\t", index=False)
-
-    table = dp.load_stability_results(audit, metadata, "log")
-
-    assert table.columns[:2].tolist() == ["Sample", "#Stable consec. batches"]
+def test_disabled_dea_monitoring_reports_every_sample():
+    metadata = sample_metadata().rename(columns={"Name":"sample","Group":"group"}).set_index("sample")
+    table = dp.load_dea_monitoring(None,metadata,"disabled")
     assert table["Sample"].tolist() == metadata.index.tolist()
-    assert table["#Stable consec. batches"].tolist() == [1, 3, 3, 4]
 
 
-def test_disabled_stability_table_reports_every_sample():
-    """Disabled analysis remains visible and explicit for every sample."""
-    metadata = sample_metadata().rename(columns={"Name": "sample", "Group": "group"})
-    metadata = metadata.set_index("sample")
-
-    table = dp.load_stability_results(None, metadata, "disabled")
-
-    assert table.columns[:2].tolist() == ["Sample", "#Stable consec. batches"]
-    assert table["Sample"].tolist() == metadata.index.tolist()
-    assert set(table["#Stable consec. batches"]) == {0}
-
-
-def test_result_stability_is_last_differential_tab(tmp_path, monkeypatch):
-    """Result Stability is rendered beside Overview and Contrasts."""
-    metadata = write_edge_r_tree(tmp_path)
+def test_dea_termination_is_last_differential_tab(tmp_path, monkeypatch):
+    """DEA termination follows Overview and Contrasts and receives its audit table."""
+    metadata = write_edge_dea_tree(tmp_path)
     data = dp.load_differential_results(tmp_path, metadata)
     tab_groups = []
     captured_tables = []
@@ -381,26 +313,28 @@ def test_result_stability_is_last_differential_tab(tmp_path, monkeypatch):
             self.names.append(name)
             return FakeTabContext()
 
+        def add_dropdown_menu(self, *_args, **_kwargs):
+            return FakeTabContext()
+
+        def add_dropdown_tab(self, *_args, **_kwargs):
+            return FakeTabContext()
+
     monkeypatch.setattr(dp, "Tabs", FakeTabs)
     monkeypatch.setattr(dp, "EZChart", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(
-        dp.DataTable,
-        "from_pandas",
-        lambda table, **_kwargs: captured_tables.append(table),
-    )
+    monkeypatch.setattr(dp, "add_dea_monitoring", captured_tables.append)
 
     dp.add_differential_analysis(data, lfc_cutoff=1, padj_cutoff=0.05)
 
-    assert tab_groups[0] == ["Overview", "Contrasts", "Result Stability"]
+    assert tab_groups[0] == ["Overview", "Contrasts", "DEA Termination"]
     assert captured_tables[0].columns[:2].tolist() == [
         "Sample",
-        "#Stable consec. batches",
+        "Status",
     ]
 
 
 def test_ma_and_volcano_include_cutoff_spans(tmp_path):
     """Both contrast plots show their applicable decision thresholds."""
-    metadata = write_edge_r_tree(tmp_path)
+    metadata = write_edge_dea_tree(tmp_path)
     data = dp.load_differential_results(tmp_path, metadata)
     contrast = data.contrasts[0]
 
@@ -413,7 +347,7 @@ def test_ma_and_volcano_include_cutoff_spans(tmp_path):
 
 def test_heatmap_contains_only_compared_conditions(tmp_path):
     """Contrast heatmaps exclude samples from unrelated conditions."""
-    metadata = write_edge_r_tree(tmp_path, include_second_target=True)
+    metadata = write_edge_dea_tree(tmp_path, include_second_target=True)
     data = dp.load_differential_results(tmp_path, metadata)
     contrast = next(item for item in data.contrasts if item.target_group == "treated")
 
@@ -451,7 +385,7 @@ def test_heatmap_row_clustering_groups_similar_profiles():
 
 def test_heatmap_placeholder_when_no_gene_is_significant(tmp_path):
     """A valid empty result renders an explanatory placeholder."""
-    metadata = write_edge_r_tree(tmp_path)
+    metadata = write_edge_dea_tree(tmp_path)
     data = dp.load_differential_results(tmp_path, metadata)
 
     heatmap = dp.create_heatmap_plot(data, data.contrasts[0], 10, 0.05)
@@ -461,7 +395,7 @@ def test_heatmap_placeholder_when_no_gene_is_significant(tmp_path):
 
 
 def test_explicit_contrasts_preserve_order_and_exclude_qc_only_groups(tmp_path):
-    metadata = write_edge_r_tree(tmp_path, include_second_target=True)
+    metadata = write_edge_dea_tree(tmp_path, include_second_target=True)
     definitions = pd.read_csv(tmp_path / "contrasts.tsv", sep="\t").iloc[::-1]
     definitions.to_csv(tmp_path / "contrasts.tsv", sep="\t", index=False)
     # Repeated aliases in an omitted group must not collide with DEA samples.

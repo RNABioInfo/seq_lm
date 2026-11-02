@@ -327,7 +327,7 @@ def test_gsva_raw_and_differential_heatmaps_render(tmp_path):
     assert len(distribution._fig.renderers) > 0
     assert differential_heatmap.report_height > 0
     assert summary._fig.y_range.factors == ["set_mixed", "set_down", "set_up"]
-    assert distribution._fig.title.text == "Raw GSVA scores — set_up"
+    assert distribution._fig.title.text == "Raw GSVA scores"
     factor_ranges = [
         model.factors
         for model in raw_heatmap._fig.select({"type": FactorRange})

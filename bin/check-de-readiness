@@ -2,10 +2,13 @@
 
 """Check count-table preconditions for differential expression analysis."""
 
+from __future__ import annotations
+
 import argparse as ap
 import csv
 import pathlib as pl
 import sys
+import tempfile
 
 
 READY = "ready"
@@ -57,6 +60,7 @@ def analysis_readiness(
     if not metadata_rows:
         return INSUFFICIENT_READ_DEPTH
 
+    all_libraries_positive = True
     passing_replicates_by_group: dict[str, int] = {}
     shared_feature_ids: set[str] | None = None
     for metadata_row in metadata_rows:
@@ -83,6 +87,7 @@ def analysis_readiness(
                 else shared_feature_ids.intersection(feature_ids)
             )
 
+        all_libraries_positive &= total_reads > 0
         group = metadata_row["group"]
         passing_replicates_by_group.setdefault(group, 0)
         if total_reads >= min_read_count:
@@ -92,26 +97,11 @@ def analysis_readiness(
         replicate_count >= min_replicate_sample_count
         for replicate_count in passing_replicates_by_group.values()
     )
-    if not read_depth_satisfied:
+    if not read_depth_satisfied or not all_libraries_positive:
         return INSUFFICIENT_READ_DEPTH
     if not shared_feature_ids:
         return NO_MATCHING_FEATURE_IDS
     return READY
-
-
-def analysis_is_stable(
-    metadata_path: pl.Path,
-    counts_dir: pl.Path,
-    min_read_count: int,
-    min_replicate_sample_count: int,
-) -> bool:
-    """Retain the public Boolean helper for callers that only need readiness."""
-    return analysis_readiness(
-        metadata_path,
-        counts_dir,
-        min_read_count,
-        min_replicate_sample_count,
-    ) == READY
 
 
 def main() -> int:
@@ -122,6 +112,7 @@ def main() -> int:
     argument_parser.add_argument(
         "--min_replicate_sample_count", type=int, required=True
     )
+    argument_parser.add_argument("--contrasts", type=pl.Path)
     argument_parser.add_argument("--metadata", type=str, required=True)
     argument_parser.add_argument("--counts_dir", type=str, required=True)
 
@@ -150,6 +141,19 @@ def main() -> int:
         args.min_read_count,
         args.min_replicate_sample_count,
     )
+    if args.contrasts and readiness != READY:
+        with meta_path.open() as f:
+            reader=csv.DictReader(f,delimiter="\t");columns=reader.fieldnames;rows=list(reader)
+        with args.contrasts.open() as f: definitions=list(csv.DictReader(f,delimiter="\t"))
+        for definition in definitions:
+            groups={definition["target_group"],definition["reference_group"]}
+            with tempfile.TemporaryDirectory() as temporary:
+                sub=pl.Path(temporary)/"manifest.tsv"
+                with sub.open("w",newline="") as f:
+                    writer=csv.DictWriter(f,fieldnames=columns,delimiter="\t");writer.writeheader()
+                    writer.writerows(row for row in rows if row["group"] in groups)
+                if analysis_readiness(sub,counts_dir,args.min_read_count,args.min_replicate_sample_count)==READY:
+                    readiness=READY;break
     print(readiness)
     return 0
 

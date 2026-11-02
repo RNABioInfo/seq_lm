@@ -3,7 +3,7 @@ nextflow.enable.types = true
 include { Sample ; QuantifiedSampleBatch } from '../lib/sample.nf'
 include { imodulon_analysis } from '../subworkflows/imodulon_analysis.nf'
 include { ica_monitoring } from '../lib/ica_stability.nf'
-include { read_stability_tsv } from '../lib/stability.nf'
+include { read_monitoring_tsv } from '../lib/acquisition_actions.nf'
 
 workflow {
     def root: Path = java.nio.file.Files.createTempDirectory('seq-lm-ica-analysis-monitoring-')
@@ -27,14 +27,14 @@ workflow {
             })
     }
     ica_snapshots_ch = imodulon_analysis(channel.fromList(batches), matrix, annotation, matrix, matrix,
-        [has_gene_map: false, has_imodulon_table: false, min_gene_coverage: 1.0,
+        [control_group: 'control', has_gene_map: false, has_imodulon_table: false, min_gene_coverage: 1.0,
          log_base: 2.0, pseudocount: 1.0, min_read_count: 10, padj_cutoff: 0.05], 0, root)
     ica_audits = ica_monitoring(ica_snapshots_ch, samples, samples,
         [behavior: 'log', num_stable_batches: 2, max_fold_change: 1.05, min_read_growth_fraction: 0.1], [:], root)
     ica_audits.collect().view { audits ->
         audits = audits.toSorted { left, right -> left.analysis_index <=> right.analysis_index }
         assert audits.size() == 3
-        def rows: List<Map> = read_stability_tsv(audits.last().sample_stability)
+        def rows: List<Map> = read_monitoring_tsv(audits.last().sample_stability)
         assert rows.every { row: Map -> row.eligible == 'true' && row.action_result == 'logged' }
         assert rows.every { row: Map -> row.required_components == '2' && row.passing_components == '2' }
         assert samples.every { sample -> !java.nio.file.Files.exists(sample.bam_dir.resolve('STOP')) }

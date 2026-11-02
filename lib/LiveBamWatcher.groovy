@@ -73,6 +73,7 @@ class LiveBamWatcher {
                 observations.keySet().removeIf { String key -> !currentKeys.contains(key) }
 
                 Map<String, List<Long>> inventory = [:]
+                List<Path> readyBams = []
                 currentBams.each { Path bamPath ->
                     String key = pathKey(bamPath)
                     // A producer may remove a file between discovery and stat.
@@ -99,10 +100,15 @@ class LiveBamWatcher {
                     if (stablePolls >= requiredStablePolls) {
                         acceptedBams.add(key)
                         observations.remove(key)
-                        target.bind([source: "poll", path: bamPath])
+                        readyBams.add(bamPath)
                     }
                 }
 
+                if (!readyBams.empty) {
+                    double acceptedAt = System.currentTimeMillis()/1000d
+                    if (completion.group_ready) target.bind([source:'poll',path:readyBams[0],paths:readyBams,accepted_at:acceptedAt])
+                    else readyBams.each { path -> target.bind([source:'poll',path:path,accepted_at:acceptedAt]) }
+                }
                 boolean hasPendingBams = currentKeys.any { String key -> !acceptedBams.contains(key) }
                 if (!stopFiles.isEmpty() && !hasPendingBams) {
                     target.bind([source: "poll", path: stopFiles[0]])

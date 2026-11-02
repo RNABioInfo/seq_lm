@@ -20,10 +20,11 @@ from bokeh.models import (
 from bokeh.palettes import Turbo256
 from ezcharts.components.ezchart import EZChart
 from ezcharts.layout.snippets import Tabs
-from ezcharts.layout.snippets.table import DataTable
 from ezcharts.plots import BokehPlot
 from scipy.cluster.hierarchy import leaves_list, linkage
 from sklearn.decomposition import PCA
+
+from .dea_monitoring import add_dea_monitoring, load_dea_monitoring
 
 FEATURE_COUNTS_FILE = "feature_counts.tsv"
 BCV_DATA_FILE = "edgeR_bcv_data.tsv"
@@ -73,17 +74,7 @@ CONDITION_PALETTE = (
     "#AA4499",
 )
 
-STABILITY_REQUIRED_COLUMNS = (
-    "batch_index",
-    "group",
-    "sample",
-    "effectively_live",
-    "required_contrasts",
-    "consecutive_stable_batches",
-    "eligible",
-    "behavior",
-    "action_result",
-)
+
 
 
 @dataclass
@@ -94,6 +85,7 @@ class ContrastResult:
     target_group: str
     reference_group: str
     results: pd.DataFrame
+    analysis_note: str | None = None
 
     @property
     def label(self) -> str:
@@ -219,6 +211,8 @@ def _read_contrasts(
                 target_group=target_group,
                 reference_group=reference_group,
                 results=results,
+                analysis_note=(contrast_dir / "analysis_deferred.txt").read_text().strip()
+                    if (contrast_dir / "analysis_deferred.txt").exists() else None,
             )
         )
     return contrasts
@@ -439,118 +433,6 @@ def load_differential_results(
         sample_metadata=metadata,
         contrasts=contrasts,
         condition_colors=condition_palette(groups),
-    )
-
-
-def _boolean_value(value: object, label: str) -> bool:
-    """Parse a strict Boolean value from a stability audit field."""
-    normalized = str(value).strip().lower()
-    if normalized not in {"true", "false"}:
-        raise ValueError(f"Invalid Boolean value for {label}: {value!r}")
-    return normalized == "true"
-
-
-def _nonnegative_integer_value(value: object, label: str) -> int:
-    """Parse a nonnegative integer from a stability audit field."""
-    try:
-        parsed = int(str(value).strip())
-    except ValueError as error:
-        raise ValueError(f"Invalid integer value for {label}: {value!r}") from error
-    if parsed < 0:
-        raise ValueError(f"Invalid negative value for {label}: {value!r}")
-    return parsed
-
-
-def load_stability_results(
-    stability_path: str | Path | None,
-    sample_metadata: pd.DataFrame,
-    behavior: str,
-    report_samples: pd.DataFrame | None = None,
-) -> pd.DataFrame:
-    """Load the sample stability audit and format its report table."""
-    if behavior not in {"disabled", "log", "terminate"}:
-        raise ValueError(f"Unknown stability behavior: {behavior}")
-    if stability_path is None:
-        return pd.DataFrame(
-            {
-                "Sample": sample_metadata.index,
-                "#Stable consec. batches": 0,
-                "Group": sample_metadata.loc[sample_metadata.index, "group"].tolist(),
-                "Live state": "Not assessed",
-                "Required contrasts": "",
-                "Eligible": "No",
-                "Action": "none",
-                "Batch": "",
-            }
-        )
-
-    path = Path(stability_path)
-    if not path.is_file():
-        raise ValueError(f"Missing sample stability audit: {path}")
-    audit = pd.read_csv(path, sep="\t", dtype=str, keep_default_na=False)
-    missing = set(STABILITY_REQUIRED_COLUMNS).difference(audit.columns)
-    if missing:
-        raise ValueError(f"{path} is missing columns: {', '.join(sorted(missing))}")
-    if report_samples is not None:
-        expected_pairs = list(zip(report_samples["Name"], report_samples["Group"]))
-        observed_pairs = list(zip(audit["sample"], audit["group"]))
-        if len(set(observed_pairs)) != len(observed_pairs) or set(observed_pairs) != set(expected_pairs):
-            raise ValueError(f"{path} does not match QC sample identities.")
-        selected_pairs = set(zip(sample_metadata.index, sample_metadata["group"]))
-        selected = pd.Series([pair in selected_pairs for pair in observed_pairs], index=audit.index)
-        if audit.loc[~selected, "eligible"].ne("false").any() or audit.loc[~selected, "required_contrasts"].ne("").any():
-            raise ValueError("Samples outside the DEA cohort cannot require contrasts or be eligible.")
-        audit = audit.loc[selected].copy()
-    if audit["sample"].eq("").any() or audit["sample"].duplicated().any():
-        raise ValueError(f"{path} contains empty or duplicate sample names.")
-    expected_samples = set(sample_metadata.index)
-    observed_samples = set(audit["sample"])
-    if observed_samples != expected_samples:
-        missing_samples = sorted(expected_samples - observed_samples)
-        extra_samples = sorted(observed_samples - expected_samples)
-        details = []
-        if missing_samples:
-            details.append("missing samples: " + ", ".join(missing_samples))
-        if extra_samples:
-            details.append("unexpected samples: " + ", ".join(extra_samples))
-        raise ValueError(
-            f"{path} does not match differential metadata ({'; '.join(details)})."
-        )
-    audit = (
-        audit.set_index("sample")
-        .loc[sample_metadata.index.tolist()]
-        .reset_index()
-    )
-    expected_groups = sample_metadata.loc[audit["sample"], "group"].tolist()
-    if audit["group"].tolist() != expected_groups:
-        raise ValueError(f"{path} groups do not match differential metadata.")
-    if set(audit["behavior"]) != {behavior}:
-        raise ValueError(f"{path} behavior does not match the report configuration.")
-
-    return pd.DataFrame(
-        {
-            "Sample": audit["sample"],
-            "#Stable consec. batches": audit["consecutive_stable_batches"].map(
-                lambda value: _nonnegative_integer_value(
-                    value,
-                    "consecutive_stable_batches",
-                )
-            ),
-            "Group": audit["group"],
-            "Live state": audit["effectively_live"].map(
-                lambda value: (
-                    "Live"
-                    if _boolean_value(value, "effectively_live")
-                    else "Final / restored"
-                )
-            ),
-            "Required contrasts": audit["required_contrasts"],
-            "Eligible": audit["eligible"].map(
-                lambda value: "Yes" if _boolean_value(value, "eligible") else "No"
-            ),
-            "Action": audit["action_result"],
-            "Batch": audit["batch_index"],
-        }
     )
 
 
@@ -1164,11 +1046,11 @@ def add_differential_analysis(
     data: DifferentialResult,
     lfc_cutoff: float,
     padj_cutoff: float,
-    stability_results: pd.DataFrame | None = None,
+    monitoring_results: pd.DataFrame | None = None,
 ) -> None:
     """Add overview, contrast, and result-stability tabs to the report section."""
-    if stability_results is None:
-        stability_results = load_stability_results(
+    if monitoring_results is None:
+        monitoring_results = load_dea_monitoring(
             None,
             data.sample_metadata,
             "disabled",
@@ -1183,6 +1065,10 @@ def add_differential_analysis(
         with contrast_tabs.add_dropdown_menu("Sample", change_header=True): # type: ignore
             for contrast in data.contrasts:
                 with contrast_tabs.add_dropdown_tab(contrast.label):
+                    if contrast.analysis_note:
+                        from dominate.tags import p
+                        p("Analysis deferred: " + contrast.analysis_note.replace("_", " ") + ". No differential-expression or precision conclusion is available for this contrast.")
+                        continue
                     plot_tabs = Tabs()
                     with plot_tabs.add_tab("MA plot"):
                         EZChart(
@@ -1219,5 +1105,5 @@ def add_differential_analysis(
                             height=f"{getattr(heatmap, 'report_height', 720)}px",
                         )
 
-    with tabs.add_tab("Result Stability"):
-        DataTable.from_pandas(stability_results, use_index=False)
+    with tabs.add_tab("DEA Termination"):
+        add_dea_monitoring(monitoring_results)
