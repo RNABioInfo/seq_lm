@@ -7,6 +7,7 @@ include { differential_expression } from '../subworkflows/differential_expressio
 
 params {
     test_gsva: Boolean = true
+    test_stopping_genes: Boolean = false
 }
 
 workflow {
@@ -20,6 +21,10 @@ workflow {
     )
     def gene_sets: Path = root.resolve('sets.gmt')
     java.nio.file.Files.writeString(gene_sets, 'UP\tinduced\ttx1\ttx2\ttx3\ttx4\ttx5\nDOWN\trepressed\ttx6\ttx7\ttx8\ttx9\ttx10\n')
+    def optional: Path = root.resolve('OPTIONAL_FILE')
+    java.nio.file.Files.writeString(optional, '')
+    def stopping_genes: Path = root.resolve('stopping genes.gmt')
+    java.nio.file.Files.writeString(stopping_genes, 'A\tfirst\tg1\ttx2\nB\tsecond\ttx2\tg3\n')
     def quantified = ['baseline', 'challenge', 'QC only'].collectMany { group: String ->
         (1..3).collect { replicate: Integer ->
             def sample: Sample = record(
@@ -47,16 +52,23 @@ workflow {
     def batch: QuantifiedSampleBatch = record(batch_index: 0, report_sequence: 0, samples: quantified)
     def selected: QuantifiedSampleBatch = select_analysis_batch(batch, gene_contrast_groups(contrasts))
     assert selected.samples.size() == 6
-    outputs = differential_expression(channel.of(selected), contrasts, 0, annotation, gene_sets, params.test_gsva, 1.0, 100, 2)
+    outputs = differential_expression(channel.of(selected), contrasts, 0, annotation,
+        params.test_gsva ? gene_sets : optional,
+        params.test_stopping_genes ? stopping_genes : optional,
+        params.test_gsva, 1.0, 100, 2)
     outputs.results.view { result ->
         assert result.batch_index == 0 && result.report_sequence == 0
         def definition: String = result.results.resolve('contrasts.tsv').text
         assert definition.contains('contrast_1\tchallenge\tbaseline')
         assert definition.contains('contrast_2\tbaseline\tchallenge')
         assert !result.results.resolve('sample_metadata.tsv').text.contains('QC only')
+        if (params.test_stopping_genes) {
+            assert result.results.resolve('dea_stopping_features.tsv').text == 'feature_id\ntx1\ntx2\ntx3\n'
+            assert result.results.resolve('dea_stopping_resolution.tsv').exists()
+        }
         [1, 2].each { index: Integer ->
             assert result.results.resolve("contrast_${index}/edgeR_results.tsv").exists()
-            assert result.results.resolve("contrast_${index}/fry_results.tsv").exists()
+            assert result.results.resolve("contrast_${index}/fry_results.tsv").exists() == params.test_gsva
             assert result.results.resolve("contrast_${index}/precision.tsv").exists()
             if (params.test_gsva) assert result.results.resolve("contrast_${index}/gsva_limma_results.tsv").exists()
         }

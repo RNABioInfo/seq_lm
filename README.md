@@ -280,7 +280,8 @@ Values belong in the config's `params` block. Defaults are from `nextflow.config
 | --- | --- | --- |
 | `monitoring_behavior` | `"disabled"` | Monitoring action: disabled, log, or terminate. |
 | `stopping_method` | `"dea"` | Curve-based R precision forecast or ICA convergence: dea or ica. |
-| `dea_gain_cutoff` | `0.01` | Maximum predicted reduction in aggregate R over the configured horizon; 0.01 means 1%. |
+| `dea_stopping_genes` | Unset | Optional GMT file; DEA stopping uses only the genes provided; omission uses all features. |
+| `dea_gain_cutoff` | `0.01` | Maximum predicted reduction in aggregate U over the configured horizon; 0.01 means 1%. |
 | `dea_information_radius_scale` | `1.0` | Declared aggregation scale in log2FC units. |
 | `dea_forecast_minutes` | `30` | Forecast horizon; observation gaps must be no longer than this for automatic stopping. |
 | `dea_max_processing_lag_seconds` | `600` | Maximum processing lag, independent of file-output interval. |

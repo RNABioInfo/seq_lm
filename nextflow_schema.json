@@ -366,6 +366,12 @@
       "type": "object",
       "description": "Validated only when DEA stopping is selected and monitoring is enabled.",
       "properties": {
+        "dea_stopping_genes": {
+          "type": "string",
+          "format": "path",
+          "description": "Optional GMT file restricting DEA stopping uncertainty to the union of all resolved gene-set members.",
+          "help_text": "Independent of gene_sets and gene-set enrichment. Uses existing annotation mapping and counts each resolved feature once. Unestimable selected features remain in the uncertainty denominator; the full differential-expression fit and results are preserved. Omit to monitor all features."
+        },
         "dea_gain_cutoff": {
           "type": "number",
           "default": 0.01,

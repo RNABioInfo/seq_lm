@@ -244,6 +244,7 @@ workflow sample_pipeline {
     reference_annotation: Path
     strand_specificity: String
     gene_sets: Path
+    dea_stopping_genes: Path
     gene_contrasts: List<GeneContrast>
     ica_groups: Set<String>
     quantification_enabled: Boolean
@@ -345,6 +346,7 @@ workflow sample_pipeline {
                 first_analysis_index,
                 reference_annotation,
                 gene_sets,
+                dea_stopping_genes,
                 gene_set_enrichment_enabled,
                 de_lfc_cutoff,
                 min_read_count,
@@ -648,6 +650,7 @@ workflow {
     WorkflowMain.initialise(workflow, params, log)
     validate_parameters(params)
     def ica_enabled: Boolean = ica_analysis_enabled(params)
+    def dea_monitoring_enabled: Boolean = params.monitoring_behavior != 'disabled' && params.stopping_method == 'dea'
 
     if (params.disable_ping == false) {
         Pinguscript.ping_post(workflow, 'start', 'none', params.out_dir, params)
@@ -665,6 +668,9 @@ workflow {
         "${params.reference_annotation}".trim() != ''
     gene_sets = params.gene_set_enrichment
         ? file(params.gene_sets, checkIfExists: true)
+        : optional_file()
+    def dea_stopping_genes: Path = dea_monitoring_enabled && params.dea_stopping_genes
+        ? file(params.dea_stopping_genes, checkIfExists: true)
         : optional_file()
     output_root = file(params.out_dir).toAbsolutePath().normalize()
     def sample_sheet_path: Path? = params.sample_sheet ? file(params.sample_sheet) : null
@@ -714,7 +720,6 @@ workflow {
     first_analysis_index = params.differential_expression
         ? next_analysis_snapshot_index(output_root)
         : 0
-    def dea_monitoring_enabled: Boolean = params.monitoring_behavior != 'disabled' && params.stopping_method == 'dea'
     def ica_monitoring_enabled: Boolean = params.monitoring_behavior != 'disabled' && params.stopping_method == 'ica'
     stability_parameter_values = [
         contrasts: gene_contrasts,
@@ -732,8 +737,9 @@ workflow {
                          strand_specificity: params.strand_specificity],
                      genome: reference_genome ? sha256_file(reference_genome) : null,
                      annotation: reference_annotation ? sha256_file(reference_annotation) : null,
+                     dea_stopping_genes: dea_stopping_genes.name != optional_file().name ? sha256_file(dea_stopping_genes) : null,
                      controls: restored_quantifications.collect { quant -> [key: "${quant.sample.group}/${quant.sample.name}", sha256: sha256_file(quant.counts)] },
-                     algorithm: ['bin/dea_termination/engine.py','bin/dea_termination/forecast.py','bin/dea_termination/cli.py','bin/de_analysis/profile_intervals.R','bin/de_analysis/edgeR_analysis.R','bin/check-de-readiness','lib/LiveBamWatcher.groovy','lib/bam_ingress.nf','lib/dea_monitoring.nf','lib/acquisition_actions.nf','subworkflows/quantification.nf','subworkflows/differential_expression.nf'].collectEntries { source: String -> [(source): sha256_file(projectDir.resolve(source))] }],
+                     algorithm: ['bin/dea_termination/engine.py','bin/dea_termination/forecast.py','bin/dea_termination/cli.py','bin/de_analysis/profile_intervals.R','bin/de_analysis/edgeR_analysis.R','bin/de_analysis/read_gmt.R','bin/check-de-readiness','lib/LiveBamWatcher.groovy','lib/bam_ingress.nf','lib/dea_monitoring.nf','lib/acquisition_actions.nf','subworkflows/quantification.nf','subworkflows/differential_expression.nf'].collectEntries { source: String -> [(source): sha256_file(projectDir.resolve(source))] }],
         dea_config: dea_monitoring_enabled ? [gain_cutoff: params.dea_gain_cutoff, information_radius_scale: params.dea_information_radius_scale,
             horizon_seconds: (params.dea_forecast_minutes as Number) * 60, max_processing_lag_seconds: params.dea_max_processing_lag_seconds, min_points: params.dea_min_points,
             earliest_seconds: params.dea_min_seconds, confirmations: params.dea_confirmations,
@@ -775,6 +781,7 @@ workflow {
         reference_annotation,
         params.strand_specificity,
         gene_sets,
+        dea_stopping_genes,
         gene_contrasts,
         ica_groups,
         quantification_enabled,

@@ -10,6 +10,7 @@ File-discovery polling remains for reliable operation on mounted filesystems.
 params {
     stopping_method = 'dea'              // alternative: 'ica'
     monitoring_behavior = 'log'         // disabled | log | terminate
+    dea_stopping_genes = null           // optional GMT file; defaults to all features
     dea_gain_cutoff = 0.01
     dea_information_radius_scale = 1
     dea_forecast_minutes = 30
@@ -79,6 +80,36 @@ Filtered, missing and unbounded intervals contribute zero while remaining in the
 denominator. Zero contribution does not mean zero uncertainty. If I is zero,
 aggregate uncertainty is unavailable/unbounded and cannot justify a stop. The
 configurable scale s defaults to 1 log2FC unit and is not estimated from the data.
+
+### Optional stopping gene sets
+
+Use `--dea_stopping_genes targets.gmt` to calculate the stopping uncertainty score
+over the union of all gene sets in a GMT file. Overlapping members and aliases
+that resolve to the same feature count once. This input is independent of
+`--gene_sets` and works with `--gene_set_enrichment false`. It is consumed only
+when `stopping_method=dea` and monitoring is enabled.
+
+The existing GMT parser and annotation mapping resolve members against the
+unfiltered count-matrix feature IDs. Gene names can resolve to multiple transcript
+features; all resolved features enter the union, without gene-level aggregation.
+Malformed GMT records, duplicate set names, empty selections and selections with
+no matching features fail. Partially matched collections use the resolved union
+and warn about unmatched members. Inspect `dea_stopping_resolution.tsv` and the
+deduplicated `dea_stopping_features.tsv` in each fitted analysis output.
+
+Only the monitoring universe changes. The full edgeR fit, interval calculations,
+DEA/enrichment outputs and library read depths are retained. Selected features
+filtered out by expression or lacking finite intervals remain in the denominator
+with zero information contribution. Every contrast uses the same fixed union;
+unexpected changes fail, and changing the GMT contents resets monitoring history
+and eligibility. Fitted snapshots must contain the selection export; deferred
+analyses remain deferred. Monitoring audits and reports identify the uncertainty
+scope and feature count.
+
+The stopping rule still measures diminishing expected improvement, without an
+absolute precision requirement or a significance filter. A selected-feature stop
+does not guarantee sufficient precision for every selected feature or for features
+outside the selection. Omit `--dea_stopping_genes` to retain all-feature monitoring.
 
 ## Forecast over the configured horizon
 

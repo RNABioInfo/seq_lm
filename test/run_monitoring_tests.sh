@@ -20,6 +20,7 @@ run_case() {
 }
 
 run_case dea-monitoring test_dea_monitoring.nf
+run_case dea-selected-monitoring test_dea_monitoring.nf --test_stopping_genes true
 run_case event-ingress test_event_bam_ingress.nf
 run_case independent-collation test_independent_collation.nf
 run_case stable-bam-trigger test_bam_ingress_stable_polling.nf

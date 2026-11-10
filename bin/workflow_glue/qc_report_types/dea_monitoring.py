@@ -78,10 +78,23 @@ def add_dea_monitoring(table):
     if not directory:
         return
     root = Path(directory)
-    config = (
-        json.loads((root / "audit.json").read_text())["config"]
+    audit = (
+        json.loads((root / "audit.json").read_text())
         if (root / "audit.json").exists()
-        else {"gain_cutoff": 0.01}
+        else {"config": {"gain_cutoff": 0.01}}
+    )
+    config = audit["config"]
+    contrasts = audit.get("contrasts", [])
+    selected = any(row.get("uncertainty_scope") == "selected_features" for row in contrasts)
+    counts = "; ".join(
+        f"{row['contrast_id']}: {row['uncertainty_feature_count']} features"
+        for row in contrasts if row.get("uncertainty_feature_count") is not None
+    )
+    paragraph(
+        "Uncertainty scope: "
+        + ("union of selected GMT features" if selected else "all quantified features")
+        + (f" ({counts})" if counts else "")
+        + ". Unestimable features remain in this denominator."
     )
     horizon_minutes = config.get("horizon_seconds", 1800) / 60
     paragraph(

@@ -40,6 +40,11 @@ options = list(
         help = "Gene sets in Gene Matrix Transposed (GMT) format."
     ),
     make_option(
+        c("--dea_stopping_genes"),
+        type = "character",
+        help = "Optional GMT file that defines features used for DEA stopping"
+    ),
+    make_option(
         c("--contrasts"),
         type = "character",
         help = "Canonical TSV of contrast_id, target_group, reference_group."
@@ -814,6 +819,31 @@ identifier_map = build_identifier_map(
     args$strip_id_versions
 )
 count_annotation = make_count_annotation(identifier_map)
+
+if (!is.null(args$dea_stopping_genes)) {
+    stopping_gmt = read_gmt(args$dea_stopping_genes)
+    stopping_members = unique(unlist(lapply(stopping_gmt, `[[`, "genes"), use.names = FALSE))
+    if (length(stopping_members) == 0L) {
+        stop("--dea_stopping_genes must contain at least one GMT member.")
+    }
+    stopping_resolution = resolve_gene_sets(stopping_gmt, identifier_map, args$strip_id_versions)
+    write_tsv(stopping_resolution$table, file.path(output_dir, "dea_stopping_resolution.tsv"))
+    stopping_features = sort(unique(unlist(stopping_resolution$sets, use.names = FALSE)))
+    if (length(stopping_features) == 0L) {
+        stop("No --dea_stopping_genes members resolved to count-matrix feature IDs. See dea_stopping_resolution.tsv.")
+    }
+    unmatched_members = setdiff(
+        stopping_members,
+        stopping_resolution$table$gmt_member[!is.na(stopping_resolution$table$feature_id)]
+    )
+    if (length(unmatched_members) > 0L) {
+        warning(sprintf(
+            "%d --dea_stopping_genes member(s) did not resolve: %s. See dea_stopping_resolution.tsv.",
+            length(unmatched_members), paste(unmatched_members, collapse = ", ")
+        ), call. = FALSE)
+    }
+    write_tsv(tibble(feature_id = stopping_features), file.path(output_dir, "dea_stopping_features.tsv"))
+}
 
 sample_groups = factor(quant_manifest$group)
 

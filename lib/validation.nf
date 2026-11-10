@@ -148,6 +148,16 @@ def validate_parameters(params_map: Map) -> Void {
 
 /** Validate only the settings consumed by active DEA monitoring. */
 def validate_dea_stopping_parameters(params_map: Map) -> Void {
+    if (params_map.dea_stopping_genes != null) {
+        def value = params_map.dea_stopping_genes
+        if (!(value instanceof String || value instanceof Path) || !"${value}".trim()) {
+            error('--dea_stopping_genes must point to an existing regular GMT file.')
+        }
+        def stopping_genes: Path = file(value)
+        if (!stopping_genes.exists() || !stopping_genes.isFile()) {
+            error("--dea_stopping_genes must point to an existing regular GMT file: ${stopping_genes}")
+        }
+    }
     ['dea_gain_cutoff', 'dea_information_radius_scale', 'dea_forecast_minutes', 'dea_max_processing_lag_seconds', 'dea_min_points',
      'dea_min_seconds', 'dea_confirmations', 'dea_interruption_fraction', 'dea_recovery_fraction', 'dea_recovery_intervals'].each { name: String ->
         def value = params_map[name]

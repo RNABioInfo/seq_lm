@@ -22,6 +22,8 @@ workflow {
     def certificate: Path = root.resolve('client.pem')
     def private_key: Path = root.resolve('key.pem')
     def ca_certificate: Path = root.resolve('ca.crt')
+    def stopping_genes: Path = root.resolve('stopping.gmt')
+    java.nio.file.Files.writeString(stopping_genes, 'set\tdescription\tg1\n')
     [certificate, private_key, ca_certificate].each { path: Path ->
         java.nio.file.Files.writeString(path, '')
     }
@@ -60,6 +62,12 @@ workflow {
     def ica_active: Map = ica + [stopping_method:'ica',monitoring_behavior:'log']
 
     validate_parameters(base)
+    validate_parameters(base + [dea_stopping_genes: stopping_genes])
+    [true, 42, '', '  ', root, root.resolve('missing.gmt')].each { value ->
+        assert_validation_error(base + [dea_stopping_genes: value], '--dea_stopping_genes must point to an existing regular GMT file')
+    }
+    validate_parameters(base + [monitoring_behavior: 'disabled', dea_stopping_genes: 'missing.gmt'])
+    validate_parameters(ica_active + [dea_stopping_genes: 'missing.gmt'])
     validate_parameters(base + [dea_forecast_minutes:60])
     assert_validation_error(base + [dea_forecast_minutes:0], 'must be a positive')
     assert_validation_error(base + [stopping_method: 'r'], '--stopping_method must be dea or ica')

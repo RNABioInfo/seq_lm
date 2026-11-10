@@ -309,6 +309,31 @@ def write_monitoring_results(path):
     pd.DataFrame([dict(contrast_id="pair",sample="treatment_1",elapsed_seconds=600,predicted_increment=1000)]).to_csv(path/"read_rate_history.tsv",sep="\t",index=False)
 
 
+@pytest.mark.parametrize("selected", [False, True])
+def test_dea_report_identifies_uncertainty_scope_and_feature_count(tmp_path, selected):
+    import dominate
+
+    from workflow_glue.qc_report_types.dea_monitoring import add_dea_monitoring
+
+    root = tmp_path / "monitoring"
+    write_monitoring_results(root)
+    audit = json.loads((root / "audit.json").read_text())
+    audit["contrasts"] = [dict(
+        contrast_id="pair", uncertainty_scope="selected_features" if selected else "all_features",
+        uncertainty_feature_count=3 if selected else 300,
+    )]
+    (root / "audit.json").write_text(json.dumps(audit))
+    table = pd.DataFrame({"Sample": ["treatment_1"], "Eligible": ["false"]})
+    table.attrs["dea_monitoring_directory"] = str(root)
+    document = dominate.document()
+    with document:
+        add_dea_monitoring(table)
+    html = document.render()
+    assert ("union of selected GMT features" if selected else "all quantified features") in html
+    assert f"pair: {3 if selected else 300} features" in html
+    assert "Unestimable features remain in this denominator" in html
+
+
 def test_create_hist_plot_uses_length_values_only(monkeypatch):
     """Length histogram passes one cleaned numeric column to ezCharts."""
     calls = {}

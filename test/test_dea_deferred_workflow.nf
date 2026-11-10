@@ -22,7 +22,7 @@ workflow {
     def contrasts: List<GeneContrast> = [record(contrast_id:'pair',target_group:'T1',reference_group:'T0')]
     def batch: QuantifiedSampleBatch = record(batch_index:0,report_sequence:0,samples:samples)
     // Enrichment is requested, but must never receive an unavailable fit.
-    outputs = differential_expression(channel.of(batch),contrasts,0,annotation,optional,true,1.0,1,2)
+    outputs = differential_expression(channel.of(batch),contrasts,0,annotation,optional,optional,true,1.0,1,2)
     outputs.report_batches.collect().map { reports ->
         assert reports.size()==1 && !reports[0].has_differential_results
         assert reports[0].differential_analysis_note

@@ -3,6 +3,7 @@
 import copy
 import json
 import math
+import subprocess
 import sys
 from pathlib import Path
 
@@ -18,7 +19,9 @@ from dea_termination.engine import (
     rate_state,
     validate_config,
     weighted_quantile,
+    write_tsv,
 )
+from dea_termination.cli import load_precision
 from dea_termination.forecast import curve_summary, fit_curve, information_radius
 
 
@@ -73,6 +76,138 @@ def test_aggregate_scale_and_missing_denominator():
     assert information_radius([1], 0.5)[1] == pytest.approx(0.2)
     with pytest.raises(ValueError):
         information_radius([-1])
+
+
+def export_precision(root, p, selection=None):
+    """Write the same full-feature artifacts consumed by the monitoring CLI."""
+    root.mkdir(parents=True, exist_ok=True)
+    for cid, data in p["precision"].items():
+        folder = root / cid
+        folder.mkdir(exist_ok=True)
+        write_tsv(folder / "precision.tsv", data["rows"])
+        write_tsv(folder / "precision_samples.tsv", [
+            row | {"assigned_reads": data["depths"][row["key"]]}
+            for row in data["samples"]
+        ])
+    if selection is not None:
+        write_tsv(root / "dea_stopping_features.tsv", [
+            {"feature_id": feature} for feature in selection
+        ], ["feature_id"])
+
+
+def test_selected_score_ignores_unselected_radii_and_keeps_library_depths(tmp_path):
+    p = payload()
+    p["identities"]["dea_stopping_genes"] = "gmt-hash"
+    p["precision"]["T1"]["rows"][0]["R"] = 0.5
+    p["precision"]["T1"]["rows"][1]["R"] = 2
+    export_precision(tmp_path, p, ["g0", "g1"])
+    full = load_precision(tmp_path, p["contrasts"])
+    p["precision"] = load_precision(tmp_path, p["contrasts"], selected=True)
+    _, metrics, _, _ = evaluate(p)
+    expected, info = information_radius([0.5, 2])
+    assert metrics[0]["R_information"] == pytest.approx(expected)
+    assert metrics[0]["information_score"] == pytest.approx(info)
+    assert metrics[0]["uncertainty_scope"] == "selected_features"
+    assert metrics[0]["uncertainty_feature_count"] == 2
+    assert metrics[0]["assigned_monitored_reads"] == 3000
+    assert p["precision"]["T1"]["depths"] == full["T1"]["depths"]
+    full["T1"]["rows"][2]["R"] = 1000
+    p["precision"] = full
+    export_precision(tmp_path, p, ["g1", "g0"])
+    p["precision"] = load_precision(tmp_path, p["contrasts"], selected=True)
+    _, changed, _, _ = evaluate(p)
+    assert changed[0]["R_information"] == metrics[0]["R_information"]
+    p["precision"] = load_precision(tmp_path, p["contrasts"])
+    del p["identities"]["dea_stopping_genes"]
+    _, default, _, _ = evaluate(p)
+    assert default[0]["uncertainty_feature_count"] == 10
+    assert default[0]["uncertainty_scope"] == "all_features"
+    assert default[0]["R_information"] != expected
+
+
+@pytest.mark.parametrize("radii", [(1, "NA"), (1, "Inf"), ("NA", "Inf")])
+def test_unestimable_selected_features_stay_in_denominator(tmp_path, radii):
+    p = payload()
+    p["identities"]["dea_stopping_genes"] = "gmt-hash"
+    for row, radius in zip(p["precision"]["T1"]["rows"], radii):
+        row["R"] = radius
+    export_precision(tmp_path, p, ["g0", "g1"])
+    p["precision"] = load_precision(tmp_path, p["contrasts"], selected=True)
+    _, metrics, samples, _ = evaluate(p)
+    expected = 0.25 if radii[0] == 1 else 0
+    assert metrics[0]["information_score"] == expected
+    assert metrics[0]["finite_R_fraction"] == (0.5 if expected else 0)
+    assert metrics[0]["uncertainty_feature_count"] == 2
+    if not expected:
+        assert metrics[0]["R_information"] is None
+        assert not metrics[0]["eligible"]
+        assert not any(row["eligible"] for row in samples)
+
+
+@pytest.mark.parametrize("selection,error", [
+    (None, "requires dea_stopping_features.tsv"),
+    ([], "selection is empty or invalid"),
+    (["g0", "g0"], "Duplicate DEA stopping feature IDs"),
+    (["absent"], "absent from precision export"),
+])
+def test_selection_export_is_required_for_fitted_snapshots(tmp_path, selection, error):
+    p = payload()
+    export_precision(tmp_path, p, selection)
+    with pytest.raises(ValueError, match=error):
+        load_precision(tmp_path, p["contrasts"], selected=True)
+
+
+def test_selection_change_resets_state_and_unexpected_drift_fails(tmp_path):
+    p = payload()
+    p["identities"]["dea_stopping_genes"] = "first-content-hash"
+    export_precision(tmp_path, p, ["g0", "g1"])
+    p["precision"] = load_precision(tmp_path, p["contrasts"], selected=True)
+    state, *_ = evaluate(p)
+    state["contrasts"]["T1"]["streak"] = 2
+    later = payload(600, depth=2000)
+    later["identities"]["dea_stopping_genes"] = "first-content-hash"
+    export_precision(tmp_path, later, ["g2", "g3"])
+    later["precision"] = load_precision(tmp_path, later["contrasts"], selected=True)
+    with pytest.raises(ValueError, match="R feature universe changed"):
+        evaluate(later, copy.deepcopy(state))
+    later["identities"]["dea_stopping_genes"] = "second-content-hash"
+    reset, metrics, *_ = evaluate(later, state)
+    assert reset["fingerprint"] != state["fingerprint"]
+    assert metrics[0]["consecutive_confirmations"] == 0
+    assert len(reset["contrasts"]["T1"]["points"]) == 1
+
+
+def test_selected_cli_audits_all_contrasts_and_handles_deferral(tmp_path):
+    p = payload()
+    p["identities"]["dea_stopping_genes"] = "gmt-content-hash"
+    other = {"contrast_id": "other", "target_group": "T1", "reference_group": "T0"}
+    p["contrasts"].append(other)
+    p["precision"]["other"] = copy.deepcopy(p["precision"]["T1"])
+    root = tmp_path / "fit"
+    export_precision(root, p, ["g0", "g1"])
+    p.pop("precision")
+    p["results"] = str(root)
+    request = tmp_path / "request.json"
+    request.write_text(json.dumps(p))
+    script = Path(__file__).parents[1] / "bin/dea-termination"
+    for deferred in (False, True):
+        if deferred:
+            for cid in ("T1", "other"):
+                (root / cid / "precision.tsv").unlink()
+            (root / "dea_stopping_features.tsv").unlink()
+        output = tmp_path / ("deferred" if deferred else "selected")
+        result = subprocess.run([
+            sys.executable, str(script), "--input", str(request),
+            "--state", str(tmp_path / "no-previous-state.json"), "--output", str(output),
+        ], capture_output=True, text=True)
+        assert result.returncode == 0, result.stdout + result.stderr
+        audit = json.loads((output / "audit.json").read_text())
+        assert len(audit["contrasts"]) == 2
+        for row in audit["contrasts"]:
+            assert row["uncertainty_scope"] == "selected_features"
+            assert row["uncertainty_feature_count"] == (None if deferred else 2)
+            if deferred:
+                assert row["reason"] == "analysis_deferred" and not row["eligible"]
 
 
 def test_nonnegative_curve_recovers_known_model():

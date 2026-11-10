@@ -600,6 +600,11 @@ def evaluate(payload, state=None):
     metrics = []
     rate_rows = []
     sequenced = {x["key"]: x.get("declared_live", x["live"]) for x in samples}
+    uncertainty_scope = (
+        "selected_features"
+        if payload["identities"].get("dea_stopping_genes") is not None
+        else "all_features"
+    )
 
     for definition in payload["contrasts"]:
         cid = definition["contrast_id"]
@@ -638,6 +643,10 @@ def evaluate(payload, state=None):
                 },
             )
 
+            result.update(
+                uncertainty_scope=uncertainty_scope,
+                uncertainty_feature_count=len(data["universe"]),
+            )
             metrics.append(result)
             rate_rows.extend(
                 dict(contrast_id=cid, elapsed_seconds=result["elapsed_seconds"], **r)
@@ -654,6 +663,8 @@ def evaluate(payload, state=None):
                     "reason": "analysis_deferred",
                     "eligible": False,
                     "consecutive_confirmations": 0,
+                    "uncertainty_scope": uncertainty_scope,
+                    "uncertainty_feature_count": None,
                 }
             )
 

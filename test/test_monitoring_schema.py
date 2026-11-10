@@ -62,6 +62,9 @@ def test_dea_parameter_names():
     valid = BASE | {"stopping_method":"dea", "differential_expression":True,
                     "dea_gain_cutoff":0.01, "dea_forecast_minutes":30}
     VALIDATOR.validate(valid)
+    VALIDATOR.validate(valid | {"dea_stopping_genes": "targets.gmt"})
+    assert list(VALIDATOR.iter_errors(valid | {"dea_stopping_genes": True}))
+    VALIDATOR.validate(BASE | {"dea_stopping_genes": True})
 
 
 def test_only_active_stopping_settings_are_validated():

@@ -4,10 +4,14 @@ import csv
 import subprocess
 from pathlib import Path
 
+import pytest
+
 SCRIPT = Path(__file__).resolve().parents[1] / "bin/de_analysis/edgeR_analysis.R"
 
 
-def run_fixture(root, third=False, zero=False, flat=False, min_reads=10000):
+def run_fixture(root, third=False, zero=False, flat=False, min_reads=10000,
+                stopping_gmt=None, annotation=None, zero_features=(), error=None,
+                warning=None):
     import random
 
     random.seed(18)
@@ -27,6 +31,8 @@ def run_fixture(root, third=False, zero=False, flat=False, min_reads=10000):
                     )
                     if flat:
                         count = 1
+                    if i in zero_features:
+                        count = 0
                     f.write(f"g{i}\t{count}\n")
             rows.append({"name": name, "group": group, "count_file": str(file)})
     manifest = root / "manifest.tsv"
@@ -40,6 +46,15 @@ def run_fixture(root, third=False, zero=False, flat=False, min_reads=10000):
         "other\tT4\tT0\n" if third else ""
     )
     (root / "contrasts.tsv").write_text(definitions)
+    extra_args = []
+    if stopping_gmt is not None:
+        path = root / "stopping genes.gmt"
+        path.write_text(stopping_gmt)
+        extra_args += ["--dea_stopping_genes", str(path)]
+    if annotation is not None:
+        path = root / "annotation.gtf"
+        path.write_text(annotation)
+        extra_args += ["--annotation", str(path)]
     result = subprocess.run(
         [
             "Rscript",
@@ -52,12 +67,18 @@ def run_fixture(root, third=False, zero=False, flat=False, min_reads=10000):
             str(min_reads),
             "--output_dir",
             str(root / "out"),
-        ],
+        ] + extra_args,
         check=False,
         text=True,
         capture_output=True,
     )
-    assert result.returncode == 0, result.stdout + result.stderr
+    if error:
+        assert result.returncode != 0
+        assert error in result.stdout + result.stderr
+    else:
+        assert result.returncode == 0, result.stdout + result.stderr
+    if warning:
+        assert warning in result.stderr
     return root / "out"
 
 
@@ -115,3 +136,49 @@ def test_read_depth_without_retained_genes_defers_the_entire_snapshot(tmp_path):
     assert (
         result / "pair/analysis_deferred.txt"
     ).read_text().strip() == "no_retained_features"
+
+
+def test_stopping_union_reuses_annotation_mapping_without_changing_fit(tmp_path):
+    annotation = (
+        'chr\ttest\ttranscript\t1\t100\t.\t+\t.\tgene_id "shared"; transcript_id "g1";\n'
+        'chr\ttest\ttranscript\t101\t200\t.\t+\t.\tgene_id "shared"; transcript_id "g2";\n'
+    )
+    default = tmp_path / "default"
+    selected = tmp_path / "selected"
+    default.mkdir()
+    selected.mkdir()
+    first = run_fixture(default, third=True, annotation=annotation, zero_features=(299,))
+    second = run_fixture(
+        selected, third=True, annotation=annotation, zero_features=(299,),
+        stopping_gmt="A\tfirst\tshared\tg1\tunknown\nB\tsecond\tg2\tg299\tshared\n",
+        warning="1 --dea_stopping_genes member(s) did not resolve: unknown",
+    )
+    assert (second / "dea_stopping_features.tsv").read_text() == "feature_id\ng1\ng2\ng299\n"
+    with (second / "dea_stopping_resolution.tsv").open() as f:
+        resolution = list(csv.DictReader(f, delimiter="\t"))
+    assert {r["feature_id"] for r in resolution if r["gmt_member"] == "shared"} == {"g1", "g2"}
+    assert [r["feature_id"] for r in resolution if r["gmt_member"] == "unknown"] == ["NA"]
+    for pair in ("pair", "other"):
+        for name in ("edgeR_results.tsv", "precision.tsv", "precision_samples.tsv", "precision_methods.tsv"):
+            assert (first / pair / name).read_bytes() == (second / pair / name).read_bytes()
+        with (second / pair / "precision.tsv").open() as f:
+            rows = list(csv.DictReader(f, delimiter="\t"))
+        assert len(rows) == 300
+        assert next(r for r in rows if r["feature_id"] == "g299")["R"] == "NA"
+
+
+@pytest.mark.parametrize("gmt,error", [
+    ("", "must contain at least one GMT member"),
+    ("A\tempty\n", "must contain at least one GMT member"),
+    ("invalid\n", "Invalid GMT record"),
+    ("A\tx\tg1\nA\ty\tg2\n", "Duplicate gene-set name"),
+    ("A\tx\tunknown\n", "No --dea_stopping_genes members resolved"),
+])
+def test_invalid_stopping_gmt_is_rejected(tmp_path, gmt, error):
+    run_fixture(tmp_path, stopping_gmt=gmt, error=error)
+
+
+def test_deferred_fit_does_not_require_selection_exports(tmp_path):
+    output = run_fixture(tmp_path, flat=True, min_reads=100, stopping_gmt="A\tx\tg1\n")
+    assert (output / "analysis_deferred.txt").exists()
+    assert not (output / "dea_stopping_features.tsv").exists()

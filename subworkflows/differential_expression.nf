@@ -20,6 +20,7 @@ workflow differential_expression {
     first_analysis_index: Integer
     annotation: Path
     gene_sets: Path
+    dea_stopping_genes: Path
     gene_set_enrichment: Boolean
     de_lfc_cutoff: Number
     min_read_count: Integer
@@ -91,6 +92,7 @@ workflow differential_expression {
         ready_quantified_sample_batches_ch,
         contrasts,
         gene_sets,
+        dea_stopping_genes,
         annotation,
         de_lfc_cutoff,
         min_read_count,
@@ -189,6 +191,7 @@ process run_differential_expression_edgeR {
     quant_batch: DifferentialExpressionBatch
     contrasts: List<GeneContrast>
     gene_sets: Path
+    dea_stopping_genes: Path
     annotation: Path
     de_lfc_cutoff: Number
     min_read_count: Integer
@@ -210,6 +213,7 @@ process run_differential_expression_edgeR {
     def contrast_rows: String = gene_contrast_tsv(contrasts)
     def results_dir: String = differential_expression_results_dir(quant_batch.analysis_index)
     def gene_set_args: String = gene_sets.name == optional_file().name ? '' : "--gene_sets ${gene_sets}"
+    def stopping_gene_args: String = dea_stopping_genes.name == optional_file().name ? '' : "--dea_stopping_genes ${shell_quote(dea_stopping_genes.toString())}"
     def manifest_rows: String = quant_batch.samples
         .withIndex()
         .collect { sample, index: Integer ->
@@ -229,6 +233,7 @@ process run_differential_expression_edgeR {
             --contrasts contrasts.tsv \
             --output_dir ${results_dir} \
             ${gene_set_args} \
+            ${stopping_gene_args} \
             --annotation ${annotation} \
             --min_read_count ${min_read_count} \
             --min_replicate_sample_count ${min_replicate_sample_count} \
