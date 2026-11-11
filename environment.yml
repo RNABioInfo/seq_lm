@@ -6,12 +6,11 @@ channels:
   - nodefaults
 
 dependencies:
-  # Nextflow host runtime. Analysis processes continue to use the workflow's
-  # Docker or Singularity/Apptainer containers.
+  # Optional Nextflow host setup. Container profiles bundle the workflow tools.
   - nextflow>=26.04.3
   - openjdk=17
 
-  # seq-run-manager and repository-side utilities/tests.
+  # Native development, repository-side utilities/tests, and seq-run-manager.
   - python=3.12
   - openssl>=3.0
   - pandas>=2.2

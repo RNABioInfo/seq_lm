@@ -18,9 +18,9 @@ workflow {
         java.nio.file.Files.writeString(root.resolve('fast/STOP'),'')
         java.nio.file.Files.writeString(root.resolve('slow/STOP'),'')
     }
-    def args: Map = [live_analysis:true,timeline_analysis:false,sample_sheet_path:sheet,
+    def args: Map = [live_analysis:true,sample_sheet_path:sheet,
         bam_poll_interval_ms:50,bam_stability_polls:3,termination_requested:false,detect_minknow_completion:false,
-        dea_event_mode:true,dea_state_directory:root.resolve('state').toString()]
+        precision_event_mode:true,precision_state_directory:root.resolve('state').toString()]
     bam_ingress(args).collect().map { batches ->
         assert batches*.batch_index.toSorted() == (0..<batches.size()).toList()
         def fast: List = batches.findAll { batch -> batch.chunks.any { chunk -> chunk.sample.name=='fast' } }.toSorted { left, right -> left.observation.samples['control\tfast'].version <=> right.observation.samples['control\tfast'].version }

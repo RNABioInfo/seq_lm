@@ -25,38 +25,47 @@ from workflow_glue.qc_report_types.imodulon_plots import (  # noqa: E402
     validate_imodulon_timecourse,
 )
 from workflow_glue import qc_report  # noqa: E402
-from workflow_glue.qc_report_types.ica_monitoring import load_ica_monitoring_results
+from workflow_glue.qc_report_types.precision_monitoring import load_precision_monitoring
+
+
+def write_ica_audit(path, samples, batch_index=7, analysis_index=11):
+    path.mkdir()
+    (path / "audit.json").write_text(json.dumps({
+        "forecast_method": "robust_recent_depth_curve",
+        "config": {"gain_cutoff": .01, "horizon_seconds": 1800},
+        "contrasts": [{
+            "contrast_id": "contrast_1", "target_group": "early", "reference_group": "control",
+            "uncertainty_scope": "selected_features", "uncertainty_feature_count": 1,
+        }],
+    }))
+    pd.DataFrame({
+        "analysis_index": analysis_index, "batch_index": batch_index,
+        "group": samples["Group"], "sample": samples["Name"],
+        "method": "ica", "metric": "R_information", "behavior": "log",
+        "consecutive_confirmations": 3, "eligible": "true",
+        "reason": "marginal_precision", "action_result": "logged",
+    }).to_csv(path / "sample_monitoring.tsv", sep="\t", index=False)
+    (path / "forecast_history.tsv").write_text(
+        "contrast_id\telapsed_seconds\tassigned_monitored_reads\tR_information\t"
+        "curve_gain\tpredicted_conservative_gain\tactual_gain_next_horizon\teligible\n"
+        "contrast_1\t3600\t40000\t0.4\t0.003\t0.005\t0.004\ttrue\n"
+    )
+    (path / "read_rate_history.tsv").write_text("contrast_id\tsample\tpredicted_increment\n")
+    return path
 
 
 def test_ica_monitoring_matches_group_alias_pairs_and_snapshot(tmp_path):
-    root = write_ica_snapshot(tmp_path / "ica")
-    data = load_imodulon_results(root)
-    path = tmp_path / "sample_stability.tsv"
-    rows = pd.DataFrame({
-        "analysis_index": data.provenance["analysis_index"],
-        "batch_index": data.provenance["batch_index"],
-        "group": data.samples.group, "sample": data.samples.alias,
-        "method": "ica", "metric": "ica_monitoring", "behavior": "log",
-        "required_components": 2, "passing_components": 2, "blocking_components": "",
-        "consecutive_stable_batches": 3, "eligible": "false",
-        "reason": "all_components_converged", "action_result": "none",
-    })
-    rows.to_csv(path, sep="\t", index=False)
-    table = load_ica_monitoring_results(path, data, "log")
-    assert len(table) == len(data.samples)
-    assert table["Passing components"].eq("2").all()
-    rows["analysis_index"] += 1
-    rows.to_csv(path, sep="\t", index=False)
-    with pytest.raises(ValueError, match="analysis_index does not match"):
-        load_ica_monitoring_results(path, data, "log")
-    rows["analysis_index"] -= 1
-    rows = pd.concat([rows, rows.iloc[[0]]])
-    rows.to_csv(path, sep="\t", index=False)
-    with pytest.raises(ValueError, match="sample identities do not match"):
-        load_ica_monitoring_results(path, data, "log")
+    samples = pd.DataFrame({"Group": ["control", "early"], "Name": ["rep1", "rep1"]})
+    path = write_ica_audit(tmp_path / "termination", samples)
+    table = load_precision_monitoring(path, None, "log", samples, method="ica", expected_snapshot=(7, 11))
+    assert table["Consecutive confirmations"].tolist() == ["3", "3"]
+    with pytest.raises(ValueError, match="does not match the analysis snapshot"):
+        load_precision_monitoring(path, None, "log", samples, method="ica", expected_snapshot=(7, 12))
+    with pytest.raises(ValueError, match="samples do not match report"):
+        load_precision_monitoring(path, None, "log", samples.iloc[:1], method="ica")
 
 
-def write_ica_snapshot(root, *, status="ready", groups=None, times=None, values=None):
+def write_ica_snapshot(root, *, status="ready", groups=None, times=None, values=None, min_replicates=2):
     """Write a compact, internally consistent ICA report fixture."""
     root.mkdir()
     groups = groups or ["control", "control", "early", "early", "late", "late"]
@@ -88,7 +97,7 @@ def write_ica_snapshot(root, *, status="ready", groups=None, times=None, values=
         },
     }
     provenance = {
-        "schema_version": 1,
+        "schema_version": 2,
         "batch_index": 7,
         "report_sequence": 3,
         "analysis_index": 11,
@@ -99,6 +108,7 @@ def write_ica_snapshot(root, *, status="ready", groups=None, times=None, values=
             "log_base": 2,
             "pseudocount": 1,
             "min_read_count": 10000,
+            "min_replicate_sample_count": min_replicates,
             "padj_cutoff": 0.05,
         },
         "control_sample_ids": ids[:2],
@@ -110,7 +120,7 @@ def write_ica_snapshot(root, *, status="ready", groups=None, times=None, values=
                 {
                     "status": "deferred",
                     "statistical_availability": "unavailable",
-                    "sample_ids": ids,
+                    "deferred_groups": sorted(set(groups)),
                 }
             )
         )
@@ -360,7 +370,7 @@ def test_single_comparison_uses_one_direct_contrast(tmp_path):
 )
 def test_invalid_timecourse_metadata_is_rejected(tmp_path, groups, times, message):
     data = load_imodulon_results(
-        write_ica_snapshot(tmp_path / "ica", groups=groups, times=times)
+        write_ica_snapshot(tmp_path / "ica", groups=groups, times=times, min_replicates=1)
     )
     with pytest.raises(ValueError, match=message):
         validate_imodulon_timecourse(data)
@@ -402,6 +412,7 @@ def test_qc_report_adds_active_ica_details_main_tab(tmp_path, monkeypatch, tempo
     monkeypatch.setattr(
         qc_report, "create_nanoplot_metrics_table", lambda _samples: pd.DataFrame()
     )
+    monitoring = write_ica_audit(tmp_path / "termination", samples_frame)
     samples = tmp_path / "samples.tsv"
     samples.write_text("unused\n")
     versions = tmp_path / "versions"
@@ -423,6 +434,9 @@ def test_qc_report_adds_active_ica_details_main_tab(tmp_path, monkeypatch, tempo
             "7",
             "--refresh-seconds",
             "0",
+            "--monitoring-results", str(monitoring),
+            "--monitoring-behavior", "log",
+            "--stopping-method", "ica",
             "--imodulon-results",
             str(snapshot),
             "--imodulon-batch",
@@ -437,6 +451,11 @@ def test_qc_report_adds_active_ica_details_main_tab(tmp_path, monkeypatch, tempo
     qc_report.main(args)
     html = report.read_text()
     assert ">Independent Components</button>" in html
+    assert ">ICA Termination</button>" in html
+    assert "selected iModulon components" in html
+    assert "Next 30-minute improvement" in html
+    assert "Consecutive confirmations" in html
+    assert "logged" in html
     assert html.find("Quality Control") < html.find("Independent Components")
     assert (">Time course</button>" in html) == temporal
     assert (">Component details</button>" in html) != temporal
@@ -550,7 +569,7 @@ def test_corrupt_snapshot_is_rejected(tmp_path, problem):
 @pytest.mark.parametrize("singleton", [True, False])
 def test_unavailable_inference_preserves_descriptive_values(tmp_path, singleton):
     kwargs = (
-        {"groups": ["control", "control", "treated"], "times": [0, 0, 10]}
+        {"groups": ["control", "control", "treated"], "times": [0, 0, 10], "min_replicates": 1}
         if singleton
         else {"values": {"iM-A": [0, 0, 1, 1, 2, 2], "NA": [0, 0, -1, -1, -2, -2]}}
     )
@@ -633,6 +652,10 @@ def test_loader_accepts_actual_analysis_cli_outputs(tmp_path):
         "fixture"
     ]
     fixture(tmp_path)
+    manifest = tmp_path / "manifest.tsv"
+    with manifest.open("a") as f:
+        f.write("shallow\ttreated\t10\tshallow.quant\t0\n")
+    (tmp_path / "shallow.quant").write_text("tname\tnum_reads\nt1\t10\nt1b\t10\nt2\t10\n")
     cli = [sys.executable, str(bin_dir / "imodulon-analysis")]
     subprocess.run(
         cli
@@ -647,7 +670,7 @@ def test_loader_accepts_actual_analysis_cli_outputs(tmp_path):
         ],
         check=True,
     )
-    for threshold, name in ((0, "ready"), (10000, "deferred")):
+    for threshold, name in ((100, "ready"), (10000, "deferred")):
         subprocess.run(
             cli
             + [
@@ -667,6 +690,9 @@ def test_loader_accepts_actual_analysis_cli_outputs(tmp_path):
         )
         data = load_imodulon_results(tmp_path / name, 0, 0, 0)
         assert data.ready == (name == "ready")
+        if data.ready:
+            assert not data.samples.loc[data.samples["alias"].eq("shallow"), "ready"].item()
+            assert data.differential["target_n"].eq(3).all()
 
 
 def test_component_annotations_preserve_ids_and_expose_names(tmp_path):

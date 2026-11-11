@@ -59,7 +59,7 @@ class RunManager:
             )
             available_kits = []
             for protocol in available_protocols:
-                tags = protocol.tags  # type: ignore
+                tags = protocol.tags
                 if tags["flow cell"].string_value == product_code:
                     available_kits.append(tags["kit"].string_value)
 
@@ -102,7 +102,7 @@ class RunManager:
         protocol: mk.protocol_pb2.ProtocolInfo,  # type: ignore
         product_code: str,
     ) -> tuple[str, float]:
-        sample_rate = protocol.tags["sample rate"].int_value  # type: ignore
+        sample_rate = protocol.tags["sample rate"].int_value
         configurations = list(
             self.connection_manager.manager.find_basecall_configurations(
                 flow_cell_product_code=product_code,
@@ -191,7 +191,7 @@ class RunManager:
                 connection
             )
             except grpc.RpcError as error:
-                if error.code() == grpc.StatusCode.FAILED_PRECONDITION:
+                if error.code() == grpc.StatusCode.FAILED_PRECONDITION: #type: ignore
                     continue  # Expected: this position has no active protocol
                 raise  # Preserve connection, authentication, and unexpected errors
 

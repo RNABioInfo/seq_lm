@@ -3,7 +3,7 @@
 nextflow.enable.types = true
 
 include {
-    bam_ingress ; capture_dea_input ;
+    bam_ingress ; capture_precision_input ;
     get_samples ;
     sample_sheet_has_order_column ;
     validate_samples ;
@@ -40,7 +40,7 @@ include { quantification } from './subworkflows/quantification.nf'
 include { differential_expression } from './subworkflows/differential_expression.nf'
 include { resolve_gene_contrasts ; gene_contrast_groups ; resolve_ica_groups ; select_analysis_batch } from './lib/gene_contrasts.nf'
 include { order_batches } from './lib/util.nf'
-include { dea_monitoring } from './lib/dea_monitoring.nf'
+include { precision_monitoring as dea_monitoring ; precision_monitoring as ica_monitoring } from './lib/precision_monitoring.nf'
 include {
     discover_sample_checkpoints ;
     file_identity ;
@@ -50,7 +50,6 @@ include {
     write_sample_checkpoints
 } from './lib/sample_checkpoints.nf'
 include { imodulon_analysis } from './subworkflows/imodulon_analysis.nf'
-include { ica_monitoring } from './lib/ica_stability.nf'
 include { next_ica_snapshot_index } from './lib/ica_publication.nf'
 include { validate_parameters; ica_analysis_enabled } from './lib/validation.nf'
 
@@ -161,6 +160,7 @@ process qc_report {
     monitoring_results: Path
     ica_results: Path
     has_differential_results: Boolean
+    gene_set_timecourse_enabled: Boolean
     has_monitoring_results: Boolean
     has_ica_results: Boolean
     ica_analysis_index: Integer
@@ -189,7 +189,7 @@ process qc_report {
         ? '--transcript-biotypes transcript_biotypes.tsv'
         : ''
     def gene_set_args: String = params.gene_set_enrichment && has_differential_results ? '--gene-set-enrichment' : ''
-    def temporal_args: String = params.timeline_analysis && params.gene_set_enrichment && has_differential_results
+    def temporal_args: String = gene_set_timecourse_enabled && has_differential_results
         ? '--temporal-analysis'
         : ''
     def readiness_args: String = differential_analysis_note
@@ -250,14 +250,15 @@ workflow sample_pipeline {
     quantification_enabled: Boolean
     differential_expression_enabled: Boolean
     gene_set_enrichment_enabled: Boolean
+    gene_set_timecourse_enabled: Boolean
     de_lfc_cutoff: Number
     min_read_count: Integer
     min_replicate_sample_count: Integer
     all_samples: List<Sample>
     active_samples: List<Sample>
     stability_behavior: String
-    stability_settings: Map
-    dea_observations: Map
+    stopping_settings: Map
+    precision_observations: Map
     minknow_connection: Map
     ica_matrix: Path
     ica_gene_map: Path
@@ -276,7 +277,7 @@ workflow sample_pipeline {
          * Groovy helpers for naming and report-state formatting.
          */
     observed_sample_batches_ch = sample_batches.map { batch ->
-        if (batch.get('observation') != null) capture_dea_input(dea_observations,batch.batch_index,batch.observation)
+        if (batch.get('observation') != null) capture_precision_input(precision_observations,batch.batch_index,batch.observation)
         return batch
     }
     sample_batch_size_ch = observed_sample_batches_ch.map { batch ->
@@ -360,11 +361,11 @@ workflow sample_pipeline {
                     tuple(result.batch_index, result.analysis_index, result.results)
                 }
             )
-            if (stability_behavior != 'disabled' && stability_settings.method == 'dea') {
+            if (stability_behavior != 'disabled' && stopping_settings.method == 'dea') {
                 dea_snapshots_ch = differential_outputs.precision_results
                 dea_audits_ch = dea_monitoring(
                     dea_snapshots_ch, all_samples, active_samples, stability_behavior,
-                    stability_settings, dea_observations, minknow_connection,
+                    stopping_settings, precision_observations, minknow_connection,
                 )
                 differential_reports_with_stability_ch = differential_report_batches_ch
                     .map { report_batch -> tuple(report_batch.batch_index, report_batch) }
@@ -440,17 +441,10 @@ workflow sample_pipeline {
                 ica_snapshots_ch,
             )
             analysis_report_batches_ch = ica_report_batches_ch
-            if (stability_behavior != 'disabled' && stability_settings.method == 'ica') {
+            if (stability_behavior != 'disabled' && stopping_settings.method == 'ica') {
                 ica_audits_ch = ica_monitoring(
-                    ica_snapshots_ch,
-                    all_samples,
-                    active_samples,
-                    [groups: ica_groups.toList().toSorted(), behavior: stability_behavior,
-                     num_stable_batches: stability_settings.num_stable_batches,
-                     max_fold_change: stability_settings.ica_max_fold_change,
-                     min_read_growth_fraction: stability_settings.ica_min_read_growth_fraction],
-                    minknow_connection,
-                    ica_output_root,
+                    ica_snapshots_ch, all_samples, active_samples, stability_behavior,
+                    stopping_settings, precision_observations, minknow_connection,
                 )
                 analysis_report_batches_ch = analysis_report_batches_ch
                     .map { report -> tuple(report.batch_index, report) }
@@ -466,7 +460,7 @@ workflow sample_pipeline {
                             batch_index: batch_index, report_sequence: report.report_sequence,
                             biotypes: report.biotypes, differential_analysis_note: report.differential_analysis_note,
                             has_differential_results: report.has_differential_results, results: report.results,
-                            monitoring_results: audit.sample_stability, has_monitoring_results: true,
+                            monitoring_results: audit.monitoring_results, has_monitoring_results: true,
                             ica_results: report.ica_results, has_ica_results: true,
                             ica_analysis_index: report.ica_analysis_index,
                         )
@@ -613,6 +607,7 @@ workflow sample_pipeline {
             qc_report_ready_ch.map { result -> result.monitoring_results },
             qc_report_ready_ch.map { result -> result.ica_results },
             qc_report_ready_ch.map { result -> result.has_differential_results },
+            gene_set_timecourse_enabled,
             qc_report_ready_ch.map { result -> result.has_monitoring_results },
             qc_report_ready_ch.map { result -> result.has_ica_results },
             qc_report_ready_ch.map { result -> result.ica_analysis_index },
@@ -629,6 +624,7 @@ workflow sample_pipeline {
             '',
             optional_file(),
             optional_file(),
+            false,
             false,
             false,
             false,
@@ -650,7 +646,10 @@ workflow {
     WorkflowMain.initialise(workflow, params, log)
     validate_parameters(params)
     def ica_enabled: Boolean = ica_analysis_enabled(params)
-    def dea_monitoring_enabled: Boolean = params.monitoring_behavior != 'disabled' && params.stopping_method == 'dea'
+    def monitoring_enabled: Boolean = params.monitoring_behavior != 'disabled'
+    def dea_monitoring_enabled: Boolean = monitoring_enabled && params.stopping_method == 'dea'
+    def ica_monitoring_enabled: Boolean = monitoring_enabled && params.stopping_method == 'ica'
+    def termination_dir: String = "termination/${params.stopping_method}"
 
     if (params.disable_ping == false) {
         Pinguscript.ping_post(workflow, 'start', 'none', params.out_dir, params)
@@ -674,21 +673,22 @@ workflow {
         : optional_file()
     output_root = file(params.out_dir).toAbsolutePath().normalize()
     def sample_sheet_path: Path? = params.sample_sheet ? file(params.sample_sheet) : null
-    def ica_timecourse_enabled: Boolean = ica_enabled && sample_sheet_path != null &&
+    def has_order_column: Boolean = (params.gene_set_enrichment || ica_enabled) && sample_sheet_path != null &&
         sample_sheet_has_order_column(sample_sheet_path)
+    def gene_set_timecourse_enabled: Boolean = params.gene_set_enrichment && has_order_column
+    def ica_timecourse_enabled: Boolean = ica_enabled && has_order_column
 
     ingress_args = record(
         live_analysis: params.live_analysis,
-        timeline_analysis: false,
         sample_sheet_path: sample_sheet_path,
         bam_poll_interval_ms: (params.bam_poll_interval_seconds as Integer) * 1000,
         bam_stability_polls: params.bam_stability_polls as Integer,
         termination_requested: params.monitoring_behavior == 'terminate',
         detect_minknow_completion: params.detect_minknow_completion,
         minknow_completion_settle_seconds: params.minknow_completion_settle_seconds,
-        dea_event_mode: params.live_analysis && params.monitoring_behavior != 'disabled' && params.stopping_method == 'dea',
-        dea_state_directory: params.live_analysis && params.monitoring_behavior != 'disabled' && params.stopping_method == 'dea'
-            ? output_root.resolve('termination/dea').toString() : null,
+        precision_event_mode: params.live_analysis && monitoring_enabled,
+        precision_state_directory: params.live_analysis && monitoring_enabled
+            ? output_root.resolve(termination_dir).toString() : null,
     )
     all_samples = get_samples(ingress_args)
     validate_samples(all_samples, params.differential_expression && !params.gene_contrast_file && !ica_enabled)
@@ -698,8 +698,9 @@ workflow {
     def ica_groups: Set<String> = ica_enabled
         ? resolve_ica_groups(all_samples, params.ica_control_group as String, params.ica_condition_groups as String)
         : [] as Set<String>
-    if (params.timeline_analysis) {
-        validate_timeline_samples(all_samples.findAll { sample -> gene_contrast_groups(gene_contrasts).contains(sample.group) })
+    if (gene_set_timecourse_enabled) {
+        def contrast_groups: Set<String> = gene_contrast_groups(gene_contrasts)
+        validate_timeline_samples(all_samples.findAll { sample -> contrast_groups.contains(sample.group) })
     }
     if (ica_timecourse_enabled) {
         validate_timeline_samples(all_samples.findAll { sample -> ica_groups.contains(sample.group) })
@@ -720,35 +721,77 @@ workflow {
     first_analysis_index = params.differential_expression
         ? next_analysis_snapshot_index(output_root)
         : 0
-    def ica_monitoring_enabled: Boolean = params.monitoring_behavior != 'disabled' && params.stopping_method == 'ica'
-    stability_parameter_values = [
-        contrasts: gene_contrasts,
+    def ica_control: String = (params.ica_control_group as String).trim()
+    def stopping_contrasts: List<GeneContrast> = gene_contrasts
+    if (ica_monitoring_enabled) {
+        def targets: List<String> = ica_groups.findAll { group: String -> group != ica_control }.toList().toSorted()
+        if (targets.empty) {
+            error('ICA stopping requires at least one condition group besides the ICA control.')
+        }
+        stopping_contrasts = targets.withIndex().collect { target: String, index: Integer ->
+            record(contrast_id: "contrast_${index + 1}" as String, target_group: target, reference_group: ica_control)
+        }
+    }
+
+    def precision_sources: List<String> = [
+        'bin/precision_termination/engine.py',
+        'bin/precision_termination/forecast.py',
+        'bin/precision_termination/cli.py',
+        'bin/workflow_glue/readiness.py',
+        'lib/LiveBamWatcher.groovy',
+        'lib/bam_ingress.nf',
+        'lib/precision_monitoring.nf',
+        'lib/acquisition_actions.nf',
+        'subworkflows/quantification.nf',
+    ]
+    def method_sources: List<String> = ica_monitoring_enabled
+        ? ['bin/precision_termination/ica.py', 'bin/imodulon_analysis/analysis.py', 'subworkflows/imodulon_analysis.nf']
+        : ['bin/de_analysis/profile_intervals.R', 'bin/de_analysis/edgeR_analysis.R',
+           'bin/de_analysis/read_gmt.R', 'bin/check-de-readiness', 'subworkflows/differential_expression.nf']
+    def algorithm_identity: Map = (precision_sources + method_sources).collectEntries { source: String ->
+        [(source): sha256_file(projectDir.resolve(source))]
+    }
+
+    stopping_settings = [
+        contrasts: stopping_contrasts,
         method: params.stopping_method as String,
-        ica_max_fold_change: ica_monitoring_enabled ? params.ica_max_fold_change : null,
-        ica_min_read_growth_fraction: ica_monitoring_enabled ? params.ica_min_read_growth_fraction : null,
-        behavior: params.monitoring_behavior as String,
-        num_stable_batches: ica_monitoring_enabled ? (params.num_stable_batches as Integer) : null,
         live_analysis: params.live_analysis,
         output_root: output_root.toString(),
-        command: projectDir.resolve('bin/dea-termination').toString(),
-        identities: [model_settings: [min_read_count: params.min_read_count,
-                         min_replicate_sample_count: params.min_replicate_sample_count,
-                         de_lfc_cutoff: params.de_lfc_cutoff, de_padj_cutoff: params.de_padj_cutoff,
-                         strand_specificity: params.strand_specificity],
-                     genome: reference_genome ? sha256_file(reference_genome) : null,
-                     annotation: reference_annotation ? sha256_file(reference_annotation) : null,
-                     dea_stopping_genes: dea_stopping_genes.name != optional_file().name ? sha256_file(dea_stopping_genes) : null,
-                     controls: restored_quantifications.collect { quant -> [key: "${quant.sample.group}/${quant.sample.name}", sha256: sha256_file(quant.counts)] },
-                     algorithm: ['bin/dea_termination/engine.py','bin/dea_termination/forecast.py','bin/dea_termination/cli.py','bin/de_analysis/profile_intervals.R','bin/de_analysis/edgeR_analysis.R','bin/de_analysis/read_gmt.R','bin/check-de-readiness','lib/LiveBamWatcher.groovy','lib/bam_ingress.nf','lib/dea_monitoring.nf','lib/acquisition_actions.nf','subworkflows/quantification.nf','subworkflows/differential_expression.nf'].collectEntries { source: String -> [(source): sha256_file(projectDir.resolve(source))] }],
-        dea_config: dea_monitoring_enabled ? [gain_cutoff: params.dea_gain_cutoff, information_radius_scale: params.dea_information_radius_scale,
-            horizon_seconds: (params.dea_forecast_minutes as Number) * 60, max_processing_lag_seconds: params.dea_max_processing_lag_seconds, min_points: params.dea_min_points,
-            earliest_seconds: params.dea_min_seconds, confirmations: params.dea_confirmations,
-            interruption_fraction: params.dea_interruption_fraction, recovery_fraction: params.dea_recovery_fraction,
-            recovery_intervals: params.dea_recovery_intervals] : [:],
+        command: projectDir.resolve('bin/precision-termination').toString(),
+        container_engine: workflow.containerEngine,
+        identities: [
+            model_settings: [
+                min_read_count: params.min_read_count,
+                min_replicate_sample_count: params.min_replicate_sample_count,
+                de_lfc_cutoff: params.de_lfc_cutoff,
+                de_padj_cutoff: params.de_padj_cutoff,
+                strand_specificity: params.strand_specificity,
+            ],
+            genome: reference_genome ? sha256_file(reference_genome) : null,
+            annotation: reference_annotation ? sha256_file(reference_annotation) : null,
+            dea_stopping_genes: dea_stopping_genes.name != optional_file().name ? sha256_file(dea_stopping_genes) : null,
+            controls: restored_quantifications.collect { quant ->
+                [key: "${quant.sample.group}/${quant.sample.name}", sha256: sha256_file(quant.counts)]
+            },
+            algorithm: algorithm_identity,
+        ],
+        precision_config: monitoring_enabled ? [
+            gain_cutoff: params.stopping_gain_cutoff,
+            information_radius_scale: params.stopping_information_radius_scale,
+            horizon_seconds: (params.stopping_forecast_minutes as Number) * 60,
+            max_processing_lag_seconds: params.stopping_max_processing_lag_seconds,
+            min_points: params.stopping_min_points,
+            earliest_seconds: params.stopping_min_seconds,
+            confirmations: params.stopping_confirmations,
+            interruption_fraction: params.stopping_interruption_fraction,
+            recovery_fraction: params.stopping_recovery_fraction,
+            recovery_intervals: params.stopping_recovery_intervals,
+        ] : [:],
     ]
-    dea_observations = [:]
+    precision_observations = [:]
     minknow_connection = [
         command: 'seq-run-manager',
+        container_engine: workflow.containerEngine,
         host: params.minknow_host as String,
         port: params.minknow_port as Integer,
         client_certificate: params.minknow_client_certificate
@@ -787,26 +830,31 @@ workflow {
         quantification_enabled,
         params.differential_expression,
         params.gene_set_enrichment,
+        gene_set_timecourse_enabled,
         params.de_lfc_cutoff,
         params.min_read_count,
         params.min_replicate_sample_count,
         all_samples,
         checkpoint_state.active,
         params.monitoring_behavior,
-        stability_parameter_values,
-        dea_observations,
+        stopping_settings,
+        precision_observations,
         minknow_connection,
         ica_enabled ? file(params.ica_matrix, checkIfExists: true) : optional_file(),
         ica_enabled && params.ica_gene_map ? file(params.ica_gene_map, checkIfExists: true) : optional_file(),
         ica_enabled && params.ica_imodulon_table ? file(params.ica_imodulon_table, checkIfExists: true) : optional_file(),
         [enabled: ica_enabled,
+         monitoring: ica_monitoring_enabled,
+         stopping_components: ica_monitoring_enabled && params.ica_stopping_components
+             ? file(params.ica_stopping_components, checkIfExists: true) : null,
          has_imodulon_table: params.ica_imodulon_table != null && "${params.ica_imodulon_table}".trim() != '',
          has_gene_map: params.ica_gene_map != null && "${params.ica_gene_map}".trim() != '',
-         control_group: (params.ica_control_group as String).trim(),
+         control_group: ica_control,
          condition_groups: ica_groups.toList().toSorted(),
          log_base: params.ica_log_base, pseudocount: params.ica_pseudocount,
          min_gene_coverage: params.ica_min_gene_coverage,
-         min_read_count: params.ica_min_read_count, padj_cutoff: params.ica_padj_cutoff],
+         min_read_count: params.min_read_count, min_replicate_sample_count: params.min_replicate_sample_count,
+         padj_cutoff: params.ica_padj_cutoff],
         ica_enabled ? next_ica_snapshot_index(output_root) : 0,
         output_root,
     )

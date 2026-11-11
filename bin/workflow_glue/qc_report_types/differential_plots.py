@@ -24,7 +24,7 @@ from ezcharts.plots import BokehPlot
 from scipy.cluster.hierarchy import leaves_list, linkage
 from sklearn.decomposition import PCA
 
-from .dea_monitoring import add_dea_monitoring, load_dea_monitoring
+from .precision_monitoring import add_precision_monitoring, load_precision_monitoring
 
 FEATURE_COUNTS_FILE = "feature_counts.tsv"
 BCV_DATA_FILE = "edgeR_bcv_data.tsv"
@@ -1050,7 +1050,7 @@ def add_differential_analysis(
 ) -> None:
     """Add overview, contrast, and result-stability tabs to the report section."""
     if monitoring_results is None:
-        monitoring_results = load_dea_monitoring(
+        monitoring_results = load_precision_monitoring(
             None,
             data.sample_metadata,
             "disabled",
@@ -1106,4 +1106,4 @@ def add_differential_analysis(
                         )
 
     with tabs.add_tab("DEA Termination"):
-        add_dea_monitoring(monitoring_results)
+        add_precision_monitoring(monitoring_results)

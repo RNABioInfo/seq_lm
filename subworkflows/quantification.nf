@@ -40,7 +40,7 @@ workflow quantification {
     all_samples: List<Sample>
 
     main:
-    def dea_event_mode: Boolean = params.live_analysis && params.stopping_method == 'dea' && params.monitoring_behavior != 'disabled'
+    def precision_event_mode: Boolean = params.live_analysis && params.monitoring_behavior != 'disabled'
 
     collated_bams = collate_chunk_bam(merged_bams)
     def pending_merged_bam_batches: Map<Integer, Map> = [:]
@@ -92,7 +92,7 @@ workflow quantification {
             )
         }
 
-    merged_bam_batches_ch = dea_event_mode
+    merged_bam_batches_ch = precision_event_mode
         ? independent_collated_batches(collated_bams, all_samples.size()).mix(empty_merged_bam_batches_ch)
         : order_batches(nonempty_merged_bam_batches_ch.mix(empty_merged_bam_batches_ch))
 
@@ -169,7 +169,7 @@ workflow quantification {
             )
         }
 
-    ordered_quantified_sample_updates_ch = dea_event_mode
+    ordered_quantified_sample_updates_ch = precision_event_mode
         ? nonempty_quantified_sample_updates_ch.mix(empty_quantified_sample_updates_ch)
         : order_batches(nonempty_quantified_sample_updates_ch.mix(empty_quantified_sample_updates_ch))
 
@@ -187,7 +187,7 @@ workflow quantification {
             }
         }
 
-        if (params.stopping_method == 'dea' && params.monitoring_behavior != 'disabled' && !latest_quantifications.isEmpty()) {
+        if (params.monitoring_behavior != 'disabled' && !latest_quantifications.isEmpty()) {
 
             // Placeholders defer missing pairs without blocking other contrasts.
             def template: Path = latest_quantifications.values().first().counts
@@ -196,7 +196,7 @@ workflow quantification {
                 def key: String = sample_key(sample)
 
                 if (!latest_quantifications.containsKey(key)) {
-                    def path: Path = Path.of(params.out_dir as String).toAbsolutePath().resolve('termination/dea/placeholders').resolve("${safe_name(sample.group)}_${safe_name(sample.name)}.quant")
+                    def path: Path = Path.of(params.out_dir as String).toAbsolutePath().resolve("termination/${params.stopping_method}/placeholders").resolve("${safe_name(sample.group)}_${safe_name(sample.name)}.quant")
                     java.nio.file.Files.createDirectories(path.parent)
 
                     def lines: List<String> = java.nio.file.Files.readAllLines(template)
@@ -389,7 +389,7 @@ process assemble_cumulative_collated_bam {
 /** Quantify one cumulative sample snapshot from a name-collated genome BAM. */
 process oarfish_quant {
     label 'seq_lm_dea'
-    container 'rnabioinfo/seq_lm_oarfish:v1.0.0'
+    container 'rnabioinfo/seq_lm_oarfish:v1.0.1'
     cpus 4
 
     input:

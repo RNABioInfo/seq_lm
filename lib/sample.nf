@@ -170,6 +170,7 @@ record SampleQCReportInputs {
 }
 
 record ICABatchResult {
+    observation: Map?
     batch_index: Integer
     report_sequence: Integer
     analysis_index: Integer

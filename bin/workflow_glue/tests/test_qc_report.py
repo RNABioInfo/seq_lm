@@ -313,7 +313,7 @@ def write_monitoring_results(path):
 def test_dea_report_identifies_uncertainty_scope_and_feature_count(tmp_path, selected):
     import dominate
 
-    from workflow_glue.qc_report_types.dea_monitoring import add_dea_monitoring
+    from workflow_glue.qc_report_types.precision_monitoring import add_precision_monitoring
 
     root = tmp_path / "monitoring"
     write_monitoring_results(root)
@@ -324,10 +324,10 @@ def test_dea_report_identifies_uncertainty_scope_and_feature_count(tmp_path, sel
     )]
     (root / "audit.json").write_text(json.dumps(audit))
     table = pd.DataFrame({"Sample": ["treatment_1"], "Eligible": ["false"]})
-    table.attrs["dea_monitoring_directory"] = str(root)
+    table.attrs["precision_monitoring_directory"] = str(root)
     document = dominate.document()
     with document:
-        add_dea_monitoring(table)
+        add_precision_monitoring(table)
     html = document.render()
     assert ("union of selected GMT features" if selected else "all quantified features") in html
     assert f"pair: {3 if selected else 300} features" in html

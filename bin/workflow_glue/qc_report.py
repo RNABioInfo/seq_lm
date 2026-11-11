@@ -12,9 +12,7 @@ from ezcharts.layout.snippets.table import DataTable
 from .qc_report_types.base_metrics import create_nanoplot_metrics_table
 from .qc_report_types.biotype_plot import add_transcript_biotype_composition
 from .qc_report_types.differential_plots import (
-    add_dea_monitoring,
     add_differential_analysis,
-    load_dea_monitoring,
     load_differential_results,
 )
 from .qc_report_types.gene_set_plots import (
@@ -27,13 +25,16 @@ from .qc_report_types.gsva_plots import (
     load_gsva_results,
 )
 from .qc_report_types.histogram_plots import add_sample_hists
-from .qc_report_types.ica_monitoring import load_ica_monitoring_results
 from .qc_report_types.imodulon_plots import (
     add_imodulon_analysis,
     load_imodulon_results,
 )
 from .qc_report_types.kde_plots import add_sample_2d_kdes, create_2d_kde_html
 from .qc_report_types.parse_inputs import load_qc_samples
+from .qc_report_types.precision_monitoring import (
+    add_precision_monitoring,
+    load_precision_monitoring,
+)
 from .qc_report_types.result_types import FlagstatResult, SampleQCResult
 from .qc_report_types.sankey_plot import (
     add_sample_read_fate_sankeys,
@@ -369,7 +370,7 @@ def main(args):
             args.differential_results,
             samples.samples_df,
         )
-        monitoring_results = load_dea_monitoring(
+        monitoring_results = load_precision_monitoring(
             args.monitoring_results if args.stopping_method == "dea" else None,
             differential.sample_metadata,
             args.monitoring_behavior,
@@ -400,8 +401,13 @@ def main(args):
             samples.samples_df,
         )
         if args.stopping_method == "ica" and args.monitoring_results is not None:
-            ica_monitoring_results = load_ica_monitoring_results(
-                args.monitoring_results, imodulon_results, args.monitoring_behavior, samples.samples_df,
+            ica_monitoring_results = load_precision_monitoring(
+                args.monitoring_results, None, args.monitoring_behavior, samples.samples_df,
+                method="ica",
+                expected_snapshot=(
+                    imodulon_results.provenance["batch_index"],
+                    imodulon_results.provenance["analysis_index"],
+                ),
             )
 
     report = labs_report(
@@ -498,15 +504,15 @@ def main(args):
 
         if differential is None and args.stopping_method == "dea" and args.monitoring_results is not None:
             with primary_tabs.add_tab("DEA Termination"):
-                add_dea_monitoring(load_dea_monitoring(args.monitoring_results, None, args.monitoring_behavior, samples.samples_df))
+                add_precision_monitoring(load_precision_monitoring(args.monitoring_results, None, args.monitoring_behavior, samples.samples_df))
         if imodulon_results is not None:
             with primary_tabs.add_tab("Independent Components"):
                 add_imodulon_analysis(
                     imodulon_results,
                 )
             if ica_monitoring_results is not None:
-                with primary_tabs.add_tab("ICA Monitoring"):
-                    DataTable.from_pandas(ica_monitoring_results, use_index=False)
+                with primary_tabs.add_tab("ICA Termination"):
+                    add_precision_monitoring(ica_monitoring_results)
 
     write_report( 
         report,

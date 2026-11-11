@@ -264,7 +264,7 @@ def test_temporal_analysis_writes_one_shared_gene_set_dropdown(tmp_path):
     versions.mkdir()
     (versions / "versions.txt").write_text("qc_report,workflow\n")
     params = tmp_path / "params.json"
-    params.write_text(json.dumps({"timeline_analysis": True}))
+    params.write_text(json.dumps({"gene_set_enrichment": True}))
     report = labs_report(
         labs,
         "Temporal test report",

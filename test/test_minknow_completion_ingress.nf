@@ -36,7 +36,7 @@ workflow {
             [first, second, other].each { dir: Path -> java.nio.file.Files.writeString(dir.resolve('STOP.watchdog'), '') }
         }
     }
-    def args = record(live_analysis: true, timeline_analysis: false, sample_sheet_path: sheet,
+    def args = record(live_analysis: true, sample_sheet_path: sheet,
         bam_poll_interval_ms: 100, bam_stability_polls: 3, termination_requested: false,
         detect_minknow_completion: true, minknow_completion_settle_seconds: 1)
     bam_ingress(args).collect(sort: false).map { batches ->

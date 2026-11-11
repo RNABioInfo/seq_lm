@@ -26,7 +26,7 @@ class SequencingProtocolManager:
         position_connection: mk.Connection,
     ) -> list[mk.protocol_pb2.ProtocolInfo]:  # type: ignore
         response = position_connection.protocol.list_protocols(force_reload=True)  # type: ignore
-        return response.protocols  # type: ignore
+        return response.protocols
 
     @staticmethod
     def start_sequencing_protocol(
@@ -78,7 +78,7 @@ class SequencingProtocolManager:
         )
         bam_args = protocols.OutputArgs(reads_per_file=4000, batch_duration=None)
 
-        protocol_identifier = protocol.identifier  # type: ignore
+        protocol_identifier = protocol.identifier
 
         protocol_args = protocols.make_protocol_arguments(
             basecalling=basecalling_args,

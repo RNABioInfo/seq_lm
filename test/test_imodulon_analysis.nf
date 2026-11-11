@@ -22,7 +22,7 @@ workflow {
     ica_snapshots_ch = imodulon_analysis(channel.fromList(batches), root.resolve('matrix.csv'),
         root.resolve('annotation.gtf'), root.resolve('matrix.csv'), root.resolve('iM_table.csv'),
         [control_group: 'control', has_gene_map: false, has_imodulon_table: true, min_gene_coverage: 1.0, log_base: 2.0,
-         pseudocount: 1.0, min_read_count: 0, padj_cutoff: 0.05], first, out_root)
+         pseudocount: 1.0, min_read_count: 0, min_replicate_sample_count: 2, padj_cutoff: 0.05], first, out_root)
     ica_snapshots_ch.collect().view { results ->
         results = results.toSorted { left, right -> left.analysis_index <=> right.analysis_index }
         assert results*.analysis_index == [first, first + 1]

@@ -1,4 +1,4 @@
-"""DEA sequencing run termination engine
+"""Shared sequencing run termination engine
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from pathlib import Path
 from .forecast import curve_summary, information_radius, quantile
 
 STATE_SCHEMA_VERSION = 3
-FORECAST_METHOD = "depth_curve"
+FORECAST_METHOD = "robust_recent_depth_curve"
 
 DEFAULTS = {
     "gain_cutoff": 0.01,
@@ -554,6 +554,8 @@ def assess_contrast(
 
 def fingerprint(payload, c):
     fields = {k: payload[k] for k in ("contrasts", "identities")}
+    if payload.get("method", "dea") != "dea":
+        fields["method"] = payload["method"]
     fields["samples"] = [
         {k: v for k, v in s.items() if k not in ("live", "available_at", "version")}
         for s in payload["samples"]
@@ -569,6 +571,7 @@ def fingerprint(payload, c):
 
 def evaluate(payload, state=None):
     c = validate_config(payload.get("config", {}))
+    method = payload.get("method", "dea")
     identity = fingerprint(payload, c)
 
     if state is not None and (
@@ -576,7 +579,7 @@ def evaluate(payload, state=None):
         or state.get("forecast_method") != FORECAST_METHOD
     ):
         raise ValueError(
-            "unsupported DEA state format or forecast method; use a fresh output directory"
+            "unsupported precision state format or forecast method; use a fresh output directory"
         )
 
     if state is None or state.get("fingerprint") != identity:
@@ -600,10 +603,9 @@ def evaluate(payload, state=None):
     metrics = []
     rate_rows = []
     sequenced = {x["key"]: x.get("declared_live", x["live"]) for x in samples}
+    selection_key = "ica_stopping_components" if method == "ica" else "dea_stopping_genes"
     uncertainty_scope = (
-        "selected_features"
-        if payload["identities"].get("dea_stopping_genes") is not None
-        else "all_features"
+        "selected_features" if payload["identities"].get(selection_key) is not None else "all_features"
     )
 
     for definition in payload["contrasts"]:
@@ -659,6 +661,8 @@ def evaluate(payload, state=None):
             metrics.append(
                 {
                     "contrast_id": cid,
+                    "target_group": definition["target_group"],
+                    "reference_group": definition["reference_group"],
                     "elapsed_seconds": t,
                     "reason": "analysis_deferred",
                     "eligible": False,
@@ -689,7 +693,7 @@ def evaluate(payload, state=None):
                 "bam_dir": sample["bam_dir"],
                 "protocol_run_id": sample.get("protocol_run_id") or "",
                 "effectively_live": sample["live"],
-                "method": "dea",
+                "method": method,
                 "metric": "R_information",
                 "required_contrasts": ",".join(required),
                 "consecutive_confirmations": min(

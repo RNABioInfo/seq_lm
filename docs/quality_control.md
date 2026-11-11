@@ -1,129 +1,56 @@
-## Analysis Report and Quality Control Workflow
+# Quality control and reports
 
-The quality control workflow runs once per sample chunk. A chunk is the set of
-new BAM files observed for one sample at a synchronized live-analysis batch
-index. Multiple startup BAMs are block-concatenated, while a one-BAM chunk is
-reused directly. Neither path sorts or indexes the chunk, so each QC result
-describes one sample chunk rather than a final accumulated sample BAM.
+> **_Author Note:_**  This documentation was generated using OpenAI GPT-6.1 and manually checked for correctness.
 
-The workflow currently runs two tabular QC steps:
+The workflow writes `qc_report.html` to the output directory. The **Quality
+Control** tab presents read counts, alignment summaries, and distributions
+of read length, read quality, and mapping quality for each sample. When
+both reference files are available, **Transcript Biotypes** shows the
+distribution of assigned reads across transcript biotypes.
+[Quantification guide](quantification.md)
 
-* `bam-qc-table` performs a sequential scan using NanoGet's per-alignment metric
-  calculations and writes the NanoPlot-compatible `NanoPlot-data.tsv.gz`
-  without requiring a coordinate index or rendering unused plots.
-* `samtools flagstat -O tsv` reads the same chunk BAM and writes a TSV
-  alignment summary.
+Additional tabs appear when results from the enabled analyses are available.
 
-The main workflow publishes an EPI2ME-displayable HTML analysis report after
-all enabled outputs for a synchronized batch are complete. With paired
-reference inputs, this includes the matching cumulative Oarfish biotype summary
-and, when enabled, edgeR readiness or results. During
-live analysis, raw NanoPlot and flagstat tables remain report inputs in
-Nextflow work directories. When the stream completes, they are also persisted
-with the sample's `FINAL` checkpoint under `--out_dir` so later invocations can
-restore QC without rescanning BAMs. The stable HTML shell is the user-facing
-entry point; a small state file points it to the immutable snapshot for the
-newest complete batch.
+- **Differential Expression** presents an overview of the samples and
+  results for each group comparison. [Differential expression guide](differential_expression.md)
+- **Gene Set Enrichment** shows GSVA scores and fry enrichment results.
+  **Time Course** appears when the sample sheet includes time points.
+- **Independent Components** shows iModulon activities and comparisons with
+  the control group. [iModulon guide](imodulon_analysis.md)
+- **DEA Termination** or **ICA Termination** reports whether the stopping
+  criteria are met and whether sequencing was stopped. [Automated stopping guide](dea_termination.md)
 
-Expected published output layout:
+## Viewing a live report
 
-```text
-qc_report.html
-qc_report_state.json
-qc_report_snapshot_revision_<report_revision>.html
+The report updates when new results are available. When precision monitoring
+is disabled, each live update normally requires a new BAM file from every
+sample still receiving data.
+
+Keep `qc_report.html`, `qc_report_state.json`, and the
+`qc_report_snapshot_revision_*.html` files in the same directory during
+analysis. If the browser remains on **Waiting for update** when opening the
+report from disk, serve the output directory locally. Replace `output` with
+the path to the output directory.
+
+```bash
+python3 -m http.server 8000 --bind 127.0.0.1 --directory output
 ```
 
-`qc_report.html` displays the title `seq_lm analysis report`. It is published at the workflow
-output root with overwrite enabled so EPI2ME can display one stable report path
-while live chunks arrive. The shell polls `qc_report_state.json` and refreshes
-only its internal report frame when a complete snapshot becomes available.
-Active Bootstrap tabs, dropdown selections, and scroll position are restored
-after the frame update using hierarchy-based tab keys, so the browser page
-itself is not reloaded. Hidden Bokeh and ECharts views are resized when their
-tabs open. After successful workflow completion, `qc_report.html` is replaced
-atomically by the latest self-contained snapshot, so the finalized report has
-no live-update status or polling behavior. The report has four possible primary
-tabs:
+Open [the local report](http://127.0.0.1:8000/qc_report.html) in a browser.
 
-* **Quality Control** contains read-flow, metrics, read-length, read-quality,
-  mapping-quality, and sample views. When both reference inputs are present, a
-  separate **Transcript biotypes** tab contains a cross-sample 100% stacked
-  horizontal bar chart of Oarfish abundance by transcript biotype.
-* **Differential Analysis** separates its overview from contrasts, then uses
-  contrast and plot-type subtabs for logFC-versus-logCPM, volcano, and top-gene
-  heatmap plots.
-* **Gene Set Enrichment** separates raw GSVA scores, GSVA limma testing, and
-  directional fry. GSVA includes score heatmaps, raw score distributions,
-  coverage, a multi-contrast dot plot, and per-contrast volcano and heatmap
-  views. GSVA heatmap rows retain their selection order and sample columns
-  retain metadata order; their scales map low values to blue and high values
-  to red.
-  GSVA views show gene-set identifiers rather than descriptions. fry retains
-  the gene-set dropdown used for barcode plots. Concise
-  identifiers appear in long dropdowns, while barcode views expose complete
-  labels and statistics in **Gene-set details**.
-* **Temporal Analysis**, shown when timeline and gene-set analysis are enabled
-  and a complete differential result is available, provides one gene-set
-  dropdown controlling a GSVA mean/SD/raw-point trajectory and a scored-gene
-  clustered row-z-score heatmap over elapsed minutes.
+The final `qc_report.html` is self-contained and can be shared after the
+workflow completes.
 
-Nested tab content uses reduced padding, while the primary tab bar uses the
-workflow brand color to remain visually distinct from analysis, contrast, and
-plot-type subtabs.
+## Reusing completed samples
 
-The report sample TSV uses this shape:
+After a run with quantification completes, final counts and quality control
+tables are available under `<out_dir>/<group>/<alias>/`. A `FINAL` file
+identifies a completed sample.
 
-```text
-name	group	order	chunks_seen	latest_batch_index	qc_dir
-rep_1	control	0	2	2	qc_results
-```
+To add samples to an experiment, update the sample sheet and use the same
+`out_dir`. seq_lm reuses completed samples with matching inputs and rebuilds
+the combined report. Reuse is independent of Nextflow's `-resume` option.
 
-Inside the report work directory, `qc_results` contains the raw QC tables for
-all chunks currently known to the report:
-
-```text
-qc_results/
-  nanoplot/
-    <group>/
-      <name>/
-        nanoplot_data_chunk_<batch_index>.tsv.gz
-  flagstat/
-    <group>/
-      <name>/
-        flagstat_data_chunk_<batch_index>.tsv
-```
-
-The BAM sample sheet uses `alias`, `group`, and `bam_dir` columns, plus optional
-`is_live`, `order`, and `minknow_run_dir` columns. `is_live` accepts case-insensitive `true` or
-`false`; a missing or blank value defaults to `true`. A sample is watched only
-when both `--live_analysis` and its row-level `is_live` value are true. When
-`--timeline_analysis` is enabled, `order` is required. With active ICA, including
-the `order` column automatically enables ICA time-course views. In either case,
-order is interpreted as signed integer elapsed minutes. Every row must provide a
-value, each group must map to one minute, and each minute to one group for the
-single supported trajectory.
-
-Final samples are processed once from all BAMs present at startup and must have
-at least one BAM. Later QC checkpoints wait for one new BAM from every currently
-active live sample, retain final or stopped samples' QC inputs, and refresh the
-cumulative report. A sample leaves later batch barriers after its manual `STOP`
-is drained or [MinKNOW completion](minknow_completion.md) is validated and its BAM
-inventory settles, so other samples may continue independently. The workflow treats `alias` as the
-sample name and requires at least two rows where `group` is `control`.
-
-QC-only startup batches are not published as incomplete reports. Without
-references, reports follow the QC batch stream. With references, a report waits
-for the matching complete cumulative quantification/biotype batch; if
-differential expression is enabled it also waits for the matching readiness or
-result record. This prevents report figures from mixing live batches.
-
-Nextflow automatically fetches the configured, versioned images from Docker Hub
-through the selected container runtime. These images provide NanoGet for per-read
-QC, samtools for alignment processing, edgeR for differential expression, and
-ezCharts/Bokeh for the combined HTML report.
-
-The chunk-level QC workflow intentionally does not consume the reference
-annotation. Transcript-biotype composition is produced by the standalone
-quantification workflow and routed into its own Quality Control → Transcript
-biotypes tab. See
-[Quantification and transcript-biotype QC](quantification.md).
+Use a new output directory to recompute results after changes to the BAM
+files, reference files, or strand setting. Run one workflow at a time per
+output directory.

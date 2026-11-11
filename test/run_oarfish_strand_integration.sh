@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Requires a running Docker daemon, the workflow's Oarfish image, samtools, and Python 3.
 set -euo pipefail
-image='rnabioinfo/seq_lm_oarfish:v1.0.0'
+image="${1:-rnabioinfo/seq_lm_oarfish:v1.0.1}"
 docker image inspect "$image" >/dev/null
 test_root="$(mktemp -d "${TMPDIR:-/tmp}/seq-lm-oarfish-strands.XXXXXX")"
 docker run --rm --entrypoint oarfish "$image" --version > "$test_root/version.txt"

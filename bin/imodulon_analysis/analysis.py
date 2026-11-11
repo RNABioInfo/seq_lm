@@ -15,6 +15,7 @@ import pandas as pd
 import scipy
 from scipy import stats
 from workflow_glue.imodulon_metadata import read_component_metadata
+from workflow_glue.readiness import read_depth_readiness
 from workflow_glue.transcript_biotypes import (
     TRANSCRIPT_FEATURES,
     identifier_aliases,
@@ -141,12 +142,23 @@ def annotation_targets(path):
     return gene_aliases, transcripts, transcript_aliases
 
 
-def prepare(matrix, annotation, gene_map, min_coverage, output, imodulon_table=None):
+def read_stopping_components(path, components):
+    selected = [line.strip() for line in Path(path).read_text().splitlines() if line.strip()]
+    if not selected or len(selected) != len(set(selected)):
+        raise ValueError("ICA stopping components must be nonempty and unique")
+    unknown = set(selected) - set(components)
+    if unknown:
+        raise ValueError(f"Unknown ICA stopping components: {sorted(unknown)}")
+    return selected
+
+
+def prepare(matrix, annotation, gene_map, min_coverage, output, imodulon_table=None, stopping_components=None):
     output = Path(output)
     output.mkdir(parents=True, exist_ok=False)
     table = read_table(matrix)
     genes = identifiers(table.iloc[:, 0], "Matrix genes")
     components = identifiers(table.columns[1:], "Matrix components")
+    selected = read_stopping_components(stopping_components, components) if stopping_components else None
     component_metadata = (
         read_component_metadata(imodulon_table, components) if imodulon_table else {}
     )
@@ -276,8 +288,9 @@ def prepare(matrix, annotation, gene_map, min_coverage, output, imodulon_table=N
             "genes": shared,
             "components": components,
             "component_metadata": component_metadata,
-            # Full-model column maxima make the convergence score
-            # invariant to ICA column scaling, even with partial gene mapping.
+            **({"stopping_components": selected} if selected is not None else {}),
+            # Full-model maxima make weighted interval widths invariant to
+            # ICA column scaling, including with partial gene mapping.
             "component_max_abs_weights": dict(zip(components, column_scale.tolist())),
             "transcript_map": transcript_map,
             "transcript_aliases": {
@@ -414,6 +427,39 @@ def stable_sample_id(group, alias):
     )
 
 
+def project_abundance(abundance, totals, control, inverse, log_base, pseudocount):
+    normalized = abundance / np.asarray(totals) * 1e6
+    logged = np.log(normalized + pseudocount) / np.log(log_base)
+    reference = logged[:, control].mean(axis=1)
+    centered = logged - reference[:, None]
+    activities = inverse @ centered
+    raw_activities = inverse @ logged
+
+    if not all(np.isfinite(x).all() for x in (logged, activities, raw_activities)):
+        raise ValueError("Projection produced nonfinite values; check matrix scaling and transformation")
+
+    return reference, centered, activities, raw_activities
+
+
+def write_partial_monitoring_activity(
+    output, metadata, abundance, inverse, components, ready_groups,
+    control_group, log_base, pseudocount, cutoff,
+):
+    selected = metadata.group.isin(ready_groups)
+    available = metadata.loc[selected]
+    control = available.group.eq(control_group).to_numpy()
+    if not control.any() or control.all():
+        return
+
+    _, _, centered, raw = project_abundance(
+        abundance[:, selected.to_numpy()], available.assigned_abundance,
+        control, inverse, log_base, pseudocount,
+    )
+    differential_activity(raw, centered, available, components, control_group, cutoff).to_csv(
+        output / "monitoring_differential_activity.tsv", sep="\t", index=False
+    )
+
+
 def analyze(
     prepared,
     manifest,
@@ -422,11 +468,13 @@ def analyze(
     log_base=2.0,
     pseudocount=1.0,
     min_reads=10000,
+    min_replicate_sample_count=2,
     cutoff=0.05,
     batch_index=0,
     analysis_index=0,
     report_sequence=0,
     control_group="control",
+    monitoring=False,
 ):
     prepared, output = Path(prepared), Path(output)
     output.mkdir(parents=True, exist_ok=False)
@@ -502,10 +550,14 @@ def analyze(
         hashes.append(dict(sample_id=row.sample_id, sha256=sha256(path)))
 
     metadata["assigned_abundance"] = totals
-    metadata["ready"] = [(t > 0 and t >= min_reads) for t in totals]
+    passing_libraries, ready_groups = read_depth_readiness(
+        zip(metadata.group, totals, strict=True), min_reads, min_replicate_sample_count
+    )
+    metadata["ready"] = passing_libraries
+    deferred_groups = sorted(set(metadata.group) - ready_groups)
     metadata.to_csv(output / "sample_metadata.tsv", sep="\t", index=False)
     provenance = {
-        "schema_version": 1,
+        "schema_version": 2,
         "batch_index": batch_index,
         "analysis_index": analysis_index,
         "report_sequence": report_sequence,
@@ -518,6 +570,7 @@ def analyze(
             "log_base": log_base,
             "pseudocount": pseudocount,
             "min_read_count": min_reads,
+            "min_replicate_sample_count": min_replicate_sample_count,
             "padj_cutoff": cutoff,
             "normalization": "all Oarfish assigned abundance per million; no length correction",
         },
@@ -532,33 +585,30 @@ def analyze(
 
     write_json(output / "provenance.json", provenance)
 
-    if not metadata.ready.all():
+    if deferred_groups:
         write_json(
             output / "status.json",
             {
                 "status": "deferred",
-                "reason": "insufficient_assigned_abundance",
-                "sample_ids": metadata.loc[~metadata.ready, "sample_id"].tolist(),
+                "reason": "insufficient_read_depth",
+                "deferred_groups": deferred_groups,
                 "statistical_availability": "unavailable",
             },
         )
+        if monitoring:
+            write_partial_monitoring_activity(
+                output, metadata, abundance, inverse, model["components"],
+                ready_groups, control_group, log_base, pseudocount, cutoff,
+            )
         return
-    
-    abundance = abundance / np.asarray(totals) * 1e6
-    logged = np.log(abundance + pseudocount) / np.log(log_base)
-    reference = logged[:, control].mean(axis=1)
-    centered = logged - reference[:, None]
-    activities = inverse @ centered
-    raw_activities = inverse @ logged
-    residual = centered - m @ activities
 
-    if not all(
-        np.isfinite(x).all() for x in (logged, activities, raw_activities, residual)
-    ):
-        raise ValueError(
-            "Projection produced nonfinite values; check matrix scaling and transformation"
-        )
-    
+    reference, centered, activities, raw_activities = project_abundance(
+        abundance, totals, control, inverse, log_base, pseudocount,
+    )
+    residual = centered - m @ activities
+    if not np.isfinite(residual).all():
+        raise ValueError("Projection produced nonfinite residuals; check matrix scaling and transformation")
+
     ids = metadata.sample_id.tolist()
     pd.DataFrame(
         activities,
@@ -660,6 +710,7 @@ def main():
     prep.add_argument("--matrix", required=True)
     prep.add_argument("--annotation", required=True)
     prep.add_argument("--gene-map")
+    prep.add_argument("--stopping-components")
     prep.add_argument(
         "--imodulon-table",
         help="Model-specific iModulon names and functions CSV/TSV.",
@@ -672,13 +723,11 @@ def main():
     for flag in ("prepared", "manifest", "counts-dir", "output"):
         run.add_argument("--" + flag, required=True)
     run.add_argument("--control-group", default="control")
+    run.add_argument("--monitoring", action="store_true")
     run.add_argument("--log-base", type=lambda x: finite_number(x, 1), default=2.0)
     run.add_argument("--pseudocount", type=lambda x: finite_number(x, 0), default=1.0)
-    run.add_argument(
-        "--min-reads",
-        type=lambda x: finite_number(x, 0, inclusive=True),
-        default=10000.0,
-    )
+    run.add_argument("--min-reads", type=int, default=10000)
+    run.add_argument("--min-replicate-sample-count", type=int, default=2)
     run.add_argument("--cutoff", type=lambda x: finite_number(x, 0, 1), default=0.05)
     for flag in ("batch-index", "analysis-index", "report-sequence"):
         run.add_argument("--" + flag, type=int, default=0)

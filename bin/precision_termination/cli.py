@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from .engine import FORECAST_METHOD, atomic_json, evaluate, read_tsv, write_tsv
+from .ica import load_ica_precision
 
 
 def load_precision(root, definitions, selected=False):
@@ -49,10 +50,17 @@ def main():
     a = p.parse_args()
     payload = json.loads(a.input.read_text())
     root = Path(payload.pop("results"))
-    payload["precision"] = load_precision(
-        root, payload["contrasts"],
-        selected=payload["identities"].get("dea_stopping_genes") is not None,
-    )
+    if payload.get("method", "dea") == "ica":
+        payload["precision"], ica_identities = load_ica_precision(
+            root, payload["contrasts"], payload["samples"]
+        )
+        payload["identities"].update(ica_identities)
+    else:
+        payload["precision"] = load_precision(
+            root, payload["contrasts"],
+            selected=payload["identities"].get("dea_stopping_genes") is not None,
+        )
+
     previous = json.loads(a.state.read_text()) if a.state.exists() else None
     state, contrasts, samples, rates = evaluate(payload, previous)
     a.output.mkdir(parents=True, exist_ok=True)

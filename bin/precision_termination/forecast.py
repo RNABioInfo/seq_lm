@@ -3,6 +3,11 @@
 import math
 
 
+FIT_HALF_LIFE_SECONDS = 2 * 60 * 60
+HUBER_RELATIVE_LIMIT = 0.04
+ROBUST_FIT_ITERATIONS = 8
+
+
 def quantile(values, q):
     values = sorted(values)
     if not values:
@@ -27,30 +32,63 @@ def information_radius(r, scale=1.0):
     return (scale * math.sqrt(1 / info - 1) if info > 0 else math.inf), info
 
 
-def fit_curve(depths, radii):
-    pairs = [
-        (1e6 / d, r * r)
-        for d, r in zip(depths, radii)
-        if math.isfinite(d + r) and d > 0 and r > 0
-    ]
-    if not pairs:
+def nonnegative_fit(rows, weights):
+    """Fit two nonnegative coefficients to a response of one."""
+    weighted = [(x, y, w * x, w * y) for (x, y), w in zip(rows, weights, strict=True)]
+    s00 = math.fsum(x * wx for x, _, wx, _ in weighted)
+    s01 = math.fsum(x * wy for x, _, _, wy in weighted)
+    s11 = math.fsum(y * wy for _, y, _, wy in weighted)
+    s0 = math.fsum(wx for _, _, wx, _ in weighted)
+    s1 = math.fsum(wy for _, _, _, wy in weighted)
+
+    if s00 == 0:
         return math.nan, math.nan
-    n = len(pairs)
-    sx = math.fsum(x for x, y in pairs)
-    sxx = math.fsum(x * x for x, y in pairs)
-    sy = math.fsum(y for x, y in pairs)
-    sxy = math.fsum(x * y for x, y in pairs)
-    det = n * sxx - sx * sx
-    candidates = [(sy / n, 0.0), (0.0, sxy / sxx)]
-    if det > max(n * sxx, 1) * 1e-12:
-        b = (n * sxy - sx * sy) / det
-        a = (sy - b * sx) / n
+
+    candidates = [(s0 / s00, 0.0)]
+    if s11 > 0:
+        candidates.append((0.0, s1 / s11))
+    det = s00 * s11 - s01 * s01
+    if det > s00 * s11 * 1e-12:
+        a = (s0 * s11 - s1 * s01) / det
+        b = (s1 * s00 - s0 * s01) / det
         if a >= 0 and b >= 0:
             candidates.append((a, b))
+
     return min(
         candidates,
-        key=lambda ab: math.fsum((y - ab[0] - ab[1] * x) ** 2 for x, y in pairs),
+        key=lambda ab: math.fsum(w * (1 - ab[0] * x - ab[1] * y) ** 2
+                                 for (x, y), w in zip(rows, weights, strict=True)),
     )
+
+
+def fit_curve(depths, radii, times):
+    """Fit the raw scores with recency weights and a robust relative error loss."""
+    points = [(d, r, t) for d, r, t in zip(depths, radii, times, strict=True)
+              if math.isfinite(d + r + t) and d > 0 and r > 0]
+    if not points:
+        return math.nan, math.nan
+
+    min_depth = min(d for d, _, _ in points)
+    min_radius = min(r for _, r, _ in points)
+    radius_squared = min_radius * min_radius
+    if not 0 < radius_squared < math.inf:
+        return math.nan, math.nan
+
+    # Divide each residual by observed R². Scale the coefficients so the
+    # two design columns are bounded by one and the response is one.
+    inverse_radii = [(min_radius / r) ** 2 for _, r, _ in points]
+    rows = [(x, x * min_depth / d) for x, (d, _, _) in zip(inverse_radii, points, strict=True)]
+    latest = max(t for _, _, t in points)
+    recency = [2 ** (-(latest - t) / FIT_HALF_LIFE_SECONDS) for _, _, t in points]
+
+    a, b = nonnegative_fit(rows, recency)
+    for _ in range(ROBUST_FIT_ITERATIONS):
+        # Huber loss downweights large relative misses without removing points.
+        weights = [w / max(1.0, abs(1 - a * x - b * y) / HUBER_RELATIVE_LIMIT)
+                   for (x, y), w in zip(rows, recency, strict=True)]
+        a, b = nonnegative_fit(rows, weights)
+
+    return a * radius_squared, b * radius_squared * (min_depth / 1e6)
 
 
 def curve_summary(depths, radii, times, extra, config):
@@ -81,7 +119,7 @@ def curve_summary(depths, radii, times, extra, config):
         return result
 
     d, r, ts = map(list, zip(*valid))
-    a, b = fit_curve(d, r)
+    a, b = fit_curve(d, r, ts)
     current = depths[-1]
     observed = radii[-1]
 

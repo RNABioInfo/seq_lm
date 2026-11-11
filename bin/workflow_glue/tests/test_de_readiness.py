@@ -96,3 +96,11 @@ def test_de_readiness_accepts_at_least_one_shared_feature_id(tmp_path):
         )
         == "ready"
     )
+
+
+def test_de_readiness_includes_positive_shallow_library(tmp_path):
+    assert _run_check(tmp_path, [10000, 12000, 11000, 13000, 1000]) == "ready"
+
+
+def test_de_readiness_rejects_empty_library_even_with_enough_deep_replicates(tmp_path):
+    assert _run_check(tmp_path, [10000, 12000, 11000, 13000, 0]) == "insufficient_read_depth"

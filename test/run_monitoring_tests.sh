@@ -28,7 +28,7 @@ run_case report-join test_report_batch_join.nf
 run_case ica-report-join test_ica_report_batch_join.nf
 run_case dea-action-guards test_dea_action_guards.nf
 run_case acquisition-actions test_acquisition_actions.nf
-run_case ica test_ica_stability.nf
+run_case ica test_ica_analysis_monitoring.nf
 run_case gene-contrasts test_gene_contrasts.nf
 run_case validation test_parameter_validation.nf
 run_case checkpoint-resume test_sample_checkpoints.nf

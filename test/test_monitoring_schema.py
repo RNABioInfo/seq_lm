@@ -14,15 +14,14 @@ BASE = {
     "ica_analysis": True, "ica_matrix": "weights.csv",
     "differential_expression": False, "gene_set_enrichment": False,
     "reference_genome": "genome.fa", "reference_annotation": "annotation.gtf",
-    "live_analysis": True, "num_stable_batches": 3,
-    "ica_max_fold_change": 1.05, "ica_min_read_growth_fraction": 0.1,
+    "live_analysis": True,
 }
 
 
 def test_ica_stopping_does_not_require_dea():
     VALIDATOR.validate(BASE)
     VALIDATOR.validate(BASE | {"monitoring_behavior": "terminate"})
-    VALIDATOR.validate(BASE | {"ica_max_fold_change": 1})
+    VALIDATOR.validate(BASE | {"ica_stopping_components": "components.txt"})
     VALIDATOR.validate(BASE | {"stopping_method": "dea", "differential_expression": True})
     Draft7Validator.check_schema(SCHEMA)
 
@@ -32,12 +31,11 @@ def test_ica_stopping_does_not_require_dea():
     {"stopping_method": "r"},
     {"ica_analysis": False},
     {"ica_matrix": ""},
-    {"ica_max_fold_change": 0.95},
-    {"ica_max_fold_change": "1.05"},
-    {"ica_min_read_growth_fraction": 0},
-    {"ica_min_read_growth_fraction": -0.1},
-    {"num_stable_batches": 0},
-    {"num_stable_batches": 1.5},
+    {"ica_stopping_components": True},
+    {"stopping_gain_cutoff": 1},
+    {"stopping_gain_cutoff": "0.01"},
+    {"stopping_forecast_minutes": 0},
+    {"stopping_confirmations": 1.5},
     {"monitoring_behavior": "terminate", "live_analysis": False},
 ])
 def test_invalid_stopping_parameters_are_rejected(values):
@@ -60,7 +58,7 @@ def test_minknow_completion_options():
 
 def test_dea_parameter_names():
     valid = BASE | {"stopping_method":"dea", "differential_expression":True,
-                    "dea_gain_cutoff":0.01, "dea_forecast_minutes":30}
+                    "stopping_gain_cutoff":0.01, "stopping_forecast_minutes":30}
     VALIDATOR.validate(valid)
     VALIDATOR.validate(valid | {"dea_stopping_genes": "targets.gmt"})
     assert list(VALIDATOR.iter_errors(valid | {"dea_stopping_genes": True}))
@@ -68,10 +66,10 @@ def test_dea_parameter_names():
 
 
 def test_only_active_stopping_settings_are_validated():
-    dea = BASE | {"stopping_method":"dea","differential_expression":True}
-    VALIDATOR.validate(dea | {"ica_max_fold_change":"unused", "ica_min_read_growth_fraction":None, "num_stable_batches":False})
-    VALIDATOR.validate(BASE | {"dea_gain_cutoff":"unused", "dea_forecast_minutes":None})
-    VALIDATOR.validate(BASE | {"monitoring_behavior":"disabled", "dea_gain_cutoff":"unused", "dea_forecast_minutes":None, "ica_max_fold_change":False, "num_stable_batches":0})
-    assert list(VALIDATOR.iter_errors(dea | {"dea_gain_cutoff":1}))
-    assert list(VALIDATOR.iter_errors(dea | {"dea_forecast_minutes":0}))
-    assert list(VALIDATOR.iter_errors(dea | {"dea_min_points":5}))
+    dea = BASE | {"stopping_method": "dea", "differential_expression": True}
+    VALIDATOR.validate(dea | {"ica_stopping_components": True})
+    VALIDATOR.validate(BASE | {"monitoring_behavior": "disabled", "stopping_gain_cutoff": "unused"})
+    for active in (dea, BASE):
+        assert list(VALIDATOR.iter_errors(active | {"stopping_gain_cutoff": 1}))
+        assert list(VALIDATOR.iter_errors(active | {"stopping_forecast_minutes": 0}))
+        assert list(VALIDATOR.iter_errors(active | {"stopping_min_points": 5}))

@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "bin"))
-from dea_termination.engine import (
+from precision_termination.engine import (
     DEFAULTS,
     atomic_json,
     evaluate,
@@ -21,8 +21,8 @@ from dea_termination.engine import (
     weighted_quantile,
     write_tsv,
 )
-from dea_termination.cli import load_precision
-from dea_termination.forecast import curve_summary, fit_curve, information_radius
+from precision_termination.cli import load_precision
+from precision_termination.forecast import curve_summary, fit_curve, information_radius
 
 
 def payload(t=0, R=1.0, depth=1000.0, extra=None):
@@ -189,7 +189,7 @@ def test_selected_cli_audits_all_contrasts_and_handles_deferral(tmp_path):
     p["results"] = str(root)
     request = tmp_path / "request.json"
     request.write_text(json.dumps(p))
-    script = Path(__file__).parents[1] / "bin/dea-termination"
+    script = Path(__file__).parents[1] / "bin/precision-termination"
     for deferred in (False, True):
         if deferred:
             for cid in ("T1", "other"):
@@ -212,7 +212,8 @@ def test_selected_cli_audits_all_contrasts_and_handles_deferral(tmp_path):
 
 def test_nonnegative_curve_recovers_known_model():
     depths = np.arange(1, 30) * 10000
-    a, b = fit_curve(depths, np.sqrt(0.25 + 20000 / depths))
+    times = np.arange(1, 30) * 600
+    a, b = fit_curve(depths, np.sqrt(0.25 + 20000 / depths), times)
     assert a == pytest.approx(0.25)
     assert b == pytest.approx(0.02)
     c = curve_summary(
@@ -226,6 +227,24 @@ def test_nonnegative_curve_recovers_known_model():
     assert not curve_summary([100] * 6, [1] * 6, list(range(6)), 0, DEFAULTS)[
         "curve_usable"
     ]
+
+
+def test_robust_fit_preserves_raw_scores_and_limits_large_misses():
+    from scipy.optimize import nnls
+
+    depths = np.array([18000, 39000, 62000, 77000, 95000, 140000, 180000, 245000])
+    times = np.array([0, 1900, 2200, 5800, 7200, 9600, 13000, 14400])
+    raw = np.array([1.49, 1.11, .97, .88, 1.4, .74, .73, .71])
+    design = np.column_stack((np.ones(len(depths)), 1e6 / depths)) / raw[:, None] ** 2
+    recent_weights = np.exp2((times - times[-1]) / 7200)
+    weights = recent_weights
+
+    for _ in range(9):
+        root = np.sqrt(weights)
+        expected, _ = nnls(design * root[:, None], root)
+        weights = recent_weights / np.maximum(1, np.abs(design @ expected - 1) / .04)
+
+    assert fit_curve(depths, raw, times) == pytest.approx(expected)
 
 
 def test_long_pause_does_not_erase_reference_and_recovery_requires_two_bins():
@@ -367,7 +386,7 @@ def test_invalid_config(config):
 
 
 def test_threshold_equality_and_three_confirmations(monkeypatch):
-    from dea_termination import engine
+    from precision_termination import engine
 
     predicted = 0.008
 
@@ -489,7 +508,7 @@ def test_partial_member_updates_accumulate_until_every_live_member_is_fresh():
 
 
 def test_hourly_output_can_qualify_only_with_hourly_horizon(monkeypatch):
-    from dea_termination import engine
+    from precision_termination import engine
 
     monkeypatch.setattr(
         engine,
@@ -509,7 +528,7 @@ def test_hourly_output_can_qualify_only_with_hourly_horizon(monkeypatch):
 
 
 def test_burst_delivery_cannot_shortcut_confirmation_span(monkeypatch):
-    from dea_termination import engine
+    from precision_termination import engine
 
     monkeypatch.setattr(
         engine,
@@ -545,15 +564,15 @@ def test_forecasts_mature_once_after_deadline_is_bracketed():
 
 
 def test_curve_only_margin_uses_completed_curve_errors(monkeypatch):
-    from dea_termination import engine
+    from precision_termination import engine
 
-    monkeypatch.setattr(
-        engine,
-        "curve_summary",
-        lambda *args: {
-            "curve_gain": 0.001, "curve_usable": True, "elbow_pass": True,
-        },
-    )
+    fitted_scores = []
+
+    def curve_summary(_depths, radii, *_args):
+        fitted_scores.append(radii[-1])
+        return {"curve_gain": 0.001, "curve_usable": True, "elbow_pass": True}
+
+    monkeypatch.setattr(engine, "curve_summary", curve_summary)
     state = None
     for t in (0, 600, 1200):
         state, metrics, *_ = evaluate(
@@ -563,13 +582,18 @@ def test_curve_only_margin_uses_completed_curve_errors(monkeypatch):
     state, metrics, *_ = evaluate(
         payload(1800, R=math.exp(-0.18), depth=2800), state
     )
-    actual_gain = 1 - math.exp(-0.18)
+    raw_R = math.exp(-0.18)
+    actual_gain = 1 - raw_R
+    assert metrics[0]["R_information"] == pytest.approx(raw_R)
+    assert fitted_scores[-1] == pytest.approx(raw_R)
+    assert metrics[0]["observed_gain_previous_horizon"] == pytest.approx(actual_gain)
+    assert state["audit_history"][0]["actual_gain_next_horizon"] == pytest.approx(actual_gain)
     assert metrics[0]["forecast_margin"] == pytest.approx(actual_gain - 0.001)
     assert metrics[0]["predicted_conservative_gain"] == pytest.approx(actual_gain)
-    assert metrics[0]["forecast_method"] == "depth_curve"
+    assert metrics[0]["forecast_method"] == "robust_recent_depth_curve"
     assert "model_gain" not in metrics[0]
     assert state["schema_version"] == 3
-    assert state["forecast_method"] == "depth_curve"
+    assert state["forecast_method"] == "robust_recent_depth_curve"
     assert all("curve_gain" in f and "base" not in f
                for f in state["contrasts"]["T1"]["forecasts"])
 
@@ -605,6 +629,8 @@ def test_resume_baseline_does_not_invent_a_zero_production_interval():
 def test_old_timed_state_and_removed_settings_are_rejected():
     with pytest.raises(ValueError, match="unsupported"):
         evaluate(payload(), {"schema_version": 1})
+    with pytest.raises(ValueError, match="use a fresh output directory"):
+        evaluate(payload(), {"schema_version": 3, "forecast_method": "depth_curve"})
     for name in ("checkpoint_seconds", "recovery_bins"):
         with pytest.raises(ValueError, match="unknown"):
             validate_config({name: 600})

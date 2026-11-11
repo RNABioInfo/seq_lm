@@ -29,8 +29,7 @@ def validate_parameters(params_map: Map) -> Void {
         if (!params_map.reference_genome || !params_map.reference_annotation) {
             error('--ica_matrix requires both --reference_genome and --reference_annotation.')
         }
-        ['ica_log_base', 'ica_pseudocount', 'ica_min_gene_coverage',
-         'ica_min_read_count', 'ica_padj_cutoff'].each { name: String ->
+        ['ica_log_base', 'ica_pseudocount', 'ica_min_gene_coverage', 'ica_padj_cutoff'].each { name: String ->
             def value = params_map[name]
             if (!(value instanceof Number) || !Double.isFinite((value as Number).doubleValue())) {
                 error("--${name} must be a finite number.")
@@ -43,9 +42,6 @@ def validate_parameters(params_map: Map) -> Void {
             }
             if (name in ['ica_min_gene_coverage', 'ica_padj_cutoff'] && (value <= 0 || value > 1)) {
                 error("--${name} must be greater than 0 and at most 1.")
-            }
-            if (name == 'ica_min_read_count' && (value < 0 || value != Math.floor((value as Number).doubleValue()))) {
-                error('--ica_min_read_count must be a nonnegative integer.')
             }
         }
     }
@@ -68,12 +64,12 @@ def validate_parameters(params_map: Map) -> Void {
         error('--de_padj_cutoff must be greater than 0 and at most 1.')
     }
 
-    if (params_map.min_read_count < 0) {
-        error('--min_read_count must be nonnegative.')
+    if (!(params_map.min_read_count instanceof Integer) || params_map.min_read_count < 0) {
+        error('--min_read_count must be a nonnegative integer.')
     }
 
-    if (params_map.min_replicate_sample_count < 1) {
-        error('--min_replicate_sample_count must be at least 1.')
+    if (!(params_map.min_replicate_sample_count instanceof Integer) || params_map.min_replicate_sample_count < 1) {
+        error('--min_replicate_sample_count must be a positive integer.')
     }
 
     def stability_behaviors: Set<String> = ['disabled', 'log', 'terminate'].toSet()
@@ -93,8 +89,13 @@ def validate_parameters(params_map: Map) -> Void {
         if (stopping_method == 'ica' && !ica_analysis_enabled(params_map)) {
             error('--monitoring_behavior with --stopping_method ica requires enabled --ica_analysis and --ica_matrix.')
         }
-        if (stopping_method == 'dea') validate_dea_stopping_parameters(params_map)
-        else validate_ica_stopping_parameters(params_map)
+        validate_precision_parameters(params_map)
+        if (stopping_method == 'dea') {
+            validate_stopping_file(params_map.dea_stopping_genes, 'dea_stopping_genes', 'GMT')
+        }
+        else {
+            validate_stopping_file(params_map.ica_stopping_components, 'ica_stopping_components', 'component list')
+        }
     }
 
     if (params_map.monitoring_behavior == 'terminate' && !params_map.live_analysis) {
@@ -127,9 +128,6 @@ def validate_parameters(params_map: Map) -> Void {
     if (params_map.gene_set_enrichment && !params_map.differential_expression) {
         error('--gene_set_enrichment requires --differential_expression.')
     }
-    if (params_map.timeline_analysis && !params_map.gene_set_enrichment) {
-        error('--timeline_analysis requires --gene_set_enrichment.')
-    }
     def reference_genome_provided: Boolean = params_map.reference_genome != null && "${params_map.reference_genome}".trim() != ''
     def reference_annotation_provided: Boolean = params_map.reference_annotation != null && "${params_map.reference_annotation}".trim() != ''
     if (reference_genome_provided != reference_annotation_provided) {
@@ -146,50 +144,29 @@ def validate_parameters(params_map: Map) -> Void {
     }
 }
 
-/** Validate only the settings consumed by active DEA monitoring. */
-def validate_dea_stopping_parameters(params_map: Map) -> Void {
-    if (params_map.dea_stopping_genes != null) {
-        def value = params_map.dea_stopping_genes
-        if (!(value instanceof String || value instanceof Path) || !"${value}".trim()) {
-            error('--dea_stopping_genes must point to an existing regular GMT file.')
-        }
-        def stopping_genes: Path = file(value)
-        if (!stopping_genes.exists() || !stopping_genes.isFile()) {
-            error("--dea_stopping_genes must point to an existing regular GMT file: ${stopping_genes}")
-        }
+def validate_stopping_file(value: Object?, name: String, format: String) -> Void {
+    if (value == null) {
+        return
     }
-    ['dea_gain_cutoff', 'dea_information_radius_scale', 'dea_forecast_minutes', 'dea_max_processing_lag_seconds', 'dea_min_points',
-     'dea_min_seconds', 'dea_confirmations', 'dea_interruption_fraction', 'dea_recovery_fraction', 'dea_recovery_intervals'].each { name: String ->
-        def value = params_map[name]
-        if (!(value instanceof Number) || !Double.isFinite((value as Number).doubleValue()) || value <= 0) error("--${name} must be a positive finite number.")
-        if (name in ['dea_forecast_minutes', 'dea_max_processing_lag_seconds', 'dea_min_points', 'dea_min_seconds', 'dea_confirmations', 'dea_recovery_intervals'] && value != Math.floor((value as Number).doubleValue())) error("--${name} must be an integer.")
-        if (name in ['dea_gain_cutoff', 'dea_interruption_fraction', 'dea_recovery_fraction'] && value >= 1) error("--${name} must be less than one.")
+    if (!(value instanceof String || value instanceof Path) || !"${value}".trim()) {
+        error("--${name} must point to an existing regular ${format} file.")
     }
-
-    if (params_map.dea_min_points < 6 || params_map.dea_min_seconds < 3600) {
-        error('R monitoring requires at least six points and at least one hour.')
+    def path: Path = file(value)
+    if (!path.exists() || !path.isFile()) {
+        error("--${name} must point to an existing regular ${format} file: ${path}")
     }
 }
 
-/** ICA analysis settings are separate from these ICA stopping settings. */
-def validate_ica_stopping_parameters(params_map: Map) -> Void {
-    ['ica_max_fold_change', 'ica_min_read_growth_fraction'].each { name: String ->
+def validate_precision_parameters(params_map: Map) -> Void {
+    ['stopping_gain_cutoff', 'stopping_information_radius_scale', 'stopping_forecast_minutes', 'stopping_max_processing_lag_seconds', 'stopping_min_points',
+     'stopping_min_seconds', 'stopping_confirmations', 'stopping_interruption_fraction', 'stopping_recovery_fraction', 'stopping_recovery_intervals'].each { name: String ->
         def value = params_map[name]
-        
-        if (!(value instanceof Number) || !Double.isFinite((value as Number).doubleValue())) {
-            error("--${name} must be a finite number.")
-        }
-        if (name == 'ica_max_fold_change' && value < 1) {
-            error('--ica_max_fold_change must be at least 1.')
-        }
-        if (name == 'ica_min_read_growth_fraction' && value <= 0) {
-            error('--ica_min_read_growth_fraction must be greater than 0.')
-        }
+        if (!(value instanceof Number) || !Double.isFinite((value as Number).doubleValue()) || value <= 0) error("--${name} must be a positive finite number.")
+        if (name in ['stopping_forecast_minutes', 'stopping_max_processing_lag_seconds', 'stopping_min_points', 'stopping_min_seconds', 'stopping_confirmations', 'stopping_recovery_intervals'] && value != Math.floor((value as Number).doubleValue())) error("--${name} must be an integer.")
+        if (name in ['stopping_gain_cutoff', 'stopping_interruption_fraction', 'stopping_recovery_fraction'] && value >= 1) error("--${name} must be less than one.")
     }
 
-    if (!(params_map.num_stable_batches instanceof Number) ||
-        !Double.isFinite((params_map.num_stable_batches as Number).doubleValue()) ||
-        params_map.num_stable_batches < 1 || params_map.num_stable_batches != Math.floor((params_map.num_stable_batches as Number).doubleValue())) {
-        error('--num_stable_batches must be a positive integer.')
+    if (params_map.stopping_min_points < 6 || params_map.stopping_min_seconds < 3600) {
+        error('R monitoring requires at least six points and at least one hour.')
     }
 }

@@ -25,7 +25,7 @@ workflow {
             java.nio.file.Files.writeString(run.resolve('STOP.manual'), '')
         }
     }
-    def args = record(live_analysis: true, timeline_analysis: false, sample_sheet_path: sheet,
+    def args = record(live_analysis: true, sample_sheet_path: sheet,
         bam_poll_interval_ms: 100, bam_stability_polls: 3, termination_requested: params.terminate == true,
         detect_minknow_completion: params.terminate == true, minknow_completion_settle_seconds: 1)
     bam_ingress(args).collect(sort: false).map { batches ->

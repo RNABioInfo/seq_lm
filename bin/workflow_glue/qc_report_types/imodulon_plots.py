@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from collections import Counter
-from html import escape
 import json
 import math
+from collections import Counter
+from dataclasses import dataclass
+from html import escape
 from pathlib import Path
 
+import colorcet as cc
+import numpy as np
+import pandas as pd
 from bokeh.layouts import column
 from bokeh.models import (
     ColorBar,
@@ -20,14 +23,11 @@ from bokeh.models import (
     Span,
 )
 from bokeh.palettes import Category20
-import colorcet as cc
 from ezcharts.components.ezchart import EZChart
 from ezcharts.layout.snippets import Tabs
 from ezcharts.layout.snippets.table import DataTable
 from ezcharts.plots import BokehPlot
-import numpy as np
-import pandas as pd
-
+from workflow_glue.readiness import read_depth_readiness
 
 READY_FILES = {
     "activities": "activities_long.tsv",
@@ -154,10 +154,15 @@ def load_imodulon_results(
     }
     if missing := required - set(provenance):
         raise ValueError("ICA provenance is missing fields: " + ", ".join(sorted(missing)))
-    if not {"log_base", "pseudocount", "min_read_count", "padj_cutoff", "control_group", "condition_groups"}.issubset(provenance["settings"]):
-        raise ValueError("ICA provenance settings are incomplete")
-    if provenance["schema_version"] != 1:
+    if provenance["schema_version"] != 2:
         raise ValueError("Unsupported ICA provenance schema version")
+    settings = provenance["settings"]
+    required_settings = {
+        "log_base", "pseudocount", "min_read_count", "min_replicate_sample_count",
+        "padj_cutoff", "control_group", "condition_groups",
+    }
+    if not required_settings <= settings.keys():
+        raise ValueError("ICA provenance settings are incomplete")
     for field, expected in (
         ("batch_index", expected_batch),
         ("report_sequence", expected_sequence),
@@ -166,8 +171,8 @@ def load_imodulon_results(
         if expected is not None and int(provenance[field]) != int(expected):
             raise ValueError(f"ICA snapshot {field} does not match its report record")
 
-    control_group = provenance["settings"]["control_group"]
-    selected_groups = provenance["settings"]["condition_groups"]
+    control_group = settings["control_group"]
+    selected_groups = settings["condition_groups"]
     if (not isinstance(control_group, str) or not control_group.strip()
             or not isinstance(selected_groups, list) or not selected_groups
             or not all(isinstance(group, str) and group for group in selected_groups)
@@ -212,21 +217,15 @@ def load_imodulon_results(
     samples["ready"] = samples["ready"].str.lower().map({"true": True, "false": False})
     if samples["ready"].isna().any():
         raise ValueError("ICA sample readiness must be true or false")
-    threshold = float(provenance["settings"]["min_read_count"])
-    if (
-        not math.isfinite(threshold)
-        or threshold < 0
-        or samples["assigned_abundance"].lt(0).any()
-    ):
-        raise ValueError(
-            "ICA sample readiness requires nonnegative abundance and a valid threshold"
-        )
-    expected_ready = samples["assigned_abundance"].gt(0) & samples[
-        "assigned_abundance"
-    ].ge(threshold)
-    if not samples["ready"].eq(expected_ready).all() or (
-        status["status"] == "ready"
-    ) != bool(expected_ready.all()):
+    if samples["assigned_abundance"].lt(0).any():
+        raise ValueError("ICA sample readiness requires nonnegative assigned abundance")
+    expected_ready, ready_groups = read_depth_readiness(
+        zip(samples["group"], samples["assigned_abundance"], strict=True),
+        settings["min_read_count"],
+        settings["min_replicate_sample_count"],
+    )
+    deferred_groups = sorted(set(selected_groups) - ready_groups)
+    if samples["ready"].tolist() != expected_ready or (status["status"] == "ready") != (not deferred_groups):
         raise ValueError(
             "ICA snapshot status/readiness does not match sample abundance"
         )
@@ -243,10 +242,8 @@ def load_imodulon_results(
         )
     result = IModulonResult(root, status, provenance, samples)
     if not result.ready:
-        if set(status.get("sample_ids", [])) != set(
-            samples.loc[~expected_ready, "sample_id"]
-        ):
-            raise ValueError("ICA deferred sample identities do not match readiness")
+        if status.get("deferred_groups") != deferred_groups:
+            raise ValueError("ICA deferred groups do not match readiness")
         return result
 
     loaded = {
@@ -1214,8 +1211,7 @@ def add_imodulon_analysis(data: IModulonResult) -> None:
         from dominate.tags import p
 
         p(
-            "iModulon analysis is deferred until all samples meet "
-            "the assigned-abundance threshold."
+            "iModulon analysis is deferred until every group meets the read-depth requirement."
         )
         with Tabs().add_tab("Diagnostics"):
             _add_component_annotations(data)

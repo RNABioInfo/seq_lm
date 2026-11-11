@@ -5,15 +5,14 @@ nextflow.enable.types = true
 
 record BamIngressArgs {
     live_analysis: Boolean
-    timeline_analysis: Boolean?
     sample_sheet_path: Path?
     bam_poll_interval_ms: Integer
     bam_stability_polls: Integer
     termination_requested: Boolean
     detect_minknow_completion: Boolean?
     minknow_completion_settle_seconds: Integer?
-    dea_event_mode: Boolean?
-    dea_state_directory: String?
+    precision_event_mode: Boolean?
+    precision_state_directory: String?
 }
 
 record LiveSampleEvent {
@@ -66,9 +65,6 @@ def get_samples(ingress_args) -> List<Sample> {
     }
 
     def samples: List<Sample> = parse_sample_sheet(ingress_args)
-    if (ingress_args.timeline_analysis) {
-        validate_timeline_samples(samples)
-    }
     return attach_minknow_run_metadata(samples, ingress_args.termination_requested)
 }
 
@@ -374,8 +370,8 @@ def sample_label(sample) -> String {
 }
 
 def mixed_analysis_ingress(samples: List<Sample>, ingress_args, experiment_sample_count: Integer) {
-    if (ingress_args.live_analysis && ingress_args.get('dea_event_mode')) {
-        return event_driven_dea_ingress(samples, ingress_args, experiment_sample_count)
+    if (ingress_args.live_analysis && ingress_args.get('precision_event_mode')) {
+        return event_driven_precision_ingress(samples, ingress_args, experiment_sample_count)
     }
     def live_samples: List<Sample> = samples.findAll { sample ->
         ingress_args.live_analysis && sample.is_live
@@ -496,7 +492,7 @@ def mixed_analysis_ingress(samples: List<Sample>, ingress_args, experiment_sampl
 }
 
 /** Monotonic frontier used to cancel stop actions on superseded inputs. */
-def capture_dea_input(observations: Map, batch_index: Integer, observation: Map) -> Void {
+def capture_precision_input(observations: Map, batch_index: Integer, observation: Map) -> Void {
     if (observations._started_at != null && observations._started_at != observation.started_at) {
         error('R input observation origin changed.')
     } 
@@ -522,9 +518,9 @@ def persist_arrival_clock(clock: Path, started: Number, versions: Map) -> Void {
     return null
 }
 
-/** R mode reuses the established file trigger, with no analysis timer or sample barrier. */
-def event_driven_dea_ingress(samples: List<Sample>, args, experiment_count: Integer) {
-    def root: Path = Path.of(args.dea_state_directory as String)
+/** Precision monitoring reuses the established file trigger, with no analysis timer or sample barrier. */
+def event_driven_precision_ingress(samples: List<Sample>, args, experiment_count: Integer) {
+    def root: Path = Path.of(args.precision_state_directory as String)
     java.nio.file.Files.createDirectories(root)
 
     def clock: Path = root.resolve('clock.json')

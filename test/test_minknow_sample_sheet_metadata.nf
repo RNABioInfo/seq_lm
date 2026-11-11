@@ -29,7 +29,6 @@ workflow {
     )
     def ingress_args = record(
         live_analysis: false,
-        timeline_analysis: false,
         sample_sheet_path: workflow_sheet,
         bam_poll_interval_ms: 100,
         bam_stability_polls: 3,
@@ -50,7 +49,6 @@ workflow {
     )
     def missing_samples: List = get_samples(record(
         live_analysis: true,
-        timeline_analysis: false,
         sample_sheet_path: missing_workflow_sheet,
         bam_poll_interval_ms: 100,
         bam_stability_polls: 3,

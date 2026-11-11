@@ -18,12 +18,14 @@ workflow imodulon_analysis {
     output_root: Path
 
     main:
-    prepared = prepare_ica_model(matrix, annotation, gene_map, imodulon_table, settings)
+    def stopping_components: Path = settings.stopping_components ? settings.stopping_components as Path : matrix
+    prepared = prepare_ica_model(matrix, annotation, gene_map, imodulon_table, stopping_components, settings)
     def results: Channel<ICABatchResult> = infer_ica_activities(batches, prepared, settings, first_index)
 
     published = results.map { result ->
         def destination: Path = publish_ica_snapshot(result, output_root)
         record(
+            observation: result.observation,
             batch_index: result.batch_index,
             report_sequence: result.report_sequence,
             analysis_index: result.analysis_index,
@@ -37,7 +39,7 @@ workflow imodulon_analysis {
 
 process prepare_ica_model {
     label 'seq_lm_ica'
-    container 'rnabioinfo/seq_lm_imodulon:v1.0.0'
+    container 'rnabioinfo/seq_lm_imodulon:v1.0.1'
     cpus 1
 
     input:
@@ -45,6 +47,7 @@ process prepare_ica_model {
     annotation: Path
     gene_map: Path
     imodulon_table: Path
+    stopping_components: Path
     settings: Map
 
     stage:
@@ -52,6 +55,7 @@ process prepare_ica_model {
     stageAs annotation, 'annotation/input.gtf'
     stageAs gene_map, 'gene_map/input.tsv'
     stageAs imodulon_table, 'imodulon_table/input.csv'
+    stageAs stopping_components, 'stopping_components/input.txt'
 
     output:
     file('prepared_ica')
@@ -59,12 +63,13 @@ process prepare_ica_model {
     script:
     def map_args: String = settings.has_gene_map ? '--gene-map gene_map/input.tsv' : ''
     def table_args: String = settings.has_imodulon_table ? '--imodulon-table imodulon_table/input.csv' : ''
+    def stopping_args: String = settings.stopping_components ? '--stopping-components stopping_components/input.txt' : ''
     """
-    # Prepare model including scales for the ICA monitoring metric.
+    # Prepare the fixed ICA model and validate the optional stopping component list.
     imodulon-analysis prepare \\
         --matrix model_weights/input.csv \\
         --annotation annotation/input.gtf \\
-        ${table_args} ${map_args} \\
+        ${table_args} ${map_args} ${stopping_args} \\
         --min-gene-coverage ${settings.min_gene_coverage} \\
         --output prepared_ica
     """
@@ -72,7 +77,7 @@ process prepare_ica_model {
 
 process infer_ica_activities {
     label 'seq_lm_ica'
-    container 'rnabioinfo/seq_lm_imodulon:v1.0.0'
+    container 'rnabioinfo/seq_lm_imodulon:v1.0.1'
     cpus 1
     // Preserve input report-sequence order even when computations finish out of order.
     fair true
@@ -89,6 +94,7 @@ process infer_ica_activities {
 
     output:
     record(
+        observation: batch.observation,
         batch_index: batch.batch_index,
         report_sequence: batch.report_sequence,
         analysis_index: first_index + batch.report_sequence,
@@ -96,6 +102,7 @@ process infer_ica_activities {
     )
 
     script:
+    def monitoring_args: String = settings.monitoring ? '--monitoring' : ''
     def rows: String = batch.samples.withIndex().collect { sample, index: Integer ->
         [sample.sample.name, sample.sample.group, sample.sample.order == null ? '' : sample.sample.order,
          "input${index + 1}.quant", sample.batch_index].collect { field -> tsv_field("${field}") }.join('\t')
@@ -107,10 +114,11 @@ process infer_ica_activities {
         --prepared prepared_ica \\
         --manifest quant_manifest.tsv \\
         --counts-dir quant \\
-        --control-group ${shell_quote(settings.control_group)} \\
+        ${monitoring_args} --control-group ${shell_quote(settings.control_group)} \\
         --log-base ${settings.log_base} \\
         --pseudocount ${settings.pseudocount} \\
         --min-reads ${settings.min_read_count} \\
+        --min-replicate-sample-count ${settings.min_replicate_sample_count} \\
         --cutoff ${settings.padj_cutoff} \\
         --batch-index ${batch.batch_index} \\
         --report-sequence ${batch.report_sequence} \\

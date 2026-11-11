@@ -17,7 +17,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bin"))
-from dea_termination.engine import atomic_json, clean, evaluate, write_tsv
+from precision_termination.engine import atomic_json, clean, evaluate, write_tsv
 
 
 def main():

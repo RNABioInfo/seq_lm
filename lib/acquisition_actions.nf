@@ -2,6 +2,7 @@ nextflow.enable.types = true
 
 include { tsv_field ; parse_delimited_rows } from './gene_contrasts.nf'
 include { get_stop_files_in_dir } from './bam_ingress.nf'
+include { sequencing_container_command } from './sequencing_container.nf'
 
 def monitoring_sample_key(sample) -> String {
     return "${sample.group}\t${sample.name}"
@@ -50,6 +51,15 @@ def run_seq_run_manager_stop(protocol_run_id: String, minknow_connection: Map) -
     ]
 
     try {
+        def engine: String? = minknow_connection.container_engine as String?
+        if (engine) {
+            def credentials: List<Path> = [
+                Path.of(minknow_connection.client_certificate as String),
+                Path.of(minknow_connection.client_private_key as String),
+                Path.of(minknow_connection.ca_certificate as String),
+            ]
+            command = sequencing_container_command(engine, command, credentials, [], true)
+        }
         def process: Process = new ProcessBuilder(command).redirectErrorStream(true).start()
         def command_output: String = process.inputStream.getText('UTF-8').trim()
         def exit_code: Integer = process.waitFor()

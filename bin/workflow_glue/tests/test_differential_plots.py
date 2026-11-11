@@ -286,7 +286,7 @@ def test_overview_orders_pca_mds_and_bcv(tmp_path, monkeypatch):
 
 def test_disabled_dea_monitoring_reports_every_sample():
     metadata = sample_metadata().rename(columns={"Name":"sample","Group":"group"}).set_index("sample")
-    table = dp.load_dea_monitoring(None,metadata,"disabled")
+    table = dp.load_precision_monitoring(None,metadata,"disabled")
     assert table["Sample"].tolist() == metadata.index.tolist()
 
 
@@ -321,7 +321,7 @@ def test_dea_termination_is_last_differential_tab(tmp_path, monkeypatch):
 
     monkeypatch.setattr(dp, "Tabs", FakeTabs)
     monkeypatch.setattr(dp, "EZChart", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(dp, "add_dea_monitoring", captured_tables.append)
+    monkeypatch.setattr(dp, "add_precision_monitoring", captured_tables.append)
 
     dp.add_differential_analysis(data, lfc_cutoff=1, padj_cutoff=0.05)
 

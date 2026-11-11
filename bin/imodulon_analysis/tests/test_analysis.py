@@ -269,7 +269,11 @@ def test_small_group_and_control_only(tmp_path):
     p = setup_model(tmp_path)
     manifest = tmp_path / "manifest.tsv"
     manifest.write_text("\n".join(manifest.read_text().splitlines()[:-1]) + "\n")
-    out = run(p, tmp_path)
+    deferred = run(p, tmp_path, "deferred")
+    status = json.loads((deferred / "status.json").read_text())
+    assert status["status"] == "deferred"
+    assert status["deferred_groups"] == ["treated"]
+    out = run(p, tmp_path, min_replicate_sample_count=1)
     result = pd.read_csv(out / "differential_activity.tsv", sep="\t")
     assert set(result.status) == {"insufficient_replicates"}
     manifest.write_text("\n".join(manifest.read_text().splitlines()[:-1]) + "\n")
@@ -304,7 +308,7 @@ def test_config_schema_defaults():
     schema = json.loads((root / "nextflow_schema.json").read_text())
     properties = schema["definitions"]["imodulon_analysis_options"]["properties"]
     config = (root / "nextflow.config").read_text()
-    assert len(properties) == 11
+    assert len(properties) == 10
     assert "ica_timecourse" not in properties
     for name, definition in properties.items():
         match = re.search(r"^\s*" + name + r" = (.+)$", config, re.M)
@@ -378,3 +382,13 @@ def test_custom_ica_reference_and_filtered_cohort(tmp_path):
     from workflow_glue.qc_report_types.imodulon_plots import load_imodulon_results
     report = load_imodulon_results(out)
     assert set(report.groups) == {"baseline", "treated"}
+
+
+@pytest.mark.parametrize("selection", ["", "a\na\n", "A\n"])
+def test_invalid_stopping_component_list(tmp_path, selection):
+    from imodulon_analysis.analysis import read_stopping_components
+
+    path = tmp_path / "components.txt"
+    path.write_text(selection)
+    with pytest.raises(ValueError, match="stopping components"):
+        read_stopping_components(path, ["a", "b"])

@@ -35,6 +35,8 @@ def fixture(root):
 def main():
     with tempfile.TemporaryDirectory(prefix="ica smoke ") as tmp:
         root = fixture(tmp)
+        components = root / "stopping_components.txt"
+        components.write_text("positive\nnegative\n")
         subprocess.run(
             [
                 "imodulon-analysis",
@@ -43,6 +45,8 @@ def main():
                 str(root / "matrix.csv"),
                 "--annotation",
                 str(root / "annotation.gtf"),
+                "--stopping-components",
+                str(components),
                 "--output",
                 str(root / "prepared"),
             ],
@@ -60,6 +64,9 @@ def main():
                 str(root),
                 "--min-reads",
                 "0",
+                "--min-replicate-sample-count",
+                "2",
+                "--monitoring",
                 "--output",
                 str(root / "results"),
             ],
