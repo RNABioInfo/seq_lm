@@ -819,28 +819,29 @@ def add_gsva_differential(
         )
     with tabs.add_tab("Contrasts"):
         contrast_tabs = Tabs()
-        for analysis in data.contrasts:
-            with contrast_tabs.add_dropdown_tab(analysis.label):
-                plot_tabs = Tabs()
-                with plot_tabs.add_tab("Volcano"):
-                    EZChart(
-                        create_limma_volcano(
+        with contrast_tabs.add_dropdown_menu("Contrast", change_header=True):
+            for analysis in data.contrasts:
+                with contrast_tabs.add_dropdown_tab(analysis.label):
+                    plot_tabs = Tabs()
+                    with plot_tabs.add_tab("Volcano"):
+                        EZChart(
+                            create_limma_volcano(
+                                analysis,
+                                condition_colors,
+                                padj_cutoff,
+                            ),
+                            "epi2melabs",
+                            height="530px",
+                        )
+                    with plot_tabs.add_tab("Score heatmap"):
+                        heatmap = create_limma_heatmap(
+                            data,
                             analysis,
                             condition_colors,
                             padj_cutoff,
-                        ),
-                        "epi2melabs",
-                        height="530px",
-                    )
-                with plot_tabs.add_tab("Score heatmap"):
-                    heatmap = create_limma_heatmap(
-                        data,
-                        analysis,
-                        condition_colors,
-                        padj_cutoff,
-                    )
-                    EZChart(
-                        heatmap,
-                        "epi2melabs",
-                        height=f"{getattr(heatmap, 'report_height', 620)}px",
-                    )
+                        )
+                        EZChart(
+                            heatmap,
+                            "epi2melabs",
+                            height=f"{getattr(heatmap, 'report_height', 620)}px",
+                        )

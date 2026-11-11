@@ -791,19 +791,20 @@ def add_gene_set_enrichment(
 ) -> None:
     """Add contrast and plot-type tabs for directional fry enrichment."""
     contrast_tabs = Tabs()
-    for analysis in analyses:
-        with contrast_tabs.add_dropdown_tab(analysis.label):
-            plot_tabs = Tabs()
-            with plot_tabs.add_tab("Enrichment results"):
-                signed = create_signed_significance_plot(
-                    analysis,
-                    condition_colors,
-                    padj_cutoff,
-                )
-                EZChart(
-                    signed,
-                    "epi2melabs",
-                    height=f"{getattr(signed, 'report_height', 520)}px",
-                )
-            with plot_tabs.add_tab("Barcode Plot"):
-                add_gene_set_barcode_dropdown(analysis, condition_colors)
+    with contrast_tabs.add_dropdown_menu("Contrast", change_header=True):
+        for analysis in analyses:
+            with contrast_tabs.add_dropdown_tab(analysis.label):
+                plot_tabs = Tabs()
+                with plot_tabs.add_tab("Enrichment results"):
+                    signed = create_signed_significance_plot(
+                        analysis,
+                        condition_colors,
+                        padj_cutoff,
+                    )
+                    EZChart(
+                        signed,
+                        "epi2melabs",
+                        height=f"{getattr(signed, 'report_height', 520)}px",
+                    )
+                with plot_tabs.add_tab("Barcode Plot"):
+                    add_gene_set_barcode_dropdown(analysis, condition_colors)

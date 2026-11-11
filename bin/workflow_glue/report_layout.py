@@ -9,6 +9,10 @@ _BRAND_COLOR = "#004191"
 _REPORT_SUBHEADLINE = (
     "ONT transcriptome sequencing quality control, and functional analysis."
 )
+_REPORT_ABOUT_TEXT = (
+    "This SeqLM report uses the EPI2ME Labs report preset (LabsReport) from "
+    "Oxford Nanopore Technologies’ ezCharts library."
+)
 # Keep the report portable and container-safe by embedding the supplied PNG.
 _BRAND_LOGO_DATA_URI = (
     "data:image/png;base64,"
@@ -60,6 +64,12 @@ _REPORT_SUBTITLE = re.compile(
     r'(?P<body>.*?)'
     r'(?P<close></p>)',
     flags=re.IGNORECASE | re.DOTALL,
+)
+_LABS_REPORT_ABOUT = re.compile(
+    r'(?P<heading><div\b[^>]*\bid=["\']LabsAddendum_[^"\']+["\'][^>]*>'
+    r'\s*<div\b[^>]*>\s*<h4\b[^>]*>\s*About this report\s*</h4>)'
+    r'(?:\s*<p\b[^>]*>(?:[^<]|<code>[^<]*</code>)*</p>)+(?=\s*</div>)',
+    flags=re.IGNORECASE,
 )
 _BRAND_STYLES = f"""
     <style id="seq-lm-report-branding">
@@ -261,6 +271,11 @@ def apply_report_branding(report_path, subtitle_notice=None):
         return f"{match.group('open')}{body}{match.group('close')}"
 
     html = _REPORT_SUBTITLE.sub(replace_subtitle, html, count=1)
+    html = _LABS_REPORT_ABOUT.sub(
+        lambda match: f"{match.group('heading')}\n          <p>{escape(_REPORT_ABOUT_TEXT)}</p>",
+        html,
+        count=1,
+    )
     if 'id="seq-lm-report-branding"' not in html and "</head>" in html:
         html = _insert_before_last(html, "</head>", _BRAND_STYLES)
     if 'id="seq-lm-report-navigation"' not in html and "</body>" in html:

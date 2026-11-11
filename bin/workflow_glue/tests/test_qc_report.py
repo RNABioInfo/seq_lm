@@ -2,6 +2,7 @@
 
 import gzip
 import json
+import re
 
 import pytest
 
@@ -16,8 +17,6 @@ from workflow_glue.transcript_biotypes import BIOTYPE_ORDER  # noqa: E402
 @pytest.mark.parametrize("refresh_seconds", [0, 5])
 def test_report_uses_canvas_for_hidden_and_nested_bokeh_plots(tmp_path, refresh_seconds):
     """Static reports and live snapshots avoid zero-sized WebGL canvases."""
-    import re
-
     from bokeh.layouts import gridplot
     from ezcharts.components.ezchart import EZChart
     from ezcharts.components.reports import labs
@@ -56,6 +55,12 @@ def test_report_uses_canvas_for_hidden_and_nested_bokeh_plots(tmp_path, refresh_
     html = report_path.read_text()
     assert "Plot 0" in html and "Plot 1" in html and "Plot 2" in html
     assert re.search(r'"output_backend"\s*:\s*"webgl"', html) is None
+    footer = html.split("<footer>", 1)[1].split("</footer>", 1)[0]
+    assert "About this report" in footer
+    assert "EPI2ME Labs report preset (LabsReport)" in footer
+    assert "Oxford Nanopore Technologies’ ezCharts library" in footer
+    assert "epi2me-labs/qc_report" not in footer
+    assert "health assessment" not in footer
 
 
 def test_write_report_uses_live_shell_and_versioned_snapshot(tmp_path):
@@ -571,6 +576,14 @@ def test_qc_report_writes_html(tmp_path, behavior):
     assert "GSVA score difference" in html
     assert "GSVA limma across contrasts" in html
     assert "Within contrast GSVA scores:" in html
+    contrast_menus = re.findall(
+        r'<button\b[^>]*\bdata-bs-toggle="dropdown"[^>]*>Contrast</button>\s*'
+        r'<ul class="dropdown-menu">(.*?)</ul>',
+        html,
+        flags=re.DOTALL,
+    )
+    assert len(contrast_menus) == 2
+    assert all(">time_point_1 vs control</button>" in menu for menu in contrast_menus)
     assert "GSVA score over time" in html
     assert "Gene expression over time" in html
     assert "Gene z-score" in html
