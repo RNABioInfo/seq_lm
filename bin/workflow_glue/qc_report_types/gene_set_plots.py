@@ -254,7 +254,10 @@ def load_gene_set_results(
     for contrast in differential.contrasts:
         fry_path = results_dir / contrast.contrast_id / FRY_RESULTS_FILE
         fry_results = _read_fry_results(fry_path)
-        retained_features = set(contrast.results["feature_id"])
+        # Rows added for the cross-contrast overview have no fitted logFC.
+        retained_features = set(
+            contrast.results.loc[contrast.results["logFC"].notna(), "feature_id"]
+        )
         members = {}
         for row in fry_results.itertuples(index=False):
             resolved = set(

@@ -28,7 +28,7 @@ from workflow_glue import qc_report  # noqa: E402
 from workflow_glue.qc_report_types.precision_monitoring import load_precision_monitoring
 
 
-def write_ica_audit(path, samples, batch_index=7, analysis_index=11):
+def write_ica_audit(path, samples, batch_index=7, analysis_index=11, *, behavior="log"):
     path.mkdir()
     (path / "audit.json").write_text(json.dumps({
         "forecast_method": "robust_recent_depth_curve",
@@ -41,9 +41,10 @@ def write_ica_audit(path, samples, batch_index=7, analysis_index=11):
     pd.DataFrame({
         "analysis_index": analysis_index, "batch_index": batch_index,
         "group": samples["Group"], "sample": samples["Name"],
-        "method": "ica", "metric": "R_information", "behavior": "log",
+        "method": "ica", "metric": "R_information", "behavior": behavior,
         "consecutive_confirmations": 3, "eligible": "true",
-        "reason": "marginal_precision", "action_result": "logged",
+        "reason": "marginal_precision",
+        "action_result": "logged" if behavior == "log" else "stop_created",
     }).to_csv(path / "sample_monitoring.tsv", sep="\t", index=False)
     (path / "forecast_history.tsv").write_text(
         "contrast_id\telapsed_seconds\tassigned_monitored_reads\tR_information\t"
@@ -57,12 +58,13 @@ def write_ica_audit(path, samples, batch_index=7, analysis_index=11):
 def test_ica_monitoring_matches_group_alias_pairs_and_snapshot(tmp_path):
     samples = pd.DataFrame({"Group": ["control", "early"], "Name": ["rep1", "rep1"]})
     path = write_ica_audit(tmp_path / "termination", samples)
-    table = load_precision_monitoring(path, None, "log", samples, method="ica", expected_snapshot=(7, 11))
-    assert table["Consecutive confirmations"].tolist() == ["3", "3"]
+    table = load_precision_monitoring(path, "log", samples, method="ica", expected_snapshot=(7, 11))
+    assert table["Checks passed in a row"].tolist() == ["3", "3"]
+    assert table["Stopping rule met"].tolist() == ["Yes", "Yes"]
     with pytest.raises(ValueError, match="does not match the analysis snapshot"):
-        load_precision_monitoring(path, None, "log", samples, method="ica", expected_snapshot=(7, 12))
+        load_precision_monitoring(path, "log", samples, method="ica", expected_snapshot=(7, 12))
     with pytest.raises(ValueError, match="samples do not match report"):
-        load_precision_monitoring(path, None, "log", samples.iloc[:1], method="ica")
+        load_precision_monitoring(path, "log", samples.iloc[:1], method="ica")
 
 
 def write_ica_snapshot(root, *, status="ready", groups=None, times=None, values=None, min_replicates=2):
@@ -381,8 +383,8 @@ def test_snapshot_identity_mismatch_is_rejected(tmp_path):
         load_imodulon_results(write_ica_snapshot(tmp_path / "ica"), 7, 3, 12)
 
 
-@pytest.mark.parametrize("temporal", [True, False])
-def test_qc_report_adds_active_ica_details_main_tab(tmp_path, monkeypatch, temporal):
+@pytest.mark.parametrize("temporal, behavior", [(True, "log"), (False, "terminate"), (False, "disabled")])
+def test_qc_report_adds_active_ica_details_main_tab(tmp_path, monkeypatch, temporal, behavior):
     times = [-5, -5, 10, 10, 40, 40] if temporal else [None] * 6
     snapshot = write_ica_snapshot(tmp_path / "ica", times=times)
     provenance_path = snapshot / "provenance.json"
@@ -412,7 +414,8 @@ def test_qc_report_adds_active_ica_details_main_tab(tmp_path, monkeypatch, tempo
     monkeypatch.setattr(
         qc_report, "create_nanoplot_metrics_table", lambda _samples: pd.DataFrame()
     )
-    monitoring = write_ica_audit(tmp_path / "termination", samples_frame)
+    audit_behavior = "log" if behavior == "disabled" else behavior
+    monitoring = write_ica_audit(tmp_path / "termination", samples_frame, behavior=audit_behavior)
     samples = tmp_path / "samples.tsv"
     samples.write_text("unused\n")
     versions = tmp_path / "versions"
@@ -435,7 +438,7 @@ def test_qc_report_adds_active_ica_details_main_tab(tmp_path, monkeypatch, tempo
             "--refresh-seconds",
             "0",
             "--monitoring-results", str(monitoring),
-            "--monitoring-behavior", "log",
+            "--monitoring-behavior", behavior,
             "--stopping-method", "ica",
             "--imodulon-results",
             str(snapshot),
@@ -451,11 +454,15 @@ def test_qc_report_adds_active_ica_details_main_tab(tmp_path, monkeypatch, tempo
     qc_report.main(args)
     html = report.read_text()
     assert ">Independent Components</button>" in html
-    assert ">ICA Termination</button>" in html
-    assert "selected iModulon components" in html
-    assert "Next 30-minute improvement" in html
-    assert "Consecutive confirmations" in html
-    assert "logged" in html
+    assert (">ICA Termination</button>" in html) == (behavior != "disabled")
+    assert ">DEA Termination</button>" not in html
+    if behavior != "disabled":
+        assert "The uncertainty score summarizes uncertainty in iModulon activity differences" in html
+        assert "selected iModulon components" in html
+        assert "Next 30-minute improvement" in html
+        assert "Checks passed in a row" in html
+        assert "Stopping rule met" in html
+        assert ("logged" if behavior == "log" else "stop_created") in html
     assert html.find("Quality Control") < html.find("Independent Components")
     assert (">Time course</button>" in html) == temporal
     assert (">Component details</button>" in html) != temporal

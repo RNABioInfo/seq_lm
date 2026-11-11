@@ -357,23 +357,20 @@ def main(args):
 
     logger = get_named_logger("SeqLMReport")
     samples = load_qc_samples(args.samples)
+    monitoring_enabled = args.monitoring_behavior != "disabled"
+    dea_monitoring_behavior = args.monitoring_behavior if args.stopping_method == "dea" else "disabled"
+    dea_monitoring_enabled = dea_monitoring_behavior != "disabled"
+    ica_monitoring_enabled = monitoring_enabled and args.stopping_method == "ica"
     differential = None
     monitoring_results = None
     fry_results = None
     gsva_results = None
     temporal_results = None
     imodulon_results = None
-    ica_monitoring_results = None
     transcript_biotypes = args.transcript_biotypes
     if args.differential_results is not None:
         differential = load_differential_results(
             args.differential_results,
-            samples.samples_df,
-        )
-        monitoring_results = load_precision_monitoring(
-            args.monitoring_results if args.stopping_method == "dea" else None,
-            differential.sample_metadata,
-            args.monitoring_behavior,
             samples.samples_df,
         )
         if args.gene_set_enrichment:
@@ -400,9 +397,15 @@ def main(args):
             args.imodulon_analysis_index,
             samples.samples_df,
         )
-        if args.stopping_method == "ica" and args.monitoring_results is not None:
-            ica_monitoring_results = load_precision_monitoring(
-                args.monitoring_results, None, args.monitoring_behavior, samples.samples_df,
+
+    if monitoring_enabled and args.monitoring_results is not None:
+        if dea_monitoring_enabled:
+            monitoring_results = load_precision_monitoring(
+                args.monitoring_results, args.monitoring_behavior, samples.samples_df,
+            )
+        elif imodulon_results is not None:
+            monitoring_results = load_precision_monitoring(
+                args.monitoring_results, args.monitoring_behavior, samples.samples_df,
                 method="ica",
                 expected_snapshot=(
                     imodulon_results.provenance["batch_index"],
@@ -471,7 +474,8 @@ def main(args):
                     differential,
                     args.lfc_cutoff,
                     args.padj_cutoff,
-                    monitoring_results,
+                    monitoring_results if dea_monitoring_enabled else None,
+                    monitoring_behavior=dea_monitoring_behavior,
                 )
 
             if args.gene_set_enrichment and gsva_results and fry_results:
@@ -502,17 +506,21 @@ def main(args):
                             differential.condition_colors,
                         )
 
-        if differential is None and args.stopping_method == "dea" and args.monitoring_results is not None:
+        if differential is None and dea_monitoring_enabled:
             with primary_tabs.add_tab("DEA Termination"):
-                add_precision_monitoring(load_precision_monitoring(args.monitoring_results, None, args.monitoring_behavior, samples.samples_df))
+                add_precision_monitoring(
+                    monitoring_results, method="dea", behavior=args.monitoring_behavior,
+                )
         if imodulon_results is not None:
             with primary_tabs.add_tab("Independent Components"):
                 add_imodulon_analysis(
                     imodulon_results,
                 )
-            if ica_monitoring_results is not None:
-                with primary_tabs.add_tab("ICA Termination"):
-                    add_precision_monitoring(ica_monitoring_results)
+        if ica_monitoring_enabled:
+            with primary_tabs.add_tab("ICA Termination"):
+                add_precision_monitoring(
+                    monitoring_results, method="ica", behavior=args.monitoring_behavior,
+                )
 
     write_report( 
         report,
@@ -570,7 +578,7 @@ def argparser():
     )
     parser.add_argument(
         "--monitoring-results",
-        help="Per-sample stability audit TSV for the represented DEA or ICA snapshot.",
+        help="Directory containing the stopping checks for this report snapshot.",
     )
     parser.add_argument(
         "--monitoring-behavior",

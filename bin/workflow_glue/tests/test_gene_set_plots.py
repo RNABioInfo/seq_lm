@@ -422,6 +422,24 @@ def test_load_gene_set_results_resolves_retained_unique_members(tmp_path):
     assert analysis.fry_results.loc[0, "display_label"].endswith("[set_up]")
 
 
+def test_load_gene_set_results_excludes_overview_only_features(tmp_path):
+    metadata = write_gene_set_tree(tmp_path)
+    differential = dp.load_differential_results(tmp_path, metadata)
+    results = differential.contrasts[0].results
+    results.loc[len(results), "feature_id"] = "feature_filtered"
+
+    resolution_path = tmp_path / "gene_set_resolution.tsv"
+    resolution = pd.read_csv(resolution_path, sep="\t")
+    resolution.loc[len(resolution), ["gene_set", "feature_id"]] = [
+        "set_up",
+        "feature_filtered",
+    ]
+    resolution.to_csv(resolution_path, sep="\t", index=False)
+
+    (analysis,) = gp.load_gene_set_results(tmp_path, differential)
+    assert analysis.members["set_up"] == ("feature_a", "feature_d")
+
+
 def test_load_gene_set_results_rejects_membership_count_mismatch(tmp_path):
     """The fry NGenes field must agree with retained resolved feature IDs."""
     metadata = write_gene_set_tree(tmp_path)

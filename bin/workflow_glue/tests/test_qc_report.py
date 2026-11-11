@@ -294,15 +294,15 @@ def write_differential_results(path):
     )
 
 
-def write_monitoring_results(path):
-    """Write the current R audit directory, including its offline plot data."""
+def write_monitoring_results(path, *, behavior="log"):
+    """Write a stopping audit directory, including its plot data."""
     path.mkdir()
     (path / "audit.json").write_text(
         json.dumps({"forecast_method": "depth_curve", "config": {"gain_cutoff": .01, "horizon_seconds": 1800}})
     )
     pd.DataFrame([
-        dict(group="control",sample="control_1",method="dea",metric="R_information",eligible="false",consecutive_confirmations=0,reason="fixed",behavior="log",action_result="none"),
-        dict(group="time_point_1",sample="treatment_1",method="dea",metric="R_information",eligible="true",consecutive_confirmations=3,reason="marginal_precision",behavior="log",action_result="logged"),
+        dict(group="control",sample="control_1",method="dea",metric="R_information",eligible="false",consecutive_confirmations=0,reason="fixed",behavior=behavior,action_result="none"),
+        dict(group="time_point_1",sample="treatment_1",method="dea",metric="R_information",eligible="true",consecutive_confirmations=3,reason="marginal_precision",behavior=behavior,action_result="logged" if behavior == "log" else "stop_created"),
     ]).to_csv(path/"sample_monitoring.tsv",sep="\t",index=False)
     pd.DataFrame([dict(contrast_id="pair",elapsed_seconds=600,assigned_monitored_reads=10000,R_information=1.,fit_R=1.,curve_gain=.008,predicted_conservative_gain=.01,
                        actual_gain_next_horizon=.005,fraction_R_le_05=.5,fraction_R_le_1=.8,eligible=False)]).to_csv(path/"forecast_history.tsv",sep="\t",index=False)
@@ -313,7 +313,10 @@ def write_monitoring_results(path):
 def test_dea_report_identifies_uncertainty_scope_and_feature_count(tmp_path, selected):
     import dominate
 
-    from workflow_glue.qc_report_types.precision_monitoring import add_precision_monitoring
+    from workflow_glue.qc_report_types.precision_monitoring import (
+        add_precision_monitoring,
+        load_precision_monitoring,
+    )
 
     root = tmp_path / "monitoring"
     write_monitoring_results(root)
@@ -323,15 +326,16 @@ def test_dea_report_identifies_uncertainty_scope_and_feature_count(tmp_path, sel
         uncertainty_feature_count=3 if selected else 300,
     )]
     (root / "audit.json").write_text(json.dumps(audit))
-    table = pd.DataFrame({"Sample": ["treatment_1"], "Eligible": ["false"]})
-    table.attrs["precision_monitoring_directory"] = str(root)
+    table = load_precision_monitoring(root, "log")
+    assert table["Stopping rule met"].tolist() == ["No", "Yes"]
     document = dominate.document()
     with document:
-        add_precision_monitoring(table)
+        add_precision_monitoring(table, method="dea", behavior="log")
     html = document.render()
-    assert ("union of selected GMT features" if selected else "all quantified features") in html
+    assert ("features in the selected gene sets" if selected else "all quantified features") in html
     assert f"pair: {3 if selected else 300} features" in html
-    assert "Unestimable features remain in this denominator" in html
+    assert "includes features with unavailable estimates" in html
+    assert "The horizontal line marks the cutoff." in html
 
 
 def test_create_hist_plot_uses_length_values_only(monkeypatch):
@@ -378,7 +382,8 @@ def test_create_hist_plot_uses_length_values_only(monkeypatch):
     assert plot._fig.yaxis.axis_label == "Number of reads"
 
 
-def test_qc_report_writes_html(tmp_path):
+@pytest.mark.parametrize("behavior", ["log", "terminate"])
+def test_qc_report_writes_html(tmp_path, behavior):
     """Report lists the current QC result samples and QC input directories."""
     write_flagstat(
         tmp_path / "qc_results/flagstat/control/control_1/flagstat_data_chunk_0.tsv"
@@ -457,7 +462,7 @@ def test_qc_report_writes_html(tmp_path):
     differential_results = tmp_path / "differential_results"
     write_differential_results(differential_results)
     monitoring_results = tmp_path / "dea_monitoring"
-    write_monitoring_results(monitoring_results)
+    write_monitoring_results(monitoring_results, behavior=behavior)
     transcript_biotypes = tmp_path / "transcript_biotypes.tsv"
     write_transcript_biotypes(transcript_biotypes)
 
@@ -473,7 +478,7 @@ def test_qc_report_writes_html(tmp_path):
     with samples.open("a") as handle:
         handle.write("omitted\tQC_only\t\t1\t0\tqc_results\n")
     with (monitoring_results/"sample_monitoring.tsv").open("a") as handle:
-        handle.write("QC_only\tomitted\tdea\tR_information\tfalse\t0\tnot_required\tlog\tnone\n")
+        handle.write(f"QC_only\tomitted\tdea\tR_information\tfalse\t0\tnot_required\t{behavior}\tnone\n")
     composition = pd.read_csv(transcript_biotypes, sep="\t")
     composition = pd.concat([composition, pd.DataFrame([
         {"name": "omitted", "group": "QC_only", "biotype": biotype, "num_reads": 0, "fraction": 0}
@@ -496,7 +501,7 @@ def test_qc_report_writes_html(tmp_path):
             "--monitoring-results",
             str(monitoring_results),
             "--monitoring-behavior",
-            "log",
+            behavior,
             "--transcript-biotypes",
             str(transcript_biotypes),
             "--gene-set-enrichment",
@@ -551,8 +556,13 @@ def test_qc_report_writes_html(tmp_path):
     assert "logFC vs logCPM" in html
     assert "Volcano plot" in html
     assert "differential genes:" in html
-    assert "DEA Termination" in html
-    assert "Consecutive confirmations" in html
+    assert ">DEA Termination</button>" in html
+    assert ">ICA Termination</button>" not in html
+    assert "The uncertainty score summarizes uncertainty in gene expression differences" in html
+    assert "Uncertainty score" in html
+    assert "Checks passed in a row" in html
+    assert "Stopping rule met" in html
+    assert ("logged" if behavior == "log" else "stop_created") in html
     assert "fry enrichment:" in html
     assert "Gene-set barcode and enrichment:" in html
     assert "GSVA scores across samples" in html
@@ -603,6 +613,8 @@ def test_qc_report_writes_html(tmp_path):
             str(params),
             "--differential-results",
             str(differential_results),
+            "--monitoring-results",
+            str(monitoring_results),
             "--refresh-seconds",
             "0",
         ]
@@ -612,6 +624,8 @@ def test_qc_report_writes_html(tmp_path):
         qc_report.main(differential_only_args)
     differential_only_html = differential_only_report.read_text()
     assert ">Differential Expression<" in differential_only_html
+    assert ">DEA Termination</button>" not in differential_only_html
+    assert ">ICA Termination</button>" not in differential_only_html
     assert ">Gene Set Enrichment<" not in differential_only_html
     assert ">Temporal Analysis<" not in differential_only_html
 
@@ -637,6 +651,8 @@ def test_qc_report_writes_html(tmp_path):
     qc_only_html = qc_only_report.read_text()
     assert ">Quality Control<" in qc_only_html
     assert ">Differential Expression<" not in qc_only_html
+    assert ">DEA Termination</button>" not in qc_only_html
+    assert ">ICA Termination</button>" not in qc_only_html
     assert ">Gene Set Enrichment<" not in qc_only_html
     assert ">Temporal Analysis<" not in qc_only_html
     assert "Transcript biotype composition" not in qc_only_html
@@ -666,6 +682,44 @@ def test_qc_report_writes_html(tmp_path):
     assert ">Differential Expression<" not in biotype_only_html
     assert "Transcript biotype composition" in biotype_only_html
     assert ">Transcript Biotypes<" in biotype_only_html
+
+
+@pytest.mark.parametrize("method", ["dea", "ica"])
+@pytest.mark.parametrize("behavior", ["log", "terminate"])
+def test_report_shows_selected_termination_tab_while_waiting(tmp_path, monkeypatch, method, behavior):
+    qc_dir = tmp_path / "qc_results"
+    write_flagstat(qc_dir / "flagstat/control/control_1/flagstat_data_chunk_0.tsv")
+    write_nanoplot(qc_dir / "nanoplot/control/control_1/nanoplot_data_chunk_0.tsv.gz", [])
+    samples = tmp_path / "samples.tsv"
+    samples.write_text(
+        "name\tgroup\torder\tchunks_seen\tlatest_batch_index\tqc_dir\n"
+        "control_1\tcontrol\t0\t1\t0\tqc_results\n"
+    )
+    versions = tmp_path / "versions"
+    versions.mkdir()
+    (versions / "versions.txt").write_text("qc_report,workflow\n")
+    params = tmp_path / "params.json"
+    params.write_text("{}")
+    report = tmp_path / "qc_report.html"
+    args = qc_report.argparser().parse_args([
+        str(report),
+        "--samples", str(samples),
+        "--versions", str(versions),
+        "--params", str(params),
+        "--monitoring-behavior", behavior,
+        "--stopping-method", method,
+        "--refresh-seconds", "0",
+    ])
+    monkeypatch.chdir(tmp_path)
+    qc_report.main(args)
+
+    html = report.read_text()
+    assert (">DEA Termination</button>" in html) == (method == "dea")
+    assert (">ICA Termination</button>" in html) == (method == "ica")
+    assert "No stopping checks have been recorded yet." in html
+    assert "R monitoring disabled or not yet available" not in html
+    assert ("records stopping checks for review" in html) == (behavior == "log")
+    assert ("SeqLM can request a stop" in html) == (behavior == "terminate")
 
 
 def test_gene_set_report_requires_differential_results():

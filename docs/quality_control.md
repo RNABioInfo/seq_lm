@@ -17,8 +17,11 @@ Additional tabs appear when results from the enabled analyses are available.
   **Time Course** appears when the sample sheet includes time points.
 - **Independent Components** shows iModulon activities and comparisons with
   the control group. [iModulon guide](imodulon_analysis.md)
-- **DEA Termination** or **ICA Termination** reports whether the stopping
-  criteria are met and whether sequencing was stopped. [Automated stopping guide](dea_termination.md)
+- **DEA Termination** or **ICA Termination** appears when stopping checks are
+  enabled. It shows how much collecting more reads is expected to improve the
+  precision of the results, whether the stopping rule was met, and what action
+  was taken. The tab shows a waiting message until the first check is available.
+  [Automated stopping guide](dea_termination.md)
 
 ## Viewing a live report
 

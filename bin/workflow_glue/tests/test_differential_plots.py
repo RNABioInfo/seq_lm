@@ -284,13 +284,10 @@ def test_overview_orders_pca_mds_and_bcv(tmp_path, monkeypatch):
     ]
 
 
-def test_disabled_dea_monitoring_reports_every_sample():
-    metadata = sample_metadata().rename(columns={"Name":"sample","Group":"group"}).set_index("sample")
-    table = dp.load_precision_monitoring(None,metadata,"disabled")
-    assert table["Sample"].tolist() == metadata.index.tolist()
-
-
-def test_dea_termination_is_last_differential_tab(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    "behavior, has_audit", [("disabled", False), ("log", False), ("terminate", True)],
+)
+def test_dea_termination_is_last_differential_tab(tmp_path, monkeypatch, behavior, has_audit):
     """DEA termination follows Overview and Contrasts and receives its audit table."""
     metadata = write_edge_dea_tree(tmp_path)
     data = dp.load_differential_results(tmp_path, metadata)
@@ -321,15 +318,25 @@ def test_dea_termination_is_last_differential_tab(tmp_path, monkeypatch):
 
     monkeypatch.setattr(dp, "Tabs", FakeTabs)
     monkeypatch.setattr(dp, "EZChart", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(dp, "add_precision_monitoring", captured_tables.append)
+    def capture_monitoring(table, **settings):
+        captured_tables.append((table, settings))
 
-    dp.add_differential_analysis(data, lfc_cutoff=1, padj_cutoff=0.05)
+    monkeypatch.setattr(dp, "add_precision_monitoring", capture_monitoring)
 
-    assert tab_groups[0] == ["Overview", "Contrasts", "DEA Termination"]
-    assert captured_tables[0].columns[:2].tolist() == [
-        "Sample",
-        "Status",
-    ]
+    audit = pd.DataFrame({"Sample": ["treated_1"]}) if has_audit else None
+    dp.add_differential_analysis(
+        data, lfc_cutoff=1, padj_cutoff=0.05, monitoring_results=audit,
+        monitoring_behavior=behavior,
+    )
+
+    if behavior == "disabled":
+        assert tab_groups[0] == ["Overview", "Contrasts"]
+        assert not captured_tables
+    else:
+        assert tab_groups[0] == ["Overview", "Contrasts", "DEA Termination"]
+        ((rendered, settings),) = captured_tables
+        assert rendered is audit
+        assert settings == {"method": "dea", "behavior": behavior}
 
 
 def test_ma_and_volcano_include_cutoff_spans(tmp_path):

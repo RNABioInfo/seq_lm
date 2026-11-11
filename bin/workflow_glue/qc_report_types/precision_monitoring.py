@@ -14,16 +14,9 @@ from precision_termination.forecast import FIT_HALF_LIFE_SECONDS
 
 
 def load_precision_monitoring(
-    path: str | None, metadata: pd.DataFrame | None, behavior: str,
+    path: str | Path, behavior: str,
     report_samples=None, *, method="dea", expected_snapshot=None,
 ) -> pd.DataFrame:
-    if path is None:
-        return pd.DataFrame(
-            {
-                "Sample": metadata.index,
-                "Status": "R monitoring disabled or not yet available",
-            }
-        )
     folder = Path(path)
     methods = json.loads((folder / "audit.json").read_text())
     if methods.get("forecast_method") not in {"depth_curve", FORECAST_METHOD}:
@@ -43,61 +36,64 @@ def load_precision_monitoring(
         "action_result",
     }
     if not required.issubset(audit):
-        raise ValueError("R monitoring audit is missing required columns")
+        raise ValueError("Stopping audit is missing required columns")
     if set(audit.method) != {method} or set(audit.metric) != {"R_information"}:
-        raise ValueError("Unexpected R monitoring method")
+        raise ValueError("Unexpected stopping audit method or metric")
     if expected_snapshot is not None:
         for column, expected in zip(("batch_index", "analysis_index"), expected_snapshot, strict=True):
             if column not in audit or set(audit[column]) != {str(expected)}:
                 raise ValueError("ICA termination audit does not match the analysis snapshot")
     if set(audit.behavior) != {behavior}:
-        raise ValueError("R monitoring behavior mismatch")
+        raise ValueError("Stopping audit behavior mismatch")
     pairs = list(zip(audit["group"], audit["sample"]))
     if len(set(pairs)) != len(pairs):
-        raise ValueError("Duplicate R monitoring sample identities")
+        raise ValueError("Duplicate stopping audit sample identities")
     if report_samples is not None and set(pairs) != set(
         zip(report_samples["Group"], report_samples["Name"])
     ):
-        raise ValueError("R monitoring samples do not match report")
+        raise ValueError("Stopping audit samples do not match report")
     if not set(audit.eligible).issubset({"true", "false"}):
-        raise ValueError("Invalid R monitoring eligibility")
+        raise ValueError("Invalid stopping audit eligibility")
     result = audit.rename(
         columns={
             "sample": "Sample",
             "group": "Group",
-            "consecutive_confirmations": "Consecutive confirmations",
-            "eligible": "Eligible",
+            "consecutive_confirmations": "Checks passed in a row",
+            "eligible": "Stopping rule met",
             "reason": "Reason",
             "action_result": "Action",
         }
     )
     result = result[
-        ["Sample", "Group", "Consecutive confirmations", "Eligible", "Reason", "Action"]
-    ]
+        ["Sample", "Group", "Checks passed in a row", "Stopping rule met", "Reason", "Action"]
+    ].copy()
+    result["Stopping rule met"] = result["Stopping rule met"].map({"true": "Yes", "false": "No"})
     result.attrs["precision_monitoring_directory"] = str(folder)
-    result.attrs["precision_monitoring_method"] = method
     return result
 
 
-def add_precision_monitoring(table):
-    ica = table.attrs.get("precision_monitoring_method") == "ica"
-    quantity = "weighted iModulon activity differences in log2 units" if ica else "log2 fold changes"
+def add_precision_monitoring(table: pd.DataFrame | None, *, method: str, behavior: str) -> None:
+    ica = method == "ica"
+    quantity = "iModulon activity differences" if ica else "gene expression differences"
     features = "components" if ica else "features"
-    plot_features = "components" if ica else "genes"
     paragraph(
-        f"R summarizes model-based uncertainty in {quantity}. Smaller values indicate narrower intervals. "
-        "The aggregate and forecast are custom heuristics; they do not provide sequential confidence coverage."
+        "This tab shows how much collecting more reads is expected to improve the precision of the results, "
+        "whether the stopping rule has been met, and what action was taken. "
+        f"The uncertainty score summarizes uncertainty in {quantity} between groups. "
+        "A lower score means a more precise estimate."
     )
-    DataTable.from_pandas(table, use_index=False)
-    directory = table.attrs.get("precision_monitoring_directory")
-    if not directory:
+    if behavior == "log":
+        paragraph("This run records stopping checks for review.")
+    else:
+        paragraph("SeqLM can request a stop once all active samples sharing the acquisition meet the stopping rule.")
+
+    if table is None:
+        paragraph("No stopping checks have been recorded yet.")
         return
-    root = Path(directory)
-    audit = (
-        json.loads((root / "audit.json").read_text())
-        if (root / "audit.json").exists()
-        else {"config": {"gain_cutoff": 0.01}}
-    )
+
+    DataTable.from_pandas(table, use_index=False)
+    root = Path(table.attrs["precision_monitoring_directory"])
+    audit = json.loads((root / "audit.json").read_text())
     config = audit["config"]
     contrasts = audit.get("contrasts", [])
     selected = any(row.get("uncertainty_scope") == "selected_features" for row in contrasts)
@@ -105,17 +101,17 @@ def add_precision_monitoring(table):
         row["contrast_id"]: f"{row['target_group']} vs {row['reference_group']}"
         for row in contrasts if row.get("target_group") is not None
     }
-    counts = "; ".join(
+    counts = ", ".join(
         f"{labels.get(row['contrast_id'], row['contrast_id'])}: {row['uncertainty_feature_count']} {features}"
         for row in contrasts if row.get("uncertainty_feature_count") is not None
     )
     all_features = "all model components" if ica else "all quantified features"
-    selected_features = "selected iModulon components" if ica else "union of selected GMT features"
+    selected_features = "selected iModulon components" if ica else "features in the selected gene sets"
     paragraph(
-        "Uncertainty scope: "
+        "The uncertainty score uses "
         + (selected_features if selected else all_features)
         + (f" ({counts})" if counts else "")
-        + f". Unestimable {features} remain in this denominator."
+        + f". The total also includes {features} with unavailable estimates."
     )
     horizon_minutes = config.get("horizon_seconds", 1800) / 60
     if audit.get("forecast_method") == FORECAST_METHOD:
@@ -125,7 +121,13 @@ def add_precision_monitoring(table):
             "Large misses have less influence on the fit."
         )
     paragraph(
-        f"Stopping cutoff: {100 * config['gain_cutoff']:g}% expected reduction in aggregate R over {horizon_minutes:g} minutes. The prediction uses the fitted depth curve plus its calibrated error margin. Solid forecast lines show their sum; dotted lines show the curve forecast before the margin; dashed lines show later observed improvement where available. Circles mark eligibility, which does not imply that a shared acquisition was stopped."
+        f"The stopping cutoff is a {100 * config['gain_cutoff']:g}% drop in uncertainty over "
+        f"{horizon_minutes:g} minutes. The rule looks for improvements smaller than this cutoff "
+        "in both the previous window and the forecast. The horizontal line marks the cutoff. "
+        "The solid line shows the forecast used for the stopping check, including an allowance for forecast error. "
+        "The dotted line shows the forecast before that allowance. "
+        "The dashed line shows the improvement measured once later data are available. "
+        "Circles mark checks that met the stopping rule. See the Action column for what happened to each sample."
     )
     history = pd.read_csv(root / "forecast_history.tsv", sep="\t")
     rates = pd.read_csv(root / "read_rate_history.tsv", sep="\t")
@@ -137,6 +139,7 @@ def add_precision_monitoring(table):
             "R_information",
             "Uncertainty over observation time",
             "Observation time (hours)",
+            "Uncertainty score",
             3600.0,
         ),
         (
@@ -144,6 +147,7 @@ def add_precision_monitoring(table):
             "R_information",
             "Uncertainty versus read depth",
             "Assigned reads in monitored libraries (millions)",
+            "Uncertainty score",
             1e6,
         ),
         (
@@ -151,56 +155,58 @@ def add_precision_monitoring(table):
             "predicted_conservative_gain",
             f"Next {horizon_minutes:g}-minute improvement",
             "Observation time (hours)",
+            "Relative improvement (%)",
             3600.0,
         ),
         (
             "elapsed_seconds",
             "fraction_R_le_05",
-            f"Fraction of {plot_features} with R ≤ 0.5",
+            f"{features.capitalize()} with uncertainty score of 0.5 or less",
             "Observation time (hours)",
+            f"Fraction of {features}",
             3600.0,
         ),
         (
             "elapsed_seconds",
             "fraction_R_le_1",
-            f"Fraction of {plot_features} with R ≤ 1",
+            f"{features.capitalize()} with uncertainty score of 1 or less",
             "Observation time (hours)",
+            f"Fraction of {features}",
+            3600.0,
+        ),
+        (
+            "elapsed_seconds",
+            "maximum_sample_data_age_seconds",
+            "Age of the data used in the check",
+            "Observation time (hours)",
+            "Age (seconds)",
+            3600.0,
+        ),
+        (
+            "elapsed_seconds",
+            "processing_lag_seconds",
+            "Delay from newest data to results",
+            "Observation time (hours)",
+            "Processing lag (seconds)",
+            3600.0,
+        ),
+        (
+            "elapsed_seconds",
+            "confirmation_span_seconds",
+            "Time covered by consecutive passing checks",
+            "Observation time (hours)",
+            "Time span (seconds)",
             3600.0,
         ),
     ]
-    plots.extend(
-        [
-            (
-                "elapsed_seconds",
-                "maximum_sample_data_age_seconds",
-                "Age of represented data",
-                "Observation time (hours)",
-                3600.0,
-            ),
-            (
-                "elapsed_seconds",
-                "processing_lag_seconds",
-                "Processing lag (seconds)",
-                "Observation time (hours)",
-                3600.0,
-            ),
-            (
-                "elapsed_seconds",
-                "confirmation_span_seconds",
-                "Confirmation span (seconds)",
-                "Observation time (hours)",
-                3600.0,
-            ),
-        ]
-    )
     colors = ["#0072B2", "#D55E00", "#009E73", "#CC79A7", "#E69F00", "#56B4E9"]
-    for x, y, title, xlabel, scale in plots:
+    for x, y, title, xlabel, ylabel, scale in plots:
         if y not in history:
             continue
         p = BokehPlot(
             title=title,
             x_axis_label=xlabel,
-            y_axis_label="Relative improvement (%)" if "gain" in y else y,
+            y_axis_label=ylabel,
         )
         if y == "R_information":
             p._fig.y_range.start = 0
