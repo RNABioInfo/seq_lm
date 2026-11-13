@@ -88,8 +88,8 @@ Open **Gene Set Enrichment** in the report.
 Add an `order` column to the sample sheet to plot GSVA scores and expression
 over time. Record elapsed time in whole minutes for every sample in the
 selected groups. Replicates in a group share the same time point. Assign
-one group per time point and include at least two time points. The
-**Time Course** tab summarizes the observed time points.
+one group per time point and include at least two time points. Open
+**Gene Set Enrichment → GSVA scores → Time Course** to see the plots.
 
 DEA can also inform when to end a live sequencing run.
 [Automated stopping guide](dea_termination.md)

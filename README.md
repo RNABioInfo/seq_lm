@@ -94,7 +94,7 @@ The converted file should be used as `reference_annotation`. See the
 
 ### 4. View results or run live
 
-`qc_report.html` can be opened in the results directory. For live analysis, set `live_analysis = true` in `run.config` before launching.
+`report.html` can be opened in the results directory. For live analysis, set `live_analysis = true` in `run.config` before launching.
 The report updates automatically as BAM file segments are received.
 
 In `disabled` or `log` monitoring mode, live sample analysis automatically finish when a validated MinKNOW `final_summary.txt` or `final_summary_*.txt` is present and the summary and BAM directory have remained unchanged for 30 seconds. This also works when analysis starts after sequencing has finished.
@@ -133,8 +133,8 @@ Diagnostics contains the component annotations. See the
 
 | Path under `out_dir` | Contents |
 | --- | --- |
-| `qc_report.html` | Main report. Live updates during sequencing |
-| `qc_report_state.json`, `qc_report_snapshot_revision_*.html` | Live-report state and immutable snapshots. |
+| `report.html` | Main report. Live updates during sequencing |
+| `report_state.json`, `report_snapshot_revision_*.html` | Live-report state and immutable snapshots. |
 | `<group>/<alias>/` | Sample QC, quantification, and `FINAL` completion marker. |
 | `differential_expression/` | Differential-expression and gene-set results. |
 | `ica/` | iModulon snapshots; `latest.json` identifies the newest snapshot and status. |
@@ -169,7 +169,7 @@ See [precision termination](docs/dea_termination.md) and [ICA monitoring](docs/i
 
 With live monitoring enabled, stable new BAMs trigger quantification for each sample independently.
 All live samples sharing a MinKNOW acquisition must qualify before the workflow can stop it.
-The report shows the corresponding **DEA Termination** or **ICA Termination** tab.
+The report shows the selected method in the **Automatic Termination** tab.
 
 Generate credentials in the activated `seq-lm` environment.
 This step must be performed on the computer that is conducting the sequencing.

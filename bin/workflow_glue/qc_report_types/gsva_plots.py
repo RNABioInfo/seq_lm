@@ -28,6 +28,7 @@ from .differential_plots import (
     DifferentialResult,
     _empty_plot,
 )
+from .temporal_plots import TemporalResult, add_temporal_analysis
 
 GSVA_SCORES_LONG_FILE = "gsva_scores_long.tsv"
 GSVA_COVERAGE_FILE = "gsva_gene_set_coverage.tsv"
@@ -776,8 +777,10 @@ def create_multi_contrast_dot_plot(
 def add_gsva_scores(
     data: GSVAResult,
     condition_colors: dict[str, str],
+    *,
+    temporal_results: TemporalResult | None = None,
 ) -> None:
-    """Add raw-score plot-type tabs and the long gene-set dropdown."""
+    """Add score plots, optional time courses, and coverage metrics."""
     tabs = Tabs()
     with tabs.add_tab("Samples Heatmap"):
         heatmap = create_score_heatmap(data, condition_colors)
@@ -796,6 +799,9 @@ def add_gsva_scores(
                         "epi2melabs",
                         height="500px",
                     )
+    if temporal_results is not None:
+        with tabs.add_tab("Time Course"):
+            add_temporal_analysis(temporal_results, condition_colors)
     with tabs.add_tab("Coverage Metrics"):
         DataTable.from_pandas(
             data.coverage.drop(columns="description"),

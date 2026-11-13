@@ -6,6 +6,7 @@ from pathlib import Path
 
 from .engine import FORECAST_METHOD, atomic_json, evaluate, read_tsv, write_tsv
 from .ica import load_ica_precision
+from .reasons import audit_reason
 
 
 def load_precision(root, definitions, selected=False):
@@ -42,6 +43,10 @@ def load_precision(root, definitions, selected=False):
     return precision
 
 
+def audit_contrasts(rows):
+    return [row | {"reason": audit_reason(row["reason"])} for row in rows]
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--input", type=Path, required=True)
@@ -66,15 +71,20 @@ def main():
     a.output.mkdir(parents=True, exist_ok=True)
     # State is staged beside the audit. The caller commits it after action auditing.
     atomic_json(a.output / "state.json", state)
+    contrast_audit = audit_contrasts(contrasts)
+    sample_audit = [
+        row | {"reason": audit_reason(row["reason"]) if row["effectively_live"] else "not_monitored"}
+        for row in samples
+    ]
     atomic_json(
         a.output / "audit.json",
-        {"forecast_method": FORECAST_METHOD, "contrasts": contrasts,
+        {"forecast_method": FORECAST_METHOD, "contrasts": contrast_audit,
          "rates": rates, "config": state["config"]},
     )
-    write_tsv(a.output / "contrast_monitoring.tsv", contrasts)
-    write_tsv(a.output / "sample_monitoring.tsv", samples)
+    write_tsv(a.output / "contrast_monitoring.tsv", contrast_audit)
+    write_tsv(a.output / "sample_monitoring.tsv", sample_audit)
     write_tsv(a.output / "read_rates.tsv", rates)
-    write_tsv(a.output / "forecast_history.tsv", state["audit_history"])
+    write_tsv(a.output / "forecast_history.tsv", audit_contrasts(state["audit_history"]))
     write_tsv(
         a.output / "read_rate_history.tsv",
         state["rate_history"],

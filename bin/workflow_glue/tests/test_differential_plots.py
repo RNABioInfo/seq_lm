@@ -284,61 +284,6 @@ def test_overview_orders_pca_mds_and_bcv(tmp_path, monkeypatch):
     ]
 
 
-@pytest.mark.parametrize(
-    "behavior, has_audit", [("disabled", False), ("log", False), ("terminate", True)],
-)
-def test_dea_termination_is_last_differential_tab(tmp_path, monkeypatch, behavior, has_audit):
-    """DEA termination follows Overview and Contrasts and receives its audit table."""
-    metadata = write_edge_dea_tree(tmp_path)
-    data = dp.load_differential_results(tmp_path, metadata)
-    tab_groups = []
-    captured_tables = []
-
-    class FakeTabContext:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_args):
-            return False
-
-    class FakeTabs:
-        def __init__(self):
-            self.names = []
-            tab_groups.append(self.names)
-
-        def add_tab(self, name):
-            self.names.append(name)
-            return FakeTabContext()
-
-        def add_dropdown_menu(self, *_args, **_kwargs):
-            return FakeTabContext()
-
-        def add_dropdown_tab(self, *_args, **_kwargs):
-            return FakeTabContext()
-
-    monkeypatch.setattr(dp, "Tabs", FakeTabs)
-    monkeypatch.setattr(dp, "EZChart", lambda *_args, **_kwargs: None)
-    def capture_monitoring(table, **settings):
-        captured_tables.append((table, settings))
-
-    monkeypatch.setattr(dp, "add_precision_monitoring", capture_monitoring)
-
-    audit = pd.DataFrame({"Sample": ["treated_1"]}) if has_audit else None
-    dp.add_differential_analysis(
-        data, lfc_cutoff=1, padj_cutoff=0.05, monitoring_results=audit,
-        monitoring_behavior=behavior,
-    )
-
-    if behavior == "disabled":
-        assert tab_groups[0] == ["Overview", "Contrasts"]
-        assert not captured_tables
-    else:
-        assert tab_groups[0] == ["Overview", "Contrasts", "DEA Termination"]
-        ((rendered, settings),) = captured_tables
-        assert rendered is audit
-        assert settings == {"method": "dea", "behavior": behavior}
-
-
 def test_ma_and_volcano_include_cutoff_spans(tmp_path):
     """Both contrast plots show their applicable decision thresholds."""
     metadata = write_edge_dea_tree(tmp_path)

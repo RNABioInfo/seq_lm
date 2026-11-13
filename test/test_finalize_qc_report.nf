@@ -6,9 +6,9 @@ include { finalize_qc_report } from '../modules/qc_report_helpers.nf'
 
 workflow {
     def root: Path = java.nio.file.Files.createTempDirectory('seq-lm-final-report-')
-    def report: Path = root.resolve('qc_report.html')
-    def snapshot: Path = root.resolve('qc_report_snapshot_revision_4.html')
-    def state: Path = root.resolve('qc_report_state.json')
+    def report: Path = root.resolve('report.html')
+    def snapshot: Path = root.resolve('report_snapshot_revision_4.html')
+    def state: Path = root.resolve('report_state.json')
     java.nio.file.Files.writeString(
         report,
         '<html><body>Waiting for update.</body></html>',

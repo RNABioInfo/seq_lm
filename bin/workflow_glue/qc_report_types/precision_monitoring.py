@@ -9,8 +9,28 @@ from dominate.tags import p as paragraph
 from ezcharts.components.ezchart import EZChart
 from ezcharts.layout.snippets.table import DataTable
 from ezcharts.plots import BokehPlot
-from precision_termination.engine import FORECAST_METHOD
-from precision_termination.forecast import FIT_HALF_LIFE_SECONDS
+from precision_termination.engine import (
+    DEFAULTS,
+    FORECAST_METHOD,
+    minimum_confirmation_span_seconds,
+)
+from precision_termination.reasons import audit_reason
+
+REASON_LABELS = {
+    "precision_met": "Precision check passed",
+    "improvement_continues": "More reads may improve precision",
+    "stability_not_confirmed": "Waiting for a stable uncertainty trend",
+    "waiting_for_reads": "Waiting for more sequencing data",
+    "results_not_ready": "Waiting for usable analysis results",
+    "not_monitored": "No stop check applies",
+}
+
+
+def reason_label(reason: str) -> str:
+    return ". ".join(
+        REASON_LABELS.get(code, code.replace("_", " ").capitalize())
+        for code in audit_reason(reason).split(",")
+    )
 
 
 def load_precision_monitoring(
@@ -68,24 +88,27 @@ def load_precision_monitoring(
         ["Sample", "Group", "Checks passed in a row", "Stopping rule met", "Reason", "Action"]
     ].copy()
     result["Stopping rule met"] = result["Stopping rule met"].map({"true": "Yes", "false": "No"})
+    result["Reason"] = result["Reason"].map(reason_label)
     result.attrs["precision_monitoring_directory"] = str(folder)
     return result
 
 
 def add_precision_monitoring(table: pd.DataFrame | None, *, method: str, behavior: str) -> None:
     ica = method == "ica"
-    quantity = "iModulon activity differences" if ica else "gene expression differences"
     features = "components" if ica else "features"
+    analysis = "iModulon activity differences (ICA)" if ica else "gene expression differences (DEA)"
+    paragraph(f"Stopping checks use {analysis}.")
     paragraph(
-        "This tab shows how much collecting more reads is expected to improve the precision of the results, "
-        "whether the stopping rule has been met, and what action was taken. "
-        f"The uncertainty score summarizes uncertainty in {quantity} between groups. "
-        "A lower score means a more precise estimate."
+        """
+        Automatic termination evaluates whether continued sequencing yields improvement in analysis uncertainty.
+        This table shows the current evaluation status of the different comparisons.
+        A lower score means a more precise analysis result.
+        """
     )
     if behavior == "log":
-        paragraph("This run records stopping checks for review.")
+        paragraph("Behavior is log only.")
     else:
-        paragraph("SeqLM can request a stop once all active samples sharing the acquisition meet the stopping rule.")
+        paragraph("Behavior is automatic stopping once all active samples sharing the acquisition meet the cutoff.")
 
     if table is None:
         paragraph("No stopping checks have been recorded yet.")
@@ -94,7 +117,7 @@ def add_precision_monitoring(table: pd.DataFrame | None, *, method: str, behavio
     DataTable.from_pandas(table, use_index=False)
     root = Path(table.attrs["precision_monitoring_directory"])
     audit = json.loads((root / "audit.json").read_text())
-    config = audit["config"]
+    config = DEFAULTS | audit["config"]
     contrasts = audit.get("contrasts", [])
     selected = any(row.get("uncertainty_scope") == "selected_features" for row in contrasts)
     labels = {
@@ -111,23 +134,15 @@ def add_precision_monitoring(table: pd.DataFrame | None, *, method: str, behavio
         "The uncertainty score uses "
         + (selected_features if selected else all_features)
         + (f" ({counts})" if counts else "")
-        + f". The total also includes {features} with unavailable estimates."
     )
-    horizon_minutes = config.get("horizon_seconds", 1800) / 60
-    if audit.get("forecast_method") == FORECAST_METHOD:
-        paragraph(
-            "The curve uses raw uncertainty scores. It gives newer checkpoints more weight, "
-            f"with weights halving every {FIT_HALF_LIFE_SECONDS / 3600:g} hours. "
-            "Large misses have less influence on the fit."
-        )
+    horizon_minutes = config["horizon_seconds"] / 60
+    gain_cutoff = 100 * config["gain_cutoff"]
+    required_span = minimum_confirmation_span_seconds(config["horizon_seconds"]) / 60
     paragraph(
-        f"The stopping cutoff is a {100 * config['gain_cutoff']:g}% drop in uncertainty over "
-        f"{horizon_minutes:g} minutes. The rule looks for improvements smaller than this cutoff "
-        "in both the previous window and the forecast. The horizontal line marks the cutoff. "
-        "The solid line shows the forecast used for the stopping check, including an allowance for forecast error. "
-        "The dotted line shows the forecast before that allowance. "
-        "The dashed line shows the improvement measured once later data are available. "
-        "Circles mark checks that met the stopping rule. See the Action column for what happened to each sample."
+        f"A precision check passes when both the decrease in uncertainty over the past {horizon_minutes:g} minutes "
+        f"and the forecast with its error allowance for the next {horizon_minutes:g} minutes are below {gain_cutoff:g}%. "
+        f"The stopping rule requires at least {config['confirmations']} passing checks in a row "
+        f"spanning at least {required_span:g} minutes. See Action for sample outcomes."
     )
     history = pd.read_csv(root / "forecast_history.tsv", sep="\t")
     rates = pd.read_csv(root / "read_rate_history.tsv", sep="\t")
@@ -176,30 +191,25 @@ def add_precision_monitoring(table: pd.DataFrame | None, *, method: str, behavio
         ),
         (
             "elapsed_seconds",
-            "maximum_sample_data_age_seconds",
-            "Age of the data used in the check",
-            "Observation time (hours)",
-            "Age (seconds)",
-            3600.0,
-        ),
-        (
-            "elapsed_seconds",
-            "processing_lag_seconds",
-            "Delay from newest data to results",
-            "Observation time (hours)",
-            "Processing lag (seconds)",
-            3600.0,
-        ),
-        (
-            "elapsed_seconds",
             "confirmation_span_seconds",
             "Time covered by consecutive passing checks",
             "Observation time (hours)",
-            "Time span (seconds)",
+            "Time span (minutes)",
             3600.0,
         ),
     ]
     colors = ["#0072B2", "#D55E00", "#009E73", "#CC79A7", "#E69F00", "#56B4E9"]
+    line_styles = {
+        "R_information": [("fit_R", "dashed", "Fitted uncertainty")],
+        "predicted_conservative_gain": [
+            ("curve_gain", "dotted", "Forecast without margin"),
+            ("actual_gain_next_horizon", "dashed", "Observed improvement"),
+        ],
+    }
+    cutoffs = {
+        "predicted_conservative_gain": (gain_cutoff, f"Stopping cutoff ({gain_cutoff:g}%)"),
+        "confirmation_span_seconds": (required_span, f"Required passing span ({required_span:g} min)"),
+    }
     for x, y, title, xlabel, ylabel, scale in plots:
         if y not in history:
             continue
@@ -208,100 +218,82 @@ def add_precision_monitoring(table: pd.DataFrame | None, *, method: str, behavio
             x_axis_label=xlabel,
             y_axis_label=ylabel,
         )
-        if y == "R_information":
+        if y in {"R_information", "confirmation_span_seconds"}:
             p._fig.y_range.start = 0
+        factor = {"predicted_conservative_gain": 100, "confirmation_span_seconds": 1 / 60}.get(y, 1)
+        extra_lines = line_styles.get(y, [])
+
         for i, (cid, rows) in enumerate(history.groupby("contrast_id", sort=False)):
             xx = pd.to_numeric(rows[x], errors="coerce") / scale
-            yy = pd.to_numeric(rows[y], errors="coerce")
-            factor = 100 if "gain" in y else 1
+            yy = pd.to_numeric(rows[y], errors="coerce") * factor
+            color = colors[i % len(colors)]
             p._fig.line(
                 xx,
-                yy * factor,
-                color=colors[i % len(colors)],
+                yy,
+                color=color,
                 legend_label=labels.get(cid, str(cid)),
                 line_width=2,
             )
-            if y == "R_information" and "fit_R" in rows:
+            for field, dash, _ in extra_lines:
+                if field not in rows:
+                    continue
                 p._fig.line(
                     xx,
-                    pd.to_numeric(rows.fit_R, errors="coerce"),
-                    color=colors[i % len(colors)],
-                    line_dash="dashed",
-                )
-            if "gain" in y and "actual_gain_next_horizon" in rows:
-                p._fig.line(
-                    xx,
-                    pd.to_numeric(rows.actual_gain_next_horizon, errors="coerce") * 100,
-                    color=colors[i % len(colors)],
-                    line_dash="dashed",
-                )
-            if y == "predicted_conservative_gain":
-                p._fig.line(
-                    xx,
-                    pd.to_numeric(rows.curve_gain, errors="coerce") * 100,
-                    color=colors[i % len(colors)],
-                    line_dash="dotted",
+                    pd.to_numeric(rows[field], errors="coerce") * factor,
+                    color=color,
+                    line_dash=dash,
                 )
             if "eligible" in rows:
-                selected = rows.eligible.astype(str).str.lower().eq("true")
+                eligible = rows.eligible.astype(str).str.lower().eq("true")
                 p._fig.scatter(
-                    xx[selected],
-                    yy[selected] * factor,
+                    xx[eligible],
+                    yy[eligible],
                     marker="circle",
                     size=8,
-                    color=colors[i % len(colors)],
+                    color=color,
                 )
-        if "gain" in y:
-            p._fig.add_layout(
-                Span(
-                    location=100 * config["gain_cutoff"],
-                    dimension="width",
-                    line_dash="dotted",
-                    line_color="#444444",
-                )
-            )
-        EZChart(p, "epi2melabs", height="400px")
-        
-    if not rates.empty and "predicted_increment" in rates:
-        p = BokehPlot(
-            title=f"Forecast reads in the next {horizon_minutes:g} minutes",
-            x_axis_label="Observation time (hours)",
-            y_axis_label="Assigned reads",
-        )
-        for i, ((cid, sample), rows) in enumerate(
-            rates.groupby(["contrast_id", "sample"], sort=False)
-        ):
+
+        # Bokeh needs a point for each legend swatch. NaNs keep the swatches off the plot.
+        legend_point = [float("nan")]
+        if y == "predicted_conservative_gain":
             p._fig.line(
-                rows.elapsed_seconds / 3600,
-                pd.to_numeric(rows.predicted_increment, errors="coerce"),
-                color=colors[i % len(colors)],
-                legend_label=f"{labels.get(cid, cid)}: {sample}",
+                legend_point, legend_point, color="#333333", line_width=2,
+                legend_label="Forecast with margin",
             )
+        for _, dash, label in extra_lines:
+            p._fig.line(
+                legend_point, legend_point, color="#333333", line_dash=dash,
+                legend_label=label,
+            )
+        if y in cutoffs:
+            cutoff, label = cutoffs[y]
+            cutoff_style = dict(line_dash=[8, 4], line_color="#777777")
+            p._fig.add_layout(
+                Span(location=cutoff, dimension="width", **cutoff_style)
+            )
+            p._fig.line(legend_point, legend_point, legend_label=label, **cutoff_style)
+            # Spans do not affect the automatic range. Include the cutoff even at the first check.
+            elapsed = history[x] / scale
+            p._fig.scatter([elapsed.min(), elapsed.max()], [cutoff, cutoff], alpha=0)
 
         EZChart(p, "epi2melabs", height="400px")
 
-    for field, title, ylabel in [
-        (
-            "last_interval_reads_per_minute",
-            "Observed throughput",
-            "Assigned reads per minute",
-        ),
-        ("last_interval_seconds", "Read-arrival observation gaps", "Seconds"),
-        ("rate_coverage_seconds", "Forecast-window coverage", "Seconds"),
-    ]:
-        if rates.empty or field not in rates:
-            continue
-        plot = BokehPlot(
-            title=title, x_axis_label="Observation time (hours)", y_axis_label=ylabel
-        )
-        for i, ((cid, sample), rows) in enumerate(
-            rates.groupby(["contrast_id", "sample"], sort=False)
-        ):
-            plot._fig.line(
-                rows.elapsed_seconds / 3600,
-                pd.to_numeric(rows[field], errors="coerce"),
-                color=colors[i % len(colors)],
-                legend_label=f"{labels.get(cid, cid)}: {sample}",
-            )
+    if rates.empty or "last_interval_reads_per_minute" not in rates:
+        return
 
-        EZChart(plot, "epi2melabs", height="400px")
+    plot = BokehPlot(
+        title="Observed throughput",
+        x_axis_label="Observation time (hours)",
+        y_axis_label="Assigned reads per minute",
+    )
+    for i, ((cid, sample), rows) in enumerate(
+        rates.groupby(["contrast_id", "sample"], sort=False)
+    ):
+        plot._fig.line(
+            rows.elapsed_seconds / 3600,
+            pd.to_numeric(rows.last_interval_reads_per_minute, errors="coerce"),
+            color=colors[i % len(colors)],
+            legend_label=f"{labels.get(cid, cid)}: {sample}",
+        )
+
+    EZChart(plot, "epi2melabs", height="400px")

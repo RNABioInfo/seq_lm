@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import colorcet as cc
 import numpy as np
@@ -25,7 +26,9 @@ from .differential_plots import (
     _display_labels,
     cluster_heatmap_rows,
 )
-from .gsva_plots import GSVAResult
+
+if TYPE_CHECKING:
+    from .gsva_plots import GSVAResult
 
 GENE_SET_RESOLUTION_FILE = "gene_set_resolution.tsv"
 TEMPORAL_NOTE = "Gene-wise z-scores."

@@ -174,7 +174,7 @@ process qc_report {
     stageAs ica_results, 'ica_results'
 
     output:
-    files('qc_report*', arity: '3')
+    files('report{.html,_state.json,_snapshot_revision_*.html}', arity: '3')
 
     script:
     def rows: String = qc_report_inputs.rows
@@ -212,7 +212,7 @@ process qc_report {
         export MPLCONFIGDIR="\$PWD/.matplotlib"
         mkdir -p "\$MPLCONFIGDIR"
 
-        workflow-glue qc_report qc_report.html \
+        workflow-glue qc_report report.html \
             --samples report_samples.tsv \
             --versions versions \
             --params params.json \

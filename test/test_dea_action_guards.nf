@@ -21,7 +21,7 @@ workflow {
     def arrivals: Map = ['target\ta': represented, 'control\tb': represented, 'other\tc': represented]
     def timing: Map = [now: 1000, checked_at: 990, horizon: 1800, maximum_lag: 600]
     guard_precision_actions([first, fixed, other], [], arrivals, ['control\tb': [version: 3]], timing, false)
-    assert !first.eligible && first.reason == 'newer_input_or_stale_result'
+    assert !first.eligible && first.reason == 'results_not_ready'
     assert other.eligible
 
     first.eligible = true
@@ -30,6 +30,6 @@ workflow {
     assert first.eligible && !other.eligible
 
     guard_precision_actions([first, fixed, other], [], arrivals, [:], timing, true)
-    assert !first.eligible && first.reason == 'terminal_snapshot'
+    assert !first.eligible && first.reason == 'not_monitored'
     channel.of('R actions recheck versions, ages, lag and missing input provenance').view()
 }

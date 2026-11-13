@@ -41,6 +41,10 @@ DEFAULTS = {
 }
 
 
+def minimum_confirmation_span_seconds(horizon_seconds):
+    return 2 * horizon_seconds / 3
+
+
 def clean(value):
     if isinstance(value, dict):
         return {str(k): clean(v) for k, v in value.items()}
@@ -537,7 +541,11 @@ def assess_contrast(
         cadence_adequate=cadence,
         consecutive_confirmations=s["streak"],
         confirmation_span_seconds=span,
-        eligible=(passed and s["streak"] >= c["confirmations"] and span >= 2 * H / 3)
+        eligible=(
+            passed
+            and s["streak"] >= c["confirmations"]
+            and span >= minimum_confirmation_span_seconds(H)
+        )
         or (
             reason == "waiting_for_fresh_data"
             and all(depths[k] == previous_depths.get(k) for k in live_keys)

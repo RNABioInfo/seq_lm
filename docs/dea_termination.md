@@ -83,7 +83,7 @@ the stop, seq_lm writes `STOP` markers and processes the remaining BAM files.
 
 ## Monitoring results
 
-The **DEA Termination** or **ICA Termination** tab presents the forecast,
+The **Automatic Termination** tab presents the forecast for the selected method,
 the status of the stopping criteria, and any action taken. Detailed results
 are available in `<out_dir>/termination/dea/` or
 `<out_dir>/termination/ica/`.

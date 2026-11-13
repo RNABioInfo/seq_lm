@@ -17,6 +17,7 @@ from precision_termination.engine import (
     evaluate,
     interpolate_R,
     rate_state,
+    read_tsv,
     validate_config,
     weighted_quantile,
     write_tsv,
@@ -190,15 +191,20 @@ def test_selected_cli_audits_all_contrasts_and_handles_deferral(tmp_path):
     request = tmp_path / "request.json"
     request.write_text(json.dumps(p))
     script = Path(__file__).parents[1] / "bin/precision-termination"
+    state_path = tmp_path / "no-previous-state.json"
     for deferred in (False, True):
         if deferred:
             for cid in ("T1", "other"):
                 (root / cid / "precision.tsv").unlink()
             (root / "dea_stopping_features.tsv").unlink()
+            state_path = tmp_path / "selected" / "state.json"
+            p["observed_at"] += 600
+            p["completed_at"] += 600
+            request.write_text(json.dumps(p))
         output = tmp_path / ("deferred" if deferred else "selected")
         result = subprocess.run([
             sys.executable, str(script), "--input", str(request),
-            "--state", str(tmp_path / "no-previous-state.json"), "--output", str(output),
+            "--state", str(state_path), "--output", str(output),
         ], capture_output=True, text=True)
         assert result.returncode == 0, result.stdout + result.stderr
         audit = json.loads((output / "audit.json").read_text())
@@ -206,8 +212,18 @@ def test_selected_cli_audits_all_contrasts_and_handles_deferral(tmp_path):
         for row in audit["contrasts"]:
             assert row["uncertainty_scope"] == "selected_features"
             assert row["uncertainty_feature_count"] == (None if deferred else 2)
-            if deferred:
-                assert row["reason"] == "analysis_deferred" and not row["eligible"]
+            assert row["reason"] == ("results_not_ready" if deferred else "waiting_for_reads")
+            assert not row["eligible"]
+        contrast_rows = read_tsv(output / "contrast_monitoring.tsv")
+        assert [r["reason"] for r in contrast_rows] == [r["reason"] for r in audit["contrasts"]]
+        sample_rows = read_tsv(output / "sample_monitoring.tsv")
+        assert {r["reason"] for r in sample_rows if r["group"] == "T0"} == {"not_monitored"}
+        assert {r["reason"] for r in sample_rows if r["group"] == "T1"} == {audit["contrasts"][0]["reason"]}
+        if deferred:
+            history = read_tsv(output / "forecast_history.tsv")
+            assert [r["reason"] for r in history] == [
+                "waiting_for_reads", "waiting_for_reads", "results_not_ready", "results_not_ready"
+            ]
 
 
 def test_nonnegative_curve_recovers_known_model():

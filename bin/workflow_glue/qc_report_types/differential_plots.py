@@ -24,7 +24,6 @@ from ezcharts.plots import BokehPlot
 from scipy.cluster.hierarchy import leaves_list, linkage
 from sklearn.decomposition import PCA
 
-from .precision_monitoring import add_precision_monitoring
 
 FEATURE_COUNTS_FILE = "feature_counts.tsv"
 BCV_DATA_FILE = "edgeR_bcv_data.tsv"
@@ -1046,11 +1045,8 @@ def add_differential_analysis(
     data: DifferentialResult,
     lfc_cutoff: float,
     padj_cutoff: float,
-    monitoring_results: pd.DataFrame | None = None,
-    *,
-    monitoring_behavior: str = "disabled",
 ) -> None:
-    """Add differential results and, when requested, the DEA stopping checks."""
+    """Add differential expression results."""
     tabs = Tabs()
     with tabs.add_tab("Overview"):
         EZChart(create_mds_plot(data), "epi2melabs", height="460px")
@@ -1100,9 +1096,3 @@ def add_differential_analysis(
                             "epi2melabs",
                             height=f"{getattr(heatmap, 'report_height', 720)}px",
                         )
-
-    if monitoring_behavior != "disabled":
-        with tabs.add_tab("DEA Termination"):
-            add_precision_monitoring(
-                monitoring_results, method="dea", behavior=monitoring_behavior,
-            )

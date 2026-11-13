@@ -52,7 +52,7 @@ nextflow run . -profile standard -c run.config
 
 Use the `standard` profile for Docker, `singularity` for Singularity, or
 `apptainer` for Apptainer. When the run completes, open
-`output/qc_report.html`.
+`output/report.html`.
 [Guide to the report](quality_control.md)
 
 ### Additional analysis options

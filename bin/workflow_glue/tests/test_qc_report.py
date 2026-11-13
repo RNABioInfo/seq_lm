@@ -45,12 +45,12 @@ def test_report_uses_canvas_for_hidden_and_nested_bokeh_plots(tmp_path, refresh_
             combined._fig = gridplot([[plots[1]._fig, plots[2]._fig]])
             EZChart(combined)
 
-    report_path = tmp_path / "qc_report.html"
+    report_path = tmp_path / "report.html"
     qc_report.write_report(report, report_path, 0, refresh_seconds)
 
     assert all(plot._fig.output_backend == "canvas" for plot in plots)
     if refresh_seconds:
-        state = json.loads((tmp_path / "qc_report_state.json").read_text())
+        state = json.loads((tmp_path / "report_state.json").read_text())
         report_path = tmp_path / state["snapshot"]
     html = report_path.read_text()
     assert "Plot 0" in html and "Plot 1" in html and "Plot 2" in html
@@ -71,13 +71,13 @@ def test_write_report_uses_live_shell_and_versioned_snapshot(tmp_path):
             path = tmp_path / path if not hasattr(path, "write_text") else path
             path.write_text("<html><body>snapshot</body></html>")
 
-    report_path = tmp_path / "qc_report.html"
+    report_path = tmp_path / "report.html"
     qc_report.write_report(Report(), report_path, "batch 2", 5)
 
     shell = report_path.read_text()
-    state = json.loads((tmp_path / "qc_report_state.json").read_text())
+    state = json.loads((tmp_path / "report_state.json").read_text())
     snapshot = tmp_path / state["snapshot"]
-    assert snapshot.name == "qc_report_snapshot_revision_0.html"
+    assert snapshot.name == "report_snapshot_revision_0.html"
     snapshot_html = snapshot.read_text()
     assert "snapshot" in snapshot_html
     assert 'id="seq-lm-report-navigation"' in snapshot_html
@@ -112,7 +112,7 @@ def test_write_report_rebrands_labs_header(tmp_path):
                 "</header></body></html>"
             )
 
-    report_path = tmp_path / "qc_report.html"
+    report_path = tmp_path / "report.html"
     qc_report.write_report(Report(), report_path, "2", 0)
 
     html = report_path.read_text()
@@ -146,7 +146,7 @@ def test_write_report_adds_dea_readiness_notice_to_subtitle(tmp_path, notice):
                 '</header><main>Quality Control</main></body></html>'
             )
 
-    report_path = tmp_path / "qc_report.html"
+    report_path = tmp_path / "report.html"
     qc_report.write_report(
         Report(),
         report_path,
@@ -314,6 +314,45 @@ def write_monitoring_results(path, *, behavior="log"):
     pd.DataFrame([dict(contrast_id="pair",sample="treatment_1",elapsed_seconds=600,predicted_increment=1000)]).to_csv(path/"read_rate_history.tsv",sep="\t",index=False)
 
 
+@pytest.mark.parametrize("method", ["dea", "ica"])
+@pytest.mark.parametrize("legacy", [False, True])
+def test_termination_report_groups_reasons(tmp_path, method, legacy):
+    from workflow_glue.qc_report_types.precision_monitoring import load_precision_monitoring
+
+    cases = [
+        ("marginal_precision", "precision_met", "Precision check passed"),
+        (
+            "continue_observed_gain, continue_expected_gain",
+            "improvement_continues",
+            "More reads may improve precision",
+        ),
+        (
+            "elbow_not_confirmed, raw_R_unstable, warming_up",
+            "stability_not_confirmed,waiting_for_reads",
+            "Waiting for a stable uncertainty trend. Waiting for more sequencing data",
+        ),
+        ("analysis_deferred", "results_not_ready", "Waiting for usable analysis results"),
+        ("fixed_reference", "not_monitored", "No stop check applies"),
+        ("", "not_monitored", "No stop check applies"),
+    ]
+    root = tmp_path / "monitoring"
+    write_monitoring_results(root)
+    pd.DataFrame([
+        dict(
+            group="target", sample=f"sample_{index}", method=method, metric="R_information",
+            eligible="false", consecutive_confirmations=int(index == 0),
+            reason=old if legacy else new, behavior="log", action_result="none",
+        )
+        for index, (old, new, _) in enumerate(cases)
+    ]).to_csv(root / "sample_monitoring.tsv", sep="\t", index=False)
+
+    table = load_precision_monitoring(root, "log", method=method)
+    assert table["Reason"].tolist() == [label for _, _, label in cases]
+    assert table.loc[0, "Checks passed in a row"] == "1"
+    assert table.loc[0, "Stopping rule met"] == "No"
+    assert table.loc[0, "Action"] == "none"
+
+
 @pytest.mark.parametrize("selected", [False, True])
 def test_dea_report_identifies_uncertainty_scope_and_feature_count(tmp_path, selected):
     import dominate
@@ -339,8 +378,115 @@ def test_dea_report_identifies_uncertainty_scope_and_feature_count(tmp_path, sel
     html = document.render()
     assert ("features in the selected gene sets" if selected else "all quantified features") in html
     assert f"pair: {3 if selected else 300} features" in html
-    assert "includes features with unavailable estimates" in html
-    assert "The horizontal line marks the cutoff." in html
+    assert "are below 1%" in html
+
+
+@pytest.mark.parametrize(
+    "method, horizon_minutes, gain_cutoff, confirmations, required_span",
+    [("dea", 30, .01, 3, 20), ("ica", 60, .025, 4, 40)],
+)
+def test_termination_chart_legends_and_cutoffs(
+    tmp_path, monkeypatch, method, horizon_minutes, gain_cutoff, confirmations, required_span
+):
+    import dominate
+    from bokeh.models import Span
+
+    from workflow_glue.qc_report_types import precision_monitoring
+
+    root = tmp_path / "monitoring"
+    write_monitoring_results(root)
+    audit = {
+        "forecast_method": "depth_curve",
+        "config": dict(
+            gain_cutoff=gain_cutoff, horizon_seconds=60 * horizon_minutes,
+            confirmations=confirmations,
+        ),
+        "contrasts": [
+            dict(contrast_id="pair", target_group="early", reference_group="control"),
+            dict(contrast_id="late", target_group="late", reference_group="control"),
+        ],
+    }
+    (root / "audit.json").write_text(json.dumps(audit))
+    samples = pd.read_csv(root / "sample_monitoring.tsv", sep="\t", dtype=str)
+    samples["method"] = method
+    samples.to_csv(root / "sample_monitoring.tsv", sep="\t", index=False)
+    history = pd.read_csv(root / "forecast_history.tsv", sep="\t")
+    history = pd.concat([history, history.assign(contrast_id="late")], ignore_index=True)
+    history = history.assign(
+        confirmation_span_seconds=0 if method == "ica" else 600,
+        maximum_sample_data_age_seconds=0, processing_lag_seconds=0,
+    )
+    if method == "ica":
+        # A first check has no forecast or observed improvement for the forecast window yet.
+        history["predicted_conservative_gain"] = None
+        history["curve_gain"] = None
+        history = history.drop(columns="actual_gain_next_horizon")
+    history.to_csv(root / "forecast_history.tsv", sep="\t", index=False)
+    rates = pd.read_csv(root / "read_rate_history.tsv", sep="\t")
+    rates = rates.assign(
+        last_interval_reads_per_minute=100, last_interval_seconds=600, rate_coverage_seconds=600
+    )
+    rates.to_csv(root / "read_rate_history.tsv", sep="\t", index=False)
+
+    figures = {}
+
+    def capture_chart(plot, *args, **kwargs):
+        figures[plot._fig.title.text] = plot._fig
+
+    monkeypatch.setattr(precision_monitoring, "EZChart", capture_chart)
+    table = precision_monitoring.load_precision_monitoring(root, "log", method=method)
+    document = dominate.document()
+    with document:
+        precision_monitoring.add_precision_monitoring(table, method=method, behavior="log")
+
+    features = "Components" if method == "ica" else "Features"
+    improvement_title = f"Next {horizon_minutes}-minute improvement"
+    span_title = "Time covered by consecutive passing checks"
+    assert list(figures) == [
+        "Uncertainty over observation time",
+        "Uncertainty versus read depth",
+        improvement_title,
+        f"{features} with uncertainty score of 0.5 or less",
+        f"{features} with uncertainty score of 1 or less",
+        span_title,
+        "Observed throughput",
+    ]
+
+    def legend_keys(figure):
+        return [item.label.value for legend in figure.legend for item in legend.items]
+
+    contrasts = ["early vs control", "late vs control"]
+    for title in ("Uncertainty over observation time", "Uncertainty versus read depth"):
+        assert legend_keys(figures[title]) == [*contrasts, "Fitted uncertainty"]
+    improvement = figures[improvement_title]
+    assert legend_keys(improvement) == [
+        *contrasts,
+        "Forecast with margin",
+        "Forecast without margin",
+        "Observed improvement",
+        f"Stopping cutoff ({100 * gain_cutoff:g}%)",
+    ]
+    passing_span = figures[span_title]
+    assert passing_span.yaxis[0].axis_label == "Time span (minutes)"
+    assert legend_keys(passing_span) == [*contrasts, f"Required passing span ({required_span} min)"]
+    for item in passing_span.legend[0].items[:len(contrasts)]:
+        assert item.renderers[0].data_source.data["y"].tolist() == [0 if method == "ica" else 10]
+    for figure, expected_cutoff in ((improvement, 100 * gain_cutoff), (passing_span, required_span)):
+        (cutoff,) = figure.select(type=Span)
+        assert cutoff.location == expected_cutoff
+        assert cutoff.dimension == "width"
+        assert cutoff.line_dash
+        for item in figure.legend[0].items[len(contrasts):]:
+            assert pd.isna(item.renderers[0].data_source.data["y"]).tolist() == [True]
+        assert any(
+            renderer.data_source.data["y"] == [expected_cutoff, expected_cutoff]
+            for renderer in figure.renderers
+            if getattr(renderer.glyph, "fill_alpha", None) == 0
+        )
+    assert (
+        f"at least {confirmations} passing checks in a row spanning at least {required_span} minutes"
+        in document.render()
+    )
 
 
 def test_create_hist_plot_uses_length_values_only(monkeypatch):
@@ -489,7 +635,7 @@ def test_qc_report_writes_html(tmp_path, behavior):
         {"name": "omitted", "group": "QC_only", "biotype": biotype, "num_reads": 0, "fraction": 0}
         for biotype in BIOTYPE_ORDER])], ignore_index=True)
     composition.to_csv(transcript_biotypes, sep="\t", index=False)
-    report = tmp_path / "qc_report.html"
+    report = tmp_path / "report.html"
     args = qc_report.argparser().parse_args(
         [
             str(report),
@@ -524,11 +670,18 @@ def test_qc_report_writes_html(tmp_path, behavior):
     assert "seq_lm analysis report" in html
     assert ">iModulon Analysis</button>" not in html
     assert (
-        html.find("Quality Control")
-        < html.find("Differential Expression")
-        < html.find("Gene Set Enrichment")
-        < html.find("Time Course")
+        html.index(">Quality Control</button>")
+        < html.index(">Automatic Termination</button>")
+        < html.index(">Differential Expression</button>")
+        < html.index(">Gene Set Enrichment</button>")
     )
+    tab_lists = re.findall(r'<ul\b[^>]*\brole="tablist"[^>]*>(.*?)</ul>', html, re.DOTALL)
+    (score_tabs,) = [tabs for tabs in tab_lists if ">Grouped Distributions</button>" in tabs]
+    assert re.findall(r'<button\b[^>]*\bdata-bs-toggle="tab"[^>]*>([^<]+)</button>', score_tabs) == [
+        "Samples Heatmap", "Grouped Distributions", "Time Course", "Coverage Metrics",
+    ]
+    assert html.index(">GSVA scores</button>") < html.index(">Time Course</button>")
+    assert html.count(">Time Course</button>") == 1
     assert "control/control_1" in html
     assert "time_point_1/treatment_1" in html
     assert "QC_only/omitted" in html
@@ -561,9 +714,10 @@ def test_qc_report_writes_html(tmp_path, behavior):
     assert "logFC vs logCPM" in html
     assert "Volcano plot" in html
     assert "differential genes:" in html
-    assert ">DEA Termination</button>" in html
-    assert ">ICA Termination</button>" not in html
-    assert "The uncertainty score summarizes uncertainty in gene expression differences" in html
+    assert html.count(">Automatic Termination</button>") == 1
+    assert ">DEA Termination</button>" not in html
+    assert "Stopping checks use gene expression differences (DEA)." in html
+    assert "A lower score means a more precise analysis result." in html
     assert "Uncertainty score" in html
     assert "Checks passed in a row" in html
     assert "Stopping rule met" in html
@@ -637,10 +791,9 @@ def test_qc_report_writes_html(tmp_path, behavior):
         qc_report.main(differential_only_args)
     differential_only_html = differential_only_report.read_text()
     assert ">Differential Expression<" in differential_only_html
-    assert ">DEA Termination</button>" not in differential_only_html
-    assert ">ICA Termination</button>" not in differential_only_html
+    assert ">Automatic Termination</button>" not in differential_only_html
     assert ">Gene Set Enrichment<" not in differential_only_html
-    assert ">Temporal Analysis<" not in differential_only_html
+    assert ">Time Course</button>" not in differential_only_html
 
     qc_only_report = tmp_path / "qc_report_qc_only.html"
     qc_only_args = qc_report.argparser().parse_args(
@@ -664,10 +817,9 @@ def test_qc_report_writes_html(tmp_path, behavior):
     qc_only_html = qc_only_report.read_text()
     assert ">Quality Control<" in qc_only_html
     assert ">Differential Expression<" not in qc_only_html
-    assert ">DEA Termination</button>" not in qc_only_html
-    assert ">ICA Termination</button>" not in qc_only_html
+    assert ">Automatic Termination</button>" not in qc_only_html
     assert ">Gene Set Enrichment<" not in qc_only_html
-    assert ">Temporal Analysis<" not in qc_only_html
+    assert ">Time Course</button>" not in qc_only_html
     assert "Transcript biotype composition" not in qc_only_html
     assert "For DEA, the required read depth is not yet satisfied." in qc_only_html
 
@@ -699,7 +851,7 @@ def test_qc_report_writes_html(tmp_path, behavior):
 
 @pytest.mark.parametrize("method", ["dea", "ica"])
 @pytest.mark.parametrize("behavior", ["log", "terminate"])
-def test_report_shows_selected_termination_tab_while_waiting(tmp_path, monkeypatch, method, behavior):
+def test_report_shows_automatic_termination_while_waiting(tmp_path, monkeypatch, method, behavior):
     qc_dir = tmp_path / "qc_results"
     write_flagstat(qc_dir / "flagstat/control/control_1/flagstat_data_chunk_0.tsv")
     write_nanoplot(qc_dir / "nanoplot/control/control_1/nanoplot_data_chunk_0.tsv.gz", [])
@@ -713,7 +865,7 @@ def test_report_shows_selected_termination_tab_while_waiting(tmp_path, monkeypat
     (versions / "versions.txt").write_text("qc_report,workflow\n")
     params = tmp_path / "params.json"
     params.write_text("{}")
-    report = tmp_path / "qc_report.html"
+    report = tmp_path / "report.html"
     args = qc_report.argparser().parse_args([
         str(report),
         "--samples", str(samples),
@@ -727,12 +879,17 @@ def test_report_shows_selected_termination_tab_while_waiting(tmp_path, monkeypat
     qc_report.main(args)
 
     html = report.read_text()
-    assert (">DEA Termination</button>" in html) == (method == "dea")
-    assert (">ICA Termination</button>" in html) == (method == "ica")
+    assert html.count(">Automatic Termination</button>") == 1
+    assert html.index(">Quality Control</button>") < html.index(">Automatic Termination</button>")
+    analysis = "iModulon activity differences (ICA)" if method == "ica" else "gene expression differences (DEA)"
+    assert f"Stopping checks use {analysis}." in html
     assert "No stopping checks have been recorded yet." in html
     assert "R monitoring disabled or not yet available" not in html
-    assert ("records stopping checks for review" in html) == (behavior == "log")
-    assert ("SeqLM can request a stop" in html) == (behavior == "terminate")
+    assert ("Behavior is log only." in html) == (behavior == "log")
+    assert (
+        "Behavior is automatic stopping once all active samples sharing the acquisition meet the cutoff."
+        in html
+    ) == (behavior == "terminate")
 
 
 def test_gene_set_report_requires_differential_results():
@@ -1030,21 +1187,21 @@ def test_live_report_revision_advances_when_local_batch_restarts(tmp_path):
         def write(self, path):
             path.write_text("<html><body>snapshot</body></html>")
 
-    report = tmp_path / "qc_report.html"
+    report = tmp_path / "report.html"
     qc_report.write_report(Report(), report, 9, 5)
-    first = json.loads((tmp_path / "qc_report_state.json").read_text())
+    first = json.loads((tmp_path / "report_state.json").read_text())
     original = (tmp_path / first["snapshot"]).read_bytes()
     qc_report.write_report(Report(), report, 0, 5)
-    state = json.loads((tmp_path / "qc_report_state.json").read_text())
+    state = json.loads((tmp_path / "report_state.json").read_text())
     assert state["report_revision"] == first["report_revision"] + 1
     assert state["latest_batch"] == "0"
     assert state["snapshot"] != first["snapshot"]
     assert (tmp_path / first["snapshot"]).read_bytes() == original
     with pytest.raises(ValueError, match="older report revision"):
         qc_report.write_report(Report(), report, 0, 5, report_revision=0)
-    (tmp_path / "qc_report_snapshot_revision_5.html").write_text("interrupted publication")
+    (tmp_path / "report_snapshot_revision_5.html").write_text("interrupted publication")
     qc_report.write_report(Report(), report, 0, 5)
-    assert json.loads((tmp_path / "qc_report_state.json").read_text())["report_revision"] == 6
+    assert json.loads((tmp_path / "report_state.json").read_text())["report_revision"] == 6
 
 
 def test_live_viewer_refreshes_on_revision_and_rejects_stale_updates(tmp_path):
@@ -1055,13 +1212,13 @@ def test_live_viewer_refreshes_on_revision_and_rejects_stale_updates(tmp_path):
     node = shutil.which("node")
     if node is None:
         pytest.skip("Node is required to execute the live report refresh script")
-    shell = qc_report._live_report_shell("qc_report_state.json", "qc_report_snapshot_revision_10.html", 10, 1)
+    shell = qc_report._live_report_shell("report_state.json", "report_snapshot_revision_10.html", 10, 1)
     script = re.search(r"<script>(.*?)</script>", shell, re.S).group(1)
     harness = r'''
 const assert = require('node:assert/strict');
 const vm = require('node:vm');
 let refresh, onload;
-let state = {schema_version: 2, report_revision: 11, latest_batch: '0', snapshot: 'qc_report_snapshot_revision_11.html', snapshot_bytes: 10};
+let state = {schema_version: 2, report_revision: 11, latest_batch: '0', snapshot: 'report_snapshot_revision_11.html', snapshot_bytes: 10};
 const status = {style: {}};
 const frame = {
   src: 'original',
@@ -1072,7 +1229,7 @@ const frame = {
 const context = {
   URL, console, Date, Event: class {},
   document: {getElementById: id => id === 'seq-lm-report-frame' ? frame : status},
-  window: {location: {href: 'https://example.test/qc_report.html'}, setInterval: callback => { refresh = callback; }, setTimeout: () => {}},
+  window: {location: {href: 'https://example.test/report.html'}, setInterval: callback => { refresh = callback; }, setTimeout: () => {}},
   fetch: async url => ({ok: true, json: async () => state, headers: {get: () => '10'}})
 };
 vm.runInNewContext(SCRIPT, context);

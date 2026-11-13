@@ -115,11 +115,12 @@ def evaluate_precision_snapshot(staging: Path, state: Path, settings: Map, paylo
     java.nio.file.Files.writeString(request, new groovy.json.JsonBuilder(payload).toPrettyString())
 
     def engine: String? = settings.container_engine as String?
-    def executable: List<String> = engine ? ['precision-termination'] : ['python3', settings.command as String]
-    def arguments: List<String> = executable + ['--input', request.toString(), '--state', state.toString(),
-                                                '--output', staging.toString()]
+    def script: Path = Path.of(settings.command as String)
+    def arguments: List<String> = ['python3', script.toString(), '--input', request.toString(),
+                                   '--state', state.toString(), '--output', staging.toString()]
     if (engine) {
-        def inputs: List<Path> = [Path.of(payload.results as String)]
+        // Use the evaluator from this checkout in both execution modes.
+        def inputs: List<Path> = [script.parent, Path.of(payload.results as String)]
         if (state.exists()) inputs.add(state)
         arguments = sequencing_container_command(engine, arguments, inputs, [staging], false)
     }
@@ -174,7 +175,7 @@ def guard_precision_actions(rows: List<Map>, contrasts: List<Map>, arrivals: Map
         if ("${row.effectively_live}" == 'true' && (terminal || affected)) {
             row.eligible = false
             row.newly_eligible = false
-            row.reason = terminal ? 'terminal_snapshot' : 'newer_input_or_stale_result'
+            row.reason = terminal ? 'not_monitored' : 'results_not_ready'
         }
     }
     return null

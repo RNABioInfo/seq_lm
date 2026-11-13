@@ -71,7 +71,7 @@ reference label with `--control_group`. Results include:
 - `group_<target>_vs_<control>/fry_results.tsv`;
 - `group_<target>_vs_<control>/fry_signed_significance.png`.
 
-The integrated `qc_report.html` adds a Gene Set Enrichment section. It shows a
+The integrated `report.html` adds a Gene Set Enrichment section. It shows a
 signed directional-FDR summary for each contrast and an offline dropdown with
 one logFC-ranked barcode and limma-style enrichment worm per tested gene set.
 The static PNG is retained as a standalone edgeR output.

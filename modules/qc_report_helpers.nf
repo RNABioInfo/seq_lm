@@ -4,7 +4,7 @@ nextflow.enable.types = true
 def read_qc_report_state(path: Path) -> Map {
     def state: Map = new groovy.json.JsonSlurper().parse(path.toFile()) as Map
     if (state.schema_version != 2 || !(state.report_revision instanceof Integer) || state.report_revision < 0 ||
-        state.snapshot != "qc_report_snapshot_revision_${state.report_revision}.html" ||
+        state.snapshot != "report_snapshot_revision_${state.report_revision}.html" ||
         !(state.snapshot_bytes instanceof Number) || state.snapshot_bytes < 0 || !(state.latest_batch instanceof String)) {
         error("Invalid current QC report state: ${path}")
     }
@@ -14,7 +14,7 @@ def read_qc_report_state(path: Path) -> Map {
 /** Replace the completed live shell with its latest self-contained snapshot. */
 def finalize_qc_report(output_root: Path) -> Void {
     def normalized_root: Path = output_root.toAbsolutePath().normalize()
-    def state_path: Path = normalized_root.resolve('qc_report_state.json')
+    def state_path: Path = normalized_root.resolve('report_state.json')
     if (!java.nio.file.Files.isRegularFile(state_path)) {
         return null
     }
@@ -29,10 +29,10 @@ def finalize_qc_report(output_root: Path) -> Void {
         error("Finalized QC report snapshot is missing or outside the output directory: ${snapshot_path}")
     }
 
-    def final_report: Path = normalized_root.resolve('qc_report.html')
+    def final_report: Path = normalized_root.resolve('report.html')
     def temporary_report: Path = java.nio.file.Files.createTempFile(
         normalized_root,
-        '.qc_report-final-',
+        '.report-final-',
         '.html',
     )
     java.nio.file.Files.copy(
@@ -64,15 +64,15 @@ def next_qc_report_revision(output_root: Path) -> Integer {
         return 0
     }
     def revisions: List<Integer> = []
-    java.nio.file.Files.newDirectoryStream(output_root, 'qc_report_snapshot_revision_*.html').withCloseable { paths ->
+    java.nio.file.Files.newDirectoryStream(output_root, 'report_snapshot_revision_*.html').withCloseable { paths ->
         paths.each { path: Path ->
-            def match = path.fileName.toString() =~ /^qc_report_snapshot_revision_(\d+)\.html$/
+            def match = path.fileName.toString() =~ /^report_snapshot_revision_(\d+)\.html$/
             if (match.matches()) {
                 revisions.add(match.group(1).toInteger())
             }
         }
     }
-    def state_path: Path = output_root.resolve('qc_report_state.json')
+    def state_path: Path = output_root.resolve('report_state.json')
     if (java.nio.file.Files.isRegularFile(state_path)) {
         def state: Map = read_qc_report_state(state_path)
         revisions.add(state.report_revision as Integer)
@@ -85,10 +85,10 @@ def publish_qc_report_snapshot(report_files: List<Path>, output_root: Path) -> P
     def normalized_root: Path = output_root.toAbsolutePath().normalize()
     java.nio.file.Files.createDirectories(normalized_root)
     def state_files: List<Path> = report_files.findAll { path: Path ->
-        path.fileName.toString() == 'qc_report_state.json'
+        path.fileName.toString() == 'report_state.json'
     }
     if (state_files.size() != 1) {
-        error('A QC report publication must contain exactly one qc_report_state.json file.')
+        error('A QC report publication must contain exactly one report_state.json file.')
     }
     def state_path: Path = state_files[0]
     def state: Map = read_qc_report_state(state_path)
@@ -97,12 +97,12 @@ def publish_qc_report_snapshot(report_files: List<Path>, output_root: Path) -> P
     }
     def snapshot_name: String = "${state.snapshot ?: ''}"
     def payloads: List<Path> = report_files.findAll { path: Path -> path != state_path }
-    if (snapshot_name != "qc_report_snapshot_revision_${state.report_revision}.html" ||
+    if (snapshot_name != "report_snapshot_revision_${state.report_revision}.html" ||
         !payloads.any { path: Path -> path.fileName.toString() == snapshot_name }) {
         error("QC report state points to a missing snapshot: ${snapshot_name}")
     }
     def snapshot: Path = payloads.find { path: Path -> path.fileName.toString() == snapshot_name }
-    def shells: List<Path> = payloads.findAll { path: Path -> path.fileName.toString() == 'qc_report.html' }
+    def shells: List<Path> = payloads.findAll { path: Path -> path.fileName.toString() == 'report.html' }
     if (shells.size() != 1 || payloads.size() != 2) {
         error('A QC report publication must contain one HTML snapshot and one live shell.')
     }

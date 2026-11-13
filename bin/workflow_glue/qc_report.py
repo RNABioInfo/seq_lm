@@ -41,10 +41,7 @@ from .qc_report_types.sankey_plot import (
     create_read_fate_sankey_html,
     create_sample_read_fate_sankey_html,
 )
-from .qc_report_types.temporal_plots import (
-    add_temporal_analysis,
-    load_temporal_results,
-)
+from .qc_report_types.temporal_plots import load_temporal_results
 from .report_layout import apply_report_branding, labs_report
 from .util import get_named_logger, wf_parser  # noqa: ABS101
 
@@ -358,9 +355,6 @@ def main(args):
     logger = get_named_logger("SeqLMReport")
     samples = load_qc_samples(args.samples)
     monitoring_enabled = args.monitoring_behavior != "disabled"
-    dea_monitoring_behavior = args.monitoring_behavior if args.stopping_method == "dea" else "disabled"
-    dea_monitoring_enabled = dea_monitoring_behavior != "disabled"
-    ica_monitoring_enabled = monitoring_enabled and args.stopping_method == "ica"
     differential = None
     monitoring_results = None
     fry_results = None
@@ -399,18 +393,16 @@ def main(args):
         )
 
     if monitoring_enabled and args.monitoring_results is not None:
-        if dea_monitoring_enabled:
-            monitoring_results = load_precision_monitoring(
-                args.monitoring_results, args.monitoring_behavior, samples.samples_df,
-            )
-        elif imodulon_results is not None:
-            monitoring_results = load_precision_monitoring(
-                args.monitoring_results, args.monitoring_behavior, samples.samples_df,
-                method="ica",
-                expected_snapshot=(
+        if args.stopping_method == "dea" or imodulon_results is not None:
+            expected_snapshot = None
+            if args.stopping_method == "ica":
+                expected_snapshot = (
                     imodulon_results.provenance["batch_index"],
                     imodulon_results.provenance["analysis_index"],
-                ),
+                )
+            monitoring_results = load_precision_monitoring(
+                args.monitoring_results, args.monitoring_behavior, samples.samples_df,
+                method=args.stopping_method, expected_snapshot=expected_snapshot,
             )
 
     report = labs_report(
@@ -468,14 +460,18 @@ def main(args):
             with qc_tabs.add_tab("Samples"):
                 DataTable.from_pandas(samples.samples_df)
 
+        if monitoring_enabled:
+            with primary_tabs.add_tab("Automatic Termination"):
+                add_precision_monitoring(
+                    monitoring_results, method=args.stopping_method, behavior=args.monitoring_behavior,
+                )
+
         if differential is not None:
             with primary_tabs.add_tab("Differential Expression"):
                 add_differential_analysis(
                     differential,
                     args.lfc_cutoff,
                     args.padj_cutoff,
-                    monitoring_results if dea_monitoring_enabled else None,
-                    monitoring_behavior=dea_monitoring_behavior,
                 )
 
             if args.gene_set_enrichment and gsva_results and fry_results:
@@ -485,6 +481,7 @@ def main(args):
                         add_gsva_scores(
                             gsva_results,
                             differential.condition_colors,
+                            temporal_results=temporal_results,
                         )
                     with analysis_tabs.add_tab("GSVA differential"):
                         add_gsva_differential(
@@ -499,27 +496,10 @@ def main(args):
                             args.padj_cutoff,
                         )
 
-                if args.temporal_analysis and temporal_results:
-                    with primary_tabs.add_tab("Time Course"):
-                        add_temporal_analysis(
-                            temporal_results,
-                            differential.condition_colors,
-                        )
-
-        if differential is None and dea_monitoring_enabled:
-            with primary_tabs.add_tab("DEA Termination"):
-                add_precision_monitoring(
-                    monitoring_results, method="dea", behavior=args.monitoring_behavior,
-                )
         if imodulon_results is not None:
             with primary_tabs.add_tab("Independent Components"):
                 add_imodulon_analysis(
                     imodulon_results,
-                )
-        if ica_monitoring_enabled:
-            with primary_tabs.add_tab("ICA Termination"):
-                add_precision_monitoring(
-                    monitoring_results, method="ica", behavior=args.monitoring_behavior,
                 )
 
     write_report( 

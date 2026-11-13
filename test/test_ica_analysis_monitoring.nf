@@ -65,7 +65,7 @@ workflow {
         def final_batch: Path = root.resolve('termination/ica/batch_2')
         def first_metrics: List<Map> = read_monitoring_tsv(first.resolve('contrast_monitoring.tsv'))
         assert first_metrics.find { row: Map -> row.contrast_id == 'early' }.uncertainty_feature_count == '1'
-        assert first_metrics.find { row: Map -> row.contrast_id == 'late' }.reason == 'analysis_deferred'
+        assert first_metrics.find { row: Map -> row.contrast_id == 'late' }.reason == 'results_not_ready'
         def partial: List<Map> = read_monitoring_tsv(root.resolve('ica/batch_0/monitoring_differential_activity.tsv'))
         assert partial.size() == 2
         assert partial.every { row: Map -> row.target_group == 'early' && row.target_n == '3' }
@@ -76,6 +76,7 @@ workflow {
         assert metrics.every { row: Map -> row.uncertainty_scope == 'selected_features' && row.uncertainty_feature_count == '1' }
         def rows: List<Map> = read_monitoring_tsv(final_batch.resolve('sample_monitoring.tsv'))
         assert rows.every { row: Map -> row.method == 'ica' && row.metric == 'R_information' && row.eligible == 'false' }
+        assert rows.findAll { row: Map -> row.group == 'control' }.every { row: Map -> row.reason == 'not_monitored' }
         assert samples.every { sample -> !sample.bam_dir.resolve('STOP').exists() }
         'Verified ICA projection, independent readiness, selected precision and audit publication without DEA'
     }

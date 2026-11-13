@@ -454,10 +454,16 @@ def test_qc_report_adds_active_ica_details_main_tab(tmp_path, monkeypatch, tempo
     qc_report.main(args)
     html = report.read_text()
     assert ">Independent Components</button>" in html
-    assert (">ICA Termination</button>" in html) == (behavior != "disabled")
-    assert ">DEA Termination</button>" not in html
+    assert html.count(">Automatic Termination</button>") == int(behavior != "disabled")
+    assert ">ICA Termination</button>" not in html
     if behavior != "disabled":
-        assert "The uncertainty score summarizes uncertainty in iModulon activity differences" in html
+        assert (
+            html.index(">Quality Control</button>")
+            < html.index(">Automatic Termination</button>")
+            < html.index(">Independent Components</button>")
+        )
+        assert "Stopping checks use iModulon activity differences (ICA)." in html
+        assert "A lower score means a more precise analysis result." in html
         assert "selected iModulon components" in html
         assert "Next 30-minute improvement" in html
         assert "Checks passed in a row" in html
